@@ -1,0 +1,1007 @@
+{
+  "purpose": "200 reading prompts; not transcripts or recordings",
+  "inputs": "SYS design P0 gate; invented everyday sentences and fictional names",
+  "verification": "Text counts/schema tested; owner review and recordings unverified",
+  "phrases": [
+    {
+      "id": "normal-001",
+      "category": "normal",
+      "expected_text": "Please leave the window open until lunch."
+    },
+    {
+      "id": "normal-002",
+      "category": "normal",
+      "expected_text": "The blue folder belongs on the lower shelf."
+    },
+    {
+      "id": "normal-003",
+      "category": "normal",
+      "expected_text": "I will review the draft after breakfast."
+    },
+    {
+      "id": "normal-004",
+      "category": "normal",
+      "expected_text": "We can move the meeting to tomorrow morning."
+    },
+    {
+      "id": "normal-005",
+      "category": "normal",
+      "expected_text": "Put the spare cable beside the monitor."
+    },
+    {
+      "id": "normal-006",
+      "category": "normal",
+      "expected_text": "The package should arrive before noon."
+    },
+    {
+      "id": "normal-007",
+      "category": "normal",
+      "expected_text": "I need a quiet place to finish this note."
+    },
+    {
+      "id": "normal-008",
+      "category": "normal",
+      "expected_text": "Please keep the original version as a backup."
+    },
+    {
+      "id": "normal-009",
+      "category": "normal",
+      "expected_text": "There are three boxes under the desk."
+    },
+    {
+      "id": "normal-010",
+      "category": "normal",
+      "expected_text": "Turn left after the second crossing."
+    },
+    {
+      "id": "normal-011",
+      "category": "normal",
+      "expected_text": "The kitchen light is still on."
+    },
+    {
+      "id": "normal-012",
+      "category": "normal",
+      "expected_text": "I forgot to add the final paragraph."
+    },
+    {
+      "id": "normal-013",
+      "category": "normal",
+      "expected_text": "Let us take a short break before continuing."
+    },
+    {
+      "id": "normal-014",
+      "category": "normal",
+      "expected_text": "The weather looks clear for the afternoon."
+    },
+    {
+      "id": "normal-015",
+      "category": "normal",
+      "expected_text": "Please bring the small notebook upstairs."
+    },
+    {
+      "id": "normal-016",
+      "category": "normal",
+      "expected_text": "I would like a copy of that diagram."
+    },
+    {
+      "id": "normal-017",
+      "category": "normal",
+      "expected_text": "We should check the measurements one more time."
+    },
+    {
+      "id": "normal-018",
+      "category": "normal",
+      "expected_text": "The next train leaves from the far platform."
+    },
+    {
+      "id": "normal-019",
+      "category": "normal",
+      "expected_text": "My coffee is on the table by the door."
+    },
+    {
+      "id": "normal-020",
+      "category": "normal",
+      "expected_text": "Please move this sentence to the beginning."
+    },
+    {
+      "id": "normal-021",
+      "category": "normal",
+      "expected_text": "The garden needs watering this evening."
+    },
+    {
+      "id": "normal-022",
+      "category": "normal",
+      "expected_text": "I will be ready in a few minutes."
+    },
+    {
+      "id": "normal-023",
+      "category": "normal",
+      "expected_text": "Keep the receipt with the instruction booklet."
+    },
+    {
+      "id": "normal-024",
+      "category": "normal",
+      "expected_text": "The red indicator turned green after a moment."
+    },
+    {
+      "id": "normal-025",
+      "category": "normal",
+      "expected_text": "This paragraph needs a clearer opening sentence."
+    },
+    {
+      "id": "normal-026",
+      "category": "normal",
+      "expected_text": "I prefer the smaller of the two cases."
+    },
+    {
+      "id": "normal-027",
+      "category": "normal",
+      "expected_text": "There is enough space for another chair."
+    },
+    {
+      "id": "normal-028",
+      "category": "normal",
+      "expected_text": "Please close the lid when you are finished."
+    },
+    {
+      "id": "normal-029",
+      "category": "normal",
+      "expected_text": "The replacement part arrived in a padded envelope."
+    },
+    {
+      "id": "normal-030",
+      "category": "normal",
+      "expected_text": "I noticed a faint clicking sound near the fan."
+    },
+    {
+      "id": "normal-031",
+      "category": "normal",
+      "expected_text": "We could use the same layout for the next page."
+    },
+    {
+      "id": "normal-032",
+      "category": "normal",
+      "expected_text": "The bookshelf fits between the door and the window."
+    },
+    {
+      "id": "normal-033",
+      "category": "normal",
+      "expected_text": "I need to check which cable goes to the display."
+    },
+    {
+      "id": "normal-034",
+      "category": "normal",
+      "expected_text": "The timer stopped while I was making a note."
+    },
+    {
+      "id": "normal-035",
+      "category": "normal",
+      "expected_text": "Please keep this draft separate from the final copy."
+    },
+    {
+      "id": "normal-036",
+      "category": "normal",
+      "expected_text": "There was a brief pause before the reply appeared."
+    },
+    {
+      "id": "normal-037",
+      "category": "normal",
+      "expected_text": "I have not decided which colour to choose."
+    },
+    {
+      "id": "normal-038",
+      "category": "normal",
+      "expected_text": "The smaller box contains the mounting screws."
+    },
+    {
+      "id": "normal-039",
+      "category": "normal",
+      "expected_text": "Please remind me to read this again tomorrow."
+    },
+    {
+      "id": "normal-040",
+      "category": "normal",
+      "expected_text": "That is the end of this practice sentence."
+    },
+    {
+      "id": "whispering-001",
+      "category": "whispering",
+      "expected_text": "Keep this note short and easy to read."
+    },
+    {
+      "id": "whispering-002",
+      "category": "whispering",
+      "expected_text": "I am speaking quietly beside the microphone."
+    },
+    {
+      "id": "whispering-003",
+      "category": "whispering",
+      "expected_text": "Please save the draft for later review."
+    },
+    {
+      "id": "whispering-004",
+      "category": "whispering",
+      "expected_text": "The room is quiet and the door is closed."
+    },
+    {
+      "id": "whispering-005",
+      "category": "whispering",
+      "expected_text": "I can hear a soft fan in the background."
+    },
+    {
+      "id": "whispering-006",
+      "category": "whispering",
+      "expected_text": "Put the green notebook beside the lamp."
+    },
+    {
+      "id": "whispering-007",
+      "category": "whispering",
+      "expected_text": "We can finish this after the break."
+    },
+    {
+      "id": "whispering-008",
+      "category": "whispering",
+      "expected_text": "Please keep the first word of this sentence."
+    },
+    {
+      "id": "whispering-009",
+      "category": "whispering",
+      "expected_text": "Start with a small breath and continue softly."
+    },
+    {
+      "id": "whispering-010",
+      "category": "whispering",
+      "expected_text": "This is a quiet test of the recording path."
+    },
+    {
+      "id": "whispering-011",
+      "category": "whispering",
+      "expected_text": "I would like to change the last two words."
+    },
+    {
+      "id": "whispering-012",
+      "category": "whispering",
+      "expected_text": "Leave a little space between the boxes."
+    },
+    {
+      "id": "whispering-013",
+      "category": "whispering",
+      "expected_text": "The light above the desk is too bright."
+    },
+    {
+      "id": "whispering-014",
+      "category": "whispering",
+      "expected_text": "Please check the cable behind the shelf."
+    },
+    {
+      "id": "whispering-015",
+      "category": "whispering",
+      "expected_text": "I will read the next line without raising my voice."
+    },
+    {
+      "id": "whispering-016",
+      "category": "whispering",
+      "expected_text": "Bring the spare battery to the workbench."
+    },
+    {
+      "id": "whispering-017",
+      "category": "whispering",
+      "expected_text": "The final page has a table near the bottom."
+    },
+    {
+      "id": "whispering-018",
+      "category": "whispering",
+      "expected_text": "Please pause before the next instruction."
+    },
+    {
+      "id": "whispering-019",
+      "category": "whispering",
+      "expected_text": "There is a small mark on the upper corner."
+    },
+    {
+      "id": "whispering-020",
+      "category": "whispering",
+      "expected_text": "I need another minute to think about it."
+    },
+    {
+      "id": "whispering-021",
+      "category": "whispering",
+      "expected_text": "Move the sentence below the diagram."
+    },
+    {
+      "id": "whispering-022",
+      "category": "whispering",
+      "expected_text": "The second option seems easier to explain."
+    },
+    {
+      "id": "whispering-023",
+      "category": "whispering",
+      "expected_text": "Please use the copy with the blue cover."
+    },
+    {
+      "id": "whispering-024",
+      "category": "whispering",
+      "expected_text": "I cannot see the label from this angle."
+    },
+    {
+      "id": "whispering-025",
+      "category": "whispering",
+      "expected_text": "The latch makes a very quiet click."
+    },
+    {
+      "id": "whispering-026",
+      "category": "whispering",
+      "expected_text": "Keep the microphone in the same position."
+    },
+    {
+      "id": "whispering-027",
+      "category": "whispering",
+      "expected_text": "I am whispering the entire sentence."
+    },
+    {
+      "id": "whispering-028",
+      "category": "whispering",
+      "expected_text": "The next paragraph starts on a new page."
+    },
+    {
+      "id": "whispering-029",
+      "category": "whispering",
+      "expected_text": "Please write down the number shown on the display."
+    },
+    {
+      "id": "whispering-030",
+      "category": "whispering",
+      "expected_text": "I will compare these two notes later."
+    },
+    {
+      "id": "whispering-031",
+      "category": "whispering",
+      "expected_text": "The left channel sounds quieter than the right."
+    },
+    {
+      "id": "whispering-032",
+      "category": "whispering",
+      "expected_text": "A soft voice can still contain clear consonants."
+    },
+    {
+      "id": "whispering-033",
+      "category": "whispering",
+      "expected_text": "Please leave the small switch in its current position."
+    },
+    {
+      "id": "whispering-034",
+      "category": "whispering",
+      "expected_text": "This sentence begins immediately after the button press."
+    },
+    {
+      "id": "whispering-035",
+      "category": "whispering",
+      "expected_text": "Wait a moment before reading the next line."
+    },
+    {
+      "id": "whispering-036",
+      "category": "whispering",
+      "expected_text": "I can finish the review without disturbing anyone."
+    },
+    {
+      "id": "whispering-037",
+      "category": "whispering",
+      "expected_text": "The paper slipped behind the lower drawer."
+    },
+    {
+      "id": "whispering-038",
+      "category": "whispering",
+      "expected_text": "Please keep the title on a single line."
+    },
+    {
+      "id": "whispering-039",
+      "category": "whispering",
+      "expected_text": "This is the last quiet phrase before the break."
+    },
+    {
+      "id": "whispering-040",
+      "category": "whispering",
+      "expected_text": "Stop recording after the end of this sentence."
+    },
+    {
+      "id": "names-001",
+      "category": "names",
+      "expected_text": "The fictional character Zorla Vennix appears in chapter 1."
+    },
+    {
+      "id": "names-002",
+      "category": "names",
+      "expected_text": "The fictional character Mivra Tollen appears in chapter 2."
+    },
+    {
+      "id": "names-003",
+      "category": "names",
+      "expected_text": "The fictional character Quenlo Saffin appears in chapter 3."
+    },
+    {
+      "id": "names-004",
+      "category": "names",
+      "expected_text": "The fictional character Dazri Pelwick appears in chapter 4."
+    },
+    {
+      "id": "names-005",
+      "category": "names",
+      "expected_text": "The fictional character Nerpo Valden appears in chapter 5."
+    },
+    {
+      "id": "names-006",
+      "category": "names",
+      "expected_text": "The fictional character Tivla Quorren appears in chapter 6."
+    },
+    {
+      "id": "names-007",
+      "category": "names",
+      "expected_text": "The fictional character Fenzu Brallik appears in chapter 7."
+    },
+    {
+      "id": "names-008",
+      "category": "names",
+      "expected_text": "The fictional character Wexra Nollin appears in chapter 8."
+    },
+    {
+      "id": "names-009",
+      "category": "names",
+      "expected_text": "The fictional character Jorvi Tazlen appears in chapter 9."
+    },
+    {
+      "id": "names-010",
+      "category": "names",
+      "expected_text": "The fictional character Pelmio Farren appears in chapter 10."
+    },
+    {
+      "id": "names-011",
+      "category": "names",
+      "expected_text": "The fictional character Vezni Lumrock appears in chapter 11."
+    },
+    {
+      "id": "names-012",
+      "category": "names",
+      "expected_text": "The fictional character Korlai Sennix appears in chapter 12."
+    },
+    {
+      "id": "names-013",
+      "category": "names",
+      "expected_text": "The fictional character Brenvo Yallik appears in chapter 13."
+    },
+    {
+      "id": "names-014",
+      "category": "names",
+      "expected_text": "The fictional character Zimra Covlen appears in chapter 14."
+    },
+    {
+      "id": "names-015",
+      "category": "names",
+      "expected_text": "The fictional character Talvo Rennik appears in chapter 15."
+    },
+    {
+      "id": "names-016",
+      "category": "names",
+      "expected_text": "The fictional character Orvex Pellin appears in chapter 16."
+    },
+    {
+      "id": "names-017",
+      "category": "names",
+      "expected_text": "The fictional character Nuvri Zallock appears in chapter 17."
+    },
+    {
+      "id": "names-018",
+      "category": "names",
+      "expected_text": "The fictional character Fivna Torlix appears in chapter 18."
+    },
+    {
+      "id": "names-019",
+      "category": "names",
+      "expected_text": "The fictional character Yemlo Darrin appears in chapter 19."
+    },
+    {
+      "id": "names-020",
+      "category": "names",
+      "expected_text": "The fictional character Qivra Mollen appears in chapter 20."
+    },
+    {
+      "id": "names-021",
+      "category": "names",
+      "expected_text": "Label the synthetic test card Zorla Vennix."
+    },
+    {
+      "id": "names-022",
+      "category": "names",
+      "expected_text": "Label the synthetic test card Mivra Tollen."
+    },
+    {
+      "id": "names-023",
+      "category": "names",
+      "expected_text": "Label the synthetic test card Quenlo Saffin."
+    },
+    {
+      "id": "names-024",
+      "category": "names",
+      "expected_text": "Label the synthetic test card Dazri Pelwick."
+    },
+    {
+      "id": "names-025",
+      "category": "names",
+      "expected_text": "Label the synthetic test card Nerpo Valden."
+    },
+    {
+      "id": "names-026",
+      "category": "names",
+      "expected_text": "Label the synthetic test card Tivla Quorren."
+    },
+    {
+      "id": "names-027",
+      "category": "names",
+      "expected_text": "Label the synthetic test card Fenzu Brallik."
+    },
+    {
+      "id": "names-028",
+      "category": "names",
+      "expected_text": "Label the synthetic test card Wexra Nollin."
+    },
+    {
+      "id": "names-029",
+      "category": "names",
+      "expected_text": "Label the synthetic test card Jorvi Tazlen."
+    },
+    {
+      "id": "names-030",
+      "category": "names",
+      "expected_text": "Label the synthetic test card Pelmio Farren."
+    },
+    {
+      "id": "names-031",
+      "category": "names",
+      "expected_text": "Label the synthetic test card Vezni Lumrock."
+    },
+    {
+      "id": "names-032",
+      "category": "names",
+      "expected_text": "Label the synthetic test card Korlai Sennix."
+    },
+    {
+      "id": "names-033",
+      "category": "names",
+      "expected_text": "Label the synthetic test card Brenvo Yallik."
+    },
+    {
+      "id": "names-034",
+      "category": "names",
+      "expected_text": "Label the synthetic test card Zimra Covlen."
+    },
+    {
+      "id": "names-035",
+      "category": "names",
+      "expected_text": "Label the synthetic test card Talvo Rennik."
+    },
+    {
+      "id": "names-036",
+      "category": "names",
+      "expected_text": "Label the synthetic test card Orvex Pellin."
+    },
+    {
+      "id": "names-037",
+      "category": "names",
+      "expected_text": "Label the synthetic test card Nuvri Zallock."
+    },
+    {
+      "id": "names-038",
+      "category": "names",
+      "expected_text": "Label the synthetic test card Fivna Torlix."
+    },
+    {
+      "id": "names-039",
+      "category": "names",
+      "expected_text": "Label the synthetic test card Yemlo Darrin."
+    },
+    {
+      "id": "names-040",
+      "category": "names",
+      "expected_text": "Label the synthetic test card Qivra Mollen."
+    },
+    {
+      "id": "numbers-001",
+      "category": "numbers",
+      "expected_text": "The test counter reads zero."
+    },
+    {
+      "id": "numbers-002",
+      "category": "numbers",
+      "expected_text": "Set the sample count to one."
+    },
+    {
+      "id": "numbers-003",
+      "category": "numbers",
+      "expected_text": "There are twelve packets in the batch."
+    },
+    {
+      "id": "numbers-004",
+      "category": "numbers",
+      "expected_text": "The reference value is twenty five."
+    },
+    {
+      "id": "numbers-005",
+      "category": "numbers",
+      "expected_text": "I measured one hundred and eight millimetres."
+    },
+    {
+      "id": "numbers-006",
+      "category": "numbers",
+      "expected_text": "Use two thousand and forty eight samples."
+    },
+    {
+      "id": "numbers-007",
+      "category": "numbers",
+      "expected_text": "The serial label is nine zero seven three."
+    },
+    {
+      "id": "numbers-008",
+      "category": "numbers",
+      "expected_text": "The fictional extension is four two six eight."
+    },
+    {
+      "id": "numbers-009",
+      "category": "numbers",
+      "expected_text": "The test date is the third of April twenty twenty seven."
+    },
+    {
+      "id": "numbers-010",
+      "category": "numbers",
+      "expected_text": "The timer reads twelve minutes and thirty seconds."
+    },
+    {
+      "id": "numbers-011",
+      "category": "numbers",
+      "expected_text": "Set the gain to minus six decibels."
+    },
+    {
+      "id": "numbers-012",
+      "category": "numbers",
+      "expected_text": "The voltage is three point three volts."
+    },
+    {
+      "id": "numbers-013",
+      "category": "numbers",
+      "expected_text": "The current is zero point zero five amps."
+    },
+    {
+      "id": "numbers-014",
+      "category": "numbers",
+      "expected_text": "Use a resistance of four point seven kilohms."
+    },
+    {
+      "id": "numbers-015",
+      "category": "numbers",
+      "expected_text": "The temperature is minus twelve degrees Celsius."
+    },
+    {
+      "id": "numbers-016",
+      "category": "numbers",
+      "expected_text": "The tolerance is plus or minus two percent."
+    },
+    {
+      "id": "numbers-017",
+      "category": "numbers",
+      "expected_text": "The ratio is three to one."
+    },
+    {
+      "id": "numbers-018",
+      "category": "numbers",
+      "expected_text": "One half is equal to fifty percent."
+    },
+    {
+      "id": "numbers-019",
+      "category": "numbers",
+      "expected_text": "The result is seven eighths of the full scale."
+    },
+    {
+      "id": "numbers-020",
+      "category": "numbers",
+      "expected_text": "The version is one point zero point three."
+    },
+    {
+      "id": "numbers-021",
+      "category": "numbers",
+      "expected_text": "The synthetic address is one ninety two dot zero dot two dot one."
+    },
+    {
+      "id": "numbers-022",
+      "category": "numbers",
+      "expected_text": "The port number is eight thousand and eighty."
+    },
+    {
+      "id": "numbers-023",
+      "category": "numbers",
+      "expected_text": "The buffer contains sixty four bytes."
+    },
+    {
+      "id": "numbers-024",
+      "category": "numbers",
+      "expected_text": "The frequency is forty eight kilohertz."
+    },
+    {
+      "id": "numbers-025",
+      "category": "numbers",
+      "expected_text": "The delay is one hundred and sixty milliseconds."
+    },
+    {
+      "id": "numbers-026",
+      "category": "numbers",
+      "expected_text": "The total duration is ten minutes."
+    },
+    {
+      "id": "numbers-027",
+      "category": "numbers",
+      "expected_text": "Repeat the test four times."
+    },
+    {
+      "id": "numbers-028",
+      "category": "numbers",
+      "expected_text": "The sample index is nine hundred and ninety nine."
+    },
+    {
+      "id": "numbers-029",
+      "category": "numbers",
+      "expected_text": "The range is from zero to two hundred and fifty five."
+    },
+    {
+      "id": "numbers-030",
+      "category": "numbers",
+      "expected_text": "The file size is sixteen megabytes."
+    },
+    {
+      "id": "numbers-031",
+      "category": "numbers",
+      "expected_text": "The timestamp is zero nine colon fifteen."
+    },
+    {
+      "id": "numbers-032",
+      "category": "numbers",
+      "expected_text": "The test price is twelve pounds and forty pence."
+    },
+    {
+      "id": "numbers-033",
+      "category": "numbers",
+      "expected_text": "The dimension is ten by twenty by thirty millimetres."
+    },
+    {
+      "id": "numbers-034",
+      "category": "numbers",
+      "expected_text": "The angle is ninety degrees."
+    },
+    {
+      "id": "numbers-035",
+      "category": "numbers",
+      "expected_text": "The square root of eighty one is nine."
+    },
+    {
+      "id": "numbers-036",
+      "category": "numbers",
+      "expected_text": "The sequence is two four eight sixteen thirty two."
+    },
+    {
+      "id": "numbers-037",
+      "category": "numbers",
+      "expected_text": "The identifier is A seven B zero C nine."
+    },
+    {
+      "id": "numbers-038",
+      "category": "numbers",
+      "expected_text": "The percentage dropped from eighty to seventy nine."
+    },
+    {
+      "id": "numbers-039",
+      "category": "numbers",
+      "expected_text": "The synthetic code is zero zero four two."
+    },
+    {
+      "id": "numbers-040",
+      "category": "numbers",
+      "expected_text": "The deadline is the twenty first of November."
+    },
+    {
+      "id": "tech_terms-001",
+      "category": "tech_terms",
+      "expected_text": "Compare hwgeekom with hworker on the diagram."
+    },
+    {
+      "id": "tech_terms-002",
+      "category": "tech_terms",
+      "expected_text": "Codex is listed beside the test harness."
+    },
+    {
+      "id": "tech_terms-003",
+      "category": "tech_terms",
+      "expected_text": "Run the voice remote receiver on hwgeekom."
+    },
+    {
+      "id": "tech_terms-004",
+      "category": "tech_terms",
+      "expected_text": "Use hworker only for the hardware fixture."
+    },
+    {
+      "id": "tech_terms-005",
+      "category": "tech_terms",
+      "expected_text": "The Codex session belongs to the synthetic project."
+    },
+    {
+      "id": "tech_terms-006",
+      "category": "tech_terms",
+      "expected_text": "The AirPods recording uses the same phrase list."
+    },
+    {
+      "id": "tech_terms-007",
+      "category": "tech_terms",
+      "expected_text": "The iPhone microphone is the second capture source."
+    },
+    {
+      "id": "tech_terms-008",
+      "category": "tech_terms",
+      "expected_text": "WhisperKit is one candidate in the engine picker."
+    },
+    {
+      "id": "tech_terms-009",
+      "category": "tech_terms",
+      "expected_text": "Argmax is another candidate for this test."
+    },
+    {
+      "id": "tech_terms-010",
+      "category": "tech_terms",
+      "expected_text": "Keep Apple as the baseline engine."
+    },
+    {
+      "id": "tech_terms-011",
+      "category": "tech_terms",
+      "expected_text": "The Zephyr build uses the board configuration."
+    },
+    {
+      "id": "tech_terms-012",
+      "category": "tech_terms",
+      "expected_text": "The nRF5340 streams audio over BLE."
+    },
+    {
+      "id": "tech_terms-013",
+      "category": "tech_terms",
+      "expected_text": "The KiCad schematic shows the microphone power switch."
+    },
+    {
+      "id": "tech_terms-014",
+      "category": "tech_terms",
+      "expected_text": "The Tauri tray displays the selected device."
+    },
+    {
+      "id": "tech_terms-015",
+      "category": "tech_terms",
+      "expected_text": "The Cloudflare relay forwards encrypted messages."
+    },
+    {
+      "id": "tech_terms-016",
+      "category": "tech_terms",
+      "expected_text": "Use a Durable Object for the relay room."
+    },
+    {
+      "id": "tech_terms-017",
+      "category": "tech_terms",
+      "expected_text": "The Swift package contains the brain interface."
+    },
+    {
+      "id": "tech_terms-018",
+      "category": "tech_terms",
+      "expected_text": "The Rust workspace contains the desktop receiver."
+    },
+    {
+      "id": "tech_terms-019",
+      "category": "tech_terms",
+      "expected_text": "The JSON Schema defines the tool proposal."
+    },
+    {
+      "id": "tech_terms-020",
+      "category": "tech_terms",
+      "expected_text": "The Noise handshake pairs the two devices."
+    },
+    {
+      "id": "tech_terms-021",
+      "category": "tech_terms",
+      "expected_text": "Check the WebSocket connection after reconnecting."
+    },
+    {
+      "id": "tech_terms-022",
+      "category": "tech_terms",
+      "expected_text": "The Opus packets contain microphone audio."
+    },
+    {
+      "id": "tech_terms-023",
+      "category": "tech_terms",
+      "expected_text": "The PDM microphones share the clock signal."
+    },
+    {
+      "id": "tech_terms-024",
+      "category": "tech_terms",
+      "expected_text": "The Core ML model runs on the phone."
+    },
+    {
+      "id": "tech_terms-025",
+      "category": "tech_terms",
+      "expected_text": "The Neural Engine is part of the runtime."
+    },
+    {
+      "id": "tech_terms-026",
+      "category": "tech_terms",
+      "expected_text": "The Linux receiver uses the Wayland portal."
+    },
+    {
+      "id": "tech_terms-027",
+      "category": "tech_terms",
+      "expected_text": "The X11 receiver has a separate injection path."
+    },
+    {
+      "id": "tech_terms-028",
+      "category": "tech_terms",
+      "expected_text": "The Windows receiver uses SendInput."
+    },
+    {
+      "id": "tech_terms-029",
+      "category": "tech_terms",
+      "expected_text": "The Git LFS pointer belongs to owner audio."
+    },
+    {
+      "id": "tech_terms-030",
+      "category": "tech_terms",
+      "expected_text": "The pytest fixture contains synthetic data only."
+    },
+    {
+      "id": "tech_terms-031",
+      "category": "tech_terms",
+      "expected_text": "Use uv to run the benchmark report."
+    },
+    {
+      "id": "tech_terms-032",
+      "category": "tech_terms",
+      "expected_text": "The WER score counts substitutions and deletions."
+    },
+    {
+      "id": "tech_terms-033",
+      "category": "tech_terms",
+      "expected_text": "The EOS timestamp marks the end of speech."
+    },
+    {
+      "id": "tech_terms-034",
+      "category": "tech_terms",
+      "expected_text": "The PTT button starts a deliberate recording."
+    },
+    {
+      "id": "tech_terms-035",
+      "category": "tech_terms",
+      "expected_text": "The tool kind is select underscore target."
+    },
+    {
+      "id": "tech_terms-036",
+      "category": "tech_terms",
+      "expected_text": "The branch contains a README and a JSON file."
+    },
+    {
+      "id": "tech_terms-037",
+      "category": "tech_terms",
+      "expected_text": "Measure time to first text on hwgeekom only as a synthetic example."
+    },
+    {
+      "id": "tech_terms-038",
+      "category": "tech_terms",
+      "expected_text": "Keep the Codex output separate from the Apple output."
+    },
+    {
+      "id": "tech_terms-039",
+      "category": "tech_terms",
+      "expected_text": "The hworker fixture is disconnected from this benchmark."
+    },
+    {
+      "id": "tech_terms-040",
+      "category": "tech_terms",
+      "expected_text": "The Voice Control Fabric report contains no real contacts."
+    }
+  ]
+}

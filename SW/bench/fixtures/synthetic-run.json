@@ -1,0 +1,147 @@
+{
+  "schema_version": 1,
+  "synthetic": true,
+  "device": "SYNTHETIC phone simulator (no measurements)",
+  "capture_source": "synthetic",
+  "session_id": "synthetic-session",
+  "vocabulary": [
+    "Codex",
+    "hwgeekom",
+    "hworker"
+  ],
+  "stt_cases": [
+    {
+      "id": "s1",
+      "category": "tech_terms",
+      "expected_text": "Codex checks hwgeekom",
+      "recording_id": "synthetic-a"
+    },
+    {
+      "id": "s2",
+      "category": "tech_terms",
+      "expected_text": "hworker runs Codex",
+      "recording_id": "synthetic-b"
+    }
+  ],
+  "brain_cases": [
+    {
+      "id": "select-001",
+      "prompt": "Select hwgeekom as the target.",
+      "context": "Synthetic registry: account_id=bench-account; hwgeekom device_id=bench-hwgeekom; hworker device_id=bench-hworker; laptop device_id=bench-laptop; project_id=bench-project; Codex session provider_session_id=bench-codex; task command_id=bench-task. All names, resources and recipients are fictional. Propose calls only; phone policy decides approval and execution.",
+      "expected_calls": [
+        {
+          "kind": "select_target",
+          "account_id": "bench-account",
+          "device_id": "bench-hwgeekom"
+        }
+      ]
+    }
+  ],
+  "engines": [
+    {
+      "id": "apple",
+      "kind": "stt",
+      "version": "synthetic-1",
+      "results": [
+        {
+          "case_id": "s1",
+          "text": "codec checks geek",
+          "first_text_ms": 120,
+          "final_after_eos_ms": 160,
+          "clipped_first_word": false
+        },
+        {
+          "case_id": "s2",
+          "text": "worker runs Codex",
+          "first_text_ms": 130,
+          "final_after_eos_ms": 180,
+          "clipped_first_word": false
+        }
+      ],
+      "battery": {
+        "duration_seconds": 120,
+        "drain_percentage_points": 0.2
+      }
+    },
+    {
+      "id": "passing-engine",
+      "kind": "stt",
+      "version": "synthetic-1",
+      "results": [
+        {
+          "case_id": "s1",
+          "text": "Codex checks hwgeekom",
+          "first_text_ms": 120,
+          "final_after_eos_ms": 160,
+          "clipped_first_word": false
+        },
+        {
+          "case_id": "s2",
+          "text": "worker runs Codex",
+          "first_text_ms": 130,
+          "final_after_eos_ms": 180,
+          "clipped_first_word": false
+        }
+      ],
+      "battery": {
+        "duration_seconds": 120,
+        "drain_percentage_points": 0.2
+      }
+    },
+    {
+      "id": "failing-engine",
+      "kind": "stt",
+      "version": "synthetic-1",
+      "results": [
+        {
+          "case_id": "s1",
+          "text": "codec checks geek",
+          "first_text_ms": 120,
+          "final_after_eos_ms": 160,
+          "clipped_first_word": false
+        },
+        {
+          "case_id": "s2",
+          "text": "worker runs Codex",
+          "first_text_ms": 130,
+          "final_after_eos_ms": 180,
+          "clipped_first_word": false
+        }
+      ],
+      "battery": {
+        "duration_seconds": 120,
+        "drain_percentage_points": 0.2
+      }
+    },
+    {
+      "id": "synthetic-brain-correct",
+      "kind": "brain",
+      "version": "synthetic-1",
+      "results": [
+        {
+          "case_id": "select-001",
+          "calls": [
+            {
+              "kind": "select_target",
+              "account_id": "bench-account",
+              "device_id": "bench-hwgeekom"
+            }
+          ],
+          "latency_ms": 90
+        }
+      ]
+    },
+    {
+      "id": "synthetic-brain-wrong",
+      "kind": "brain",
+      "version": "synthetic-1",
+      "results": [
+        {
+          "case_id": "select-001",
+          "calls": [],
+          "latency_ms": 50
+        }
+      ]
+    }
+  ]
+}
