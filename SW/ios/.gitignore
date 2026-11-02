@@ -1,0 +1,5 @@
+*.xcodeproj/
+*.xcworkspace/
+Configuration/*-Info.plist
+__pycache__/
+Configuration/Assets.xcassets/
