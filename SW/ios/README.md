@@ -13,7 +13,8 @@ flowchart LR
 |---|---|---|
 | [project.yml](project.yml) | XcodeGen targets, one bundle prefix, marketing version | ✅ Scaffold |
 | [App/](App/README.md) | “Voice Remote / Ready for setup” screen | 🟡 macOS build **unverified** |
-| [KeyboardExt/](KeyboardExt/README.md) | Next-keyboard button; no capture, network or text insertion | 🟡 Stub |
+| [KeyboardExt/](KeyboardExt/README.md) | Status, globe/space/delete; committed-text insertion; no mic/network/Send | 🟡 Linux bridge tested; Apple compile/device **unverified** |
+| [Packages/KeyboardBridge/](Packages/KeyboardBridge/README.md) | Bounded App Group queue, Darwin wakeup, private crash receipts, copy/share APIs | ✅ Linux tests; main-app wiring **unverified** |
 | [LiveActivity/](LiveActivity/README.md) | ActivityKit lock-screen and Dynamic Island views; no activity started | 🟡 Stub |
 | [Configuration/](Configuration/README.md) | Shared App Group entitlement; generated Info plists | ✅ Configuration |
 | [Packages/Core/](Packages/Core/README.md) | Independent mode/capture, triggers, Auto target, text history, registry and safe dictation | ✅ Linux unit tests; UI adapters pending |
@@ -73,3 +74,18 @@ otherwise it skips before allocating another macOS runner. It archives and uploa
 `xcodebuild -allowProvisioningUpdates` and API authentication. Apple-side processing,
 compliance questions and tester assignment remain in App Store Connect. The entire signed
 archive/upload path is **unverified** until run with the owner's team credentials.
+
+Keyboard task 9 ([REQ-16], [REQ-46–48], [REQ-56]):
+
+| Decision / check | Consequence / evidence |
+|---|---|
+| Full Access off (`RequestsOpenAccess: false`) | [Current Apple open-access documentation](https://developer.apple.com/documentation/uikit/configuring-open-access-for-a-custom-keyboard) checked 2026-11-02: shared App Group **reading is permitted** without Full Access; writing is restricted. This supersedes the archived guide's broader restriction. App owns shared writes; extension receipts stay private. |
+| Privacy | Keyboard has no microphone or network access, no audio storage, no ML, and never reads host field contents. Only committed text and listening state cross the shared queue; Darwin notification has no text payload. No Full Access permission is requested. |
+| Crash safety | Receipt is persisted before insertion: at most one attempt per immutable segment ID within seven days; a crash in that gap can lose text. Recover explicitly from app history. See [queue contract](Packages/KeyboardBridge/README.md). |
+| Small memory | Queue/ledger capped at 256 KiB each, 1,024 records, 16 KiB per segment; measured extension footprint **unverified**. |
+| Seven-day expiry | Reader skips expired text; app must call `maintain` at launch and periodically to physically prune it. OS background scheduling cannot guarantee deletion at the exact boundary. No audio accepted by the bridge. |
+| No Send | Tests reject controls and newline scalars at enqueue and drain. UI only has globe, space, delete; no Return/Send key or command path. |
+| Unsupported fields | Main-app explicit copy/share APIs provided; main-app package dependency, history buttons and producer wiring belong to the app owner and remain **unverified**. Secure fields and apps can reject keyboards; no arbitrary background insertion promise. |
+| Linux check | `swift test -j 4 --package-path SW/ios/Packages/KeyboardBridge` (through `heavy` here): ordering, ID dedup, crash/restart, seven-day expiry, capacity, controls and newline rejection. |
+| Owner real-device check | **Unverified:** enable keyboard with Full Access off; dictate synthetic text in main app; activate in Messages and Mail, confirm text at caret and **no auto-send**; exercise globe, space/delete, suspension/restart, and copy/share in a rejecting field. |
+| Coordinator CI | **Unverified:** `ios-ci-*` tag run compiles UIKit/Darwin adapters and keyboard target; Linux does not compile Apple-only code. |
