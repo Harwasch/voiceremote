@@ -1,7 +1,8 @@
 ```mermaid
 flowchart LR
   SYS[SYS design + product definition] --> App[VoiceRemote · SwiftUI]
-  App --> Core[Packages/Core] & Stt[Packages/Stt] & Brain[Packages/Brain]
+  App --> Core[Packages/Core] & Pairing[Packages/Pairing] & Stt[Packages/Stt] & Brain[Packages/Brain]
+  Core & Pairing --> Protocol[Packages/Protocol]
   App --> Keyboard[KeyboardExt · UIKit] & Live[LiveActivity · WidgetKit]
   Group[App Group entitlement] --- App & Keyboard & Live
   Tests[VoiceRemoteTests] --> App
@@ -15,20 +16,22 @@ flowchart LR
 | [KeyboardExt/](KeyboardExt/README.md) | Next-keyboard button; no capture, network or text insertion | 🟡 Stub |
 | [LiveActivity/](LiveActivity/README.md) | ActivityKit lock-screen and Dynamic Island views; no activity started | 🟡 Stub |
 | [Configuration/](Configuration/README.md) | Shared App Group entitlement; generated Info plists | ✅ Configuration |
-| [Packages/](Packages/README.md) | Core, Stt, Brain: portable Swift skeletons with tests | ✅ Linux tests; features not implemented |
+| [Packages/Core/](Packages/Core/README.md) | Independent mode/capture, triggers, Auto target, text history, registry and safe dictation | ✅ Linux unit tests; UI adapters pending |
+| [Packages/Pairing/](Packages/Pairing/README.md) | Noise XX, QR checks, four-word phrase and both-screen confirmation gate | ✅ Cacophony/Linux tests; live desktop pairing **unverified** |
+| [Packages/Protocol/](Packages/Protocol/README.md) | Generated validating wire codecs | ✅ Linux round-trip tests |
+| [Packages/](Packages/README.md) | Stt and Brain skeletons; portable package map | 🟡 Feature implementations pending |
 | [Tests/](Tests/README.md) | Hosted app unit test | 🟡 macOS test **unverified** |
 | [ci/](ci/README.md) | Tested release guard and simulator discovery | ✅ Linux helper tests |
 | [ios.yml](../../.github/workflows/ios.yml) | Unsigned simulator tests; optional TestFlight release | 🟡 GitHub run **unverified** |
 
 Start with `project.yml`. Design: [Components and Repo](../../SYS/system-design-v1.md#components),
-[product definition](../../SYS/product-definition-v0.2.md). No `[REQ-n]` IDs are assigned in those
-sources yet; this scaffold does not claim a functional requirement is met. Protocol is owned
-by another task and is deliberately not referenced.
+[product definition](../../SYS/product-definition-v0.2.md). Core logic traces to REQ-3/4/5/8/16/17/18/25/56/60; Pairing traces to REQ-22–25/60/61.
+Package tests prove portable logic; app targets remain scaffolds and on-device behavior is **unverified**.
 
 Linux checks (Swift 6+, no Apple frameworks):
 
 ```sh
-for p in Core Stt Brain; do swift test --package-path SW/ios/Packages/$p || exit 1; done
+for p in Protocol Core Pairing Stt Brain; do swift test -j 4 --package-path SW/ios/Packages/$p || exit 1; done
 python3 -m unittest discover -s SW/ios/ci -p 'test_*.py'
 ```
 

@@ -8,7 +8,7 @@ flowchart LR
 
 | File / folder | What it is | Status |
 |---|---|---|
-| [Package.swift](Package.swift) | Standalone Foundation-only Swift package | ✅ Linux |
+| [Package.swift](Package.swift) | Foundation-only Swift package; iOS 26 minimum, Linux testable | ✅ Linux |
 | [Sources/](Sources/) | Generated Codable models, validation and wire codec | ✅ |
 | [Tests/](Tests/) | Typed shared-vector round trips and rejection tests | ✅ |
 
