@@ -6,6 +6,6 @@ let package = Package(
     products: [.library(name: "Stt", targets: ["Stt"])],
     targets: [
         .target(name: "Stt", path: "Sources", exclude: ["README.md"]),
-        .testTarget(name: "SttTests", dependencies: ["Stt"], path: "Tests", exclude: ["README.md"])
+        .testTarget(name: "SttTests", dependencies: ["Stt"], path: "Tests", exclude: ["README.md", "FakeWebSocket.py"])
     ]
 )
