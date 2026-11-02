@@ -1,0 +1,19 @@
+.claude/worktrees/
+.claude/ops/
+AI/scratch/
+# build output
+target/
+node_modules/
+.build/
+.swiftpm/
+DerivedData/
+build/
+dist/
+.wrangler/
+.dev.vars
+# secrets and private audio never live in the repo
+*.p8
+*.p12
+*.mobileprovision
+.env
+.env.*
