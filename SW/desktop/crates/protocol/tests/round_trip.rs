@@ -5,7 +5,9 @@ use voiceremote_protocol::*;
 #[derive(Deserialize)]
 struct Vector { name: String, schema: String, value: Value, json: Option<String> }
 #[derive(Deserialize)]
-struct Vectors { valid: Vec<Vector>, invalid: Vec<Vector> }
+struct RawVector { name: String, schema: String, json: String }
+#[derive(Deserialize)]
+struct Vectors { valid: Vec<Vector>, invalid: Vec<Vector>, raw_invalid: Vec<RawVector> }
 
 fn vectors() -> Vectors {
     serde_json::from_str(include_str!("../../../../../SYS/protocol/vectors/golden.json")).unwrap()
@@ -75,6 +77,15 @@ fn shared_invalid_vectors_are_rejected() {
         assert!(typed(&v.schema, &v.value.to_string()).is_err(), "Typed codec accepted {}", v.name);
     }
     println!("{} shared invalid vectors rejected", vectors.invalid.len());
+}
+
+#[test]
+fn shared_raw_invalid_vectors_are_rejected() {
+    let fixtures = vectors();
+    for v in &fixtures.raw_invalid {
+        assert!(typed(&v.schema, &v.json).is_err(), "Typed codec accepted {}", v.name);
+    }
+    println!("{} shared raw invalid vectors rejected", fixtures.raw_invalid.len());
 }
 
 #[test]

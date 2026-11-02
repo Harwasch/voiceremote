@@ -4,7 +4,8 @@ import XCTest
 
 final class RoundTripTests: XCTestCase {
     struct Vector: Decodable { let name: String; let schema: String; let value: JSONValue; let json: String? }
-    struct Vectors: Decodable { let valid: [Vector]; let invalid: [Vector] }
+    struct RawVector: Decodable { let name: String; let schema: String; let json: String }
+    struct Vectors: Decodable { let valid: [Vector]; let invalid: [Vector]; let raw_invalid: [RawVector] }
     func vectors() throws -> Vectors {
         var root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         while root.path != "/" {
@@ -75,5 +76,14 @@ final class RoundTripTests: XCTestCase {
         XCTAssertThrowsError(try ProtocolCodec.encode(value))
         XCTAssertThrowsError(try ProtocolCodec.decode(InnerMessage.self, from: Data("{\"kind\":\"unknown\"}".utf8)))
         XCTAssertThrowsError(try ProtocolCodec.decode(RelayFrame.self, from: Data("not JSON".utf8)))
+    }
+    func testSharedRawInvalidVectorsAreRejected() throws {
+        let fixtures = try vectors()
+        for v in fixtures.raw_invalid {
+            let data = Data(v.json.utf8)
+            XCTAssertThrowsError(try ProtocolCodec.validate(v.schema, json: data), v.name)
+            XCTAssertThrowsError(try typed(v.schema, data), v.name)
+        }
+        print("\(fixtures.raw_invalid.count) shared raw invalid vectors rejected")
     }
 }

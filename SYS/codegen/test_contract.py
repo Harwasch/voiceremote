@@ -10,7 +10,12 @@ import unittest
 
 from generate import ROOT, bundle, check_dialect, render, schema_children
 
-FORBIDDEN = {'authenticated_actor', 'activation_kind', 'approval_credential_class', 'granted_scope_id'}
+# Product §4.1–4.4 and §7: input evidence, policy decisions, approval bindings
+# and execution results are trusted; proposed risk/payload and UI state are hints.
+FORBIDDEN = {'authenticated_actor', 'activation_kind', 'approval_credential_class',
+             'granted_scope_id', 'source_tier', 'approval_event_id', 'policy_version',
+             'risk_class', 'payload_hash', 'execution_state', 'outcome',
+             'speaker_evidence', 'recording_consent_state'}
 DICTATION_FIELDS = {'kind', 'account_id', 'segment_id', 'revision', 'state', 'target_device_id', 'text'}
 RELAY_FIELDS = {
     'RelayCiphertext': {'kind', 'account_id', 'room_id', 'sender_device_id', 'ciphertext'},
@@ -49,7 +54,7 @@ def dictation_invariant(defs):
         assert props[field] == {'$ref': '#/$defs/Identifier'}, 'dictation identifier gained an action'
     assert props['revision'] == {'$ref': '#/$defs/Counter'}
     assert defs['DictationText']['additionalProperties'] is False
-    assert defs['DictationText']['properties']['text'].get('not') == {'pattern': '[\\r\\n\\u0085\\u2028\\u2029]'}, 'dictation permits line submission'
+    assert defs['DictationText']['properties']['text'].get('not') == {'pattern': '[\\u0000-\\u001F\\u007F-\\u009F\\u2028\\u2029]'}, 'dictation permits line submission'
 
 
 def relay_invariant(defs):
@@ -76,6 +81,20 @@ class ContractTests(unittest.TestCase):
 
     def test_dictation_has_only_insertion_fields_and_no_line_separators(self):
         dictation_invariant(self.defs)
+
+    def test_dictation_vectors_cover_every_control_and_keypad_enter(self):
+        vectors = json.loads((ROOT / 'SYS/protocol/vectors/golden.json').read_text())
+        controls = set(range(0x20)) | set(range(0x7f, 0xa0)) | {0x2028, 0x2029}
+        by_name = {v['name']: v for v in vectors['invalid']}
+        for point in controls:
+            vector = by_name[f'dictation control U+{point:04X}']
+            self.assertEqual(vector['schema'], 'DictationText')
+            self.assertIn(chr(point), vector['value']['text'])
+        self.assertIn('\x1bOM', by_name['dictation control keypad Enter']['value']['text'])
+        changed = copy.deepcopy(self.defs)
+        del changed['DictationText']['properties']['text']['not']
+        with self.assertRaisesRegex(AssertionError, 'submission'):
+            dictation_invariant(changed)
 
     def test_relay_is_only_opaque_bytes_and_allowlisted_metadata(self):
         relay_invariant(self.defs)

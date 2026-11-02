@@ -17,5 +17,7 @@ not permission to decrypt. TypeScript interfaces alone never validate input.
 Run `make -C SYS check`, or install pinned direct dependencies from `SW/relay`
 with `npm install --ignore-scripts --no-package-lock` then run `npm test`.
 The package typechecks and runs Vitest with at most four workers.
-Trace: product §4/§7; `[REQ-n]` is TBD. Room auth, encryption, APNs, and Worker
+Trace: product §4/§7; [REQ-59](../../../../SYS/requirements.md#extensibility), [REQ-61](../../../../SYS/requirements.md#extensibility). Room auth, encryption, APNs, and Worker
 integration are **unverified** future work.
+
+Strict parsing rejects duplicate keys and invalid Unicode; lexical integer paths feed the private Ajv integer check.

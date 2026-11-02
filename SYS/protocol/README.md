@@ -23,7 +23,7 @@ flowchart LR
 | `ciphertext` | Relay | Room, sender, opaque encrypted bytes |
 | `presence` / `wake_registration` | Relay | Online state / APNs wake token and environment |
 | `pairing` | QR, not a relay frame | Desktop public key, one-use token, expiry, relay room |
-| `dictation_text` | Noise | Partial/committed text, target, segment, revision; no send or line separators |
+| `dictation_text` | Noise | Partial/committed text, target, segment, revision; no send, C0/C1 controls or line separators |
 | `focus_report` | Noise | Focus boolean and last activity; no field contents |
 | `device_info` | Noise | Device role, platform, capabilities |
 | `revoke` | Noise | Device, command, idempotency key, revocation time |
@@ -48,4 +48,9 @@ schemas independently of the Swift/Rust interpreters.
 
 Trace: [product definition §4, §7](../product-definition-v0.2.md#4-activity-and-authorization-architecture)
 and [system design: Modes, Components, Pairing/security](../system-design-v1.md).
-Numbered `[REQ-n]` traceability is **TBD**: no requirements file exists yet.
+Trace: [REQ-59](../requirements.md#extensibility) (generated compatibility),
+[REQ-61](../requirements.md#extensibility) (account IDs),
+[REQ-16, REQ-18](../requirements.md#dictation-delivery-and-targets) (insertion/focus),
+[REQ-22, REQ-24](../requirements.md#pairing-and-transport) (pairing/relay), and
+[REQ-28–36](../requirements.md#authorization-and-policy) (authority contracts).
+Only contract checks are proven here; component integration remains unverified.

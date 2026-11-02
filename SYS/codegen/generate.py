@@ -23,8 +23,8 @@ KEYWORDS = {'$schema', '$id', '$defs', '$ref', 'title', 'description', 'type',
             'const', 'enum', 'oneOf', 'allOf', 'if', 'then', 'not'}
 PORTABLE_PATTERNS = {
     '^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$',
-    '[^A-Za-z0-9+/=]', '^[0-9a-f]+$', '[^0-9a-f]',
-    '[\\r\\n\\u0085\\u2028\\u2029]',
+    '^[A-Za-z0-9+/]{43}=$', '[^A-Za-z0-9+/=]', '^[0-9a-f]+$', '[^0-9a-f]',
+    '[\\u0000-\\u001F\\u007F-\\u009F\\u2028\\u2029]',
 }
 
 

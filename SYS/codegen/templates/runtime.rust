@@ -15,31 +15,16 @@ pub trait WireRecord: Serialize + DeserializeOwned { const SCHEMA_NAME: &'static
 
 /// Use these codecs at wire boundaries; raw serde only checks Rust field types.
 pub fn decode<T: WireRecord>(json: &str) -> Result<T, String> {
-    let mut value: Value = serde_json::from_str(json).map_err(|e| e.to_string())?;
+    let value = parse_wire_json(json)?;
     validate(T::SCHEMA_NAME, &value)?;
-    normalize_integer_numbers(&mut value);
     serde_json::from_value(value).map_err(|e| e.to_string())
-}
-// JSON Schema treats 1.0 and 1e0 as integers. Serde's u64 decoder requires an
-// integer representation, so normalize mathematically integral safe numbers.
-fn normalize_integer_numbers(value: &mut Value) {
-    match value {
-        Value::Number(n) => {
-            if let Some(f) = n.as_f64() {
-                if (0.0..=9007199254740991.0).contains(&f) && f.fract() == 0.0 {
-                    *value = Value::from(f as u64);
-                }
-            }
-        }
-        Value::Array(a) => a.iter_mut().for_each(normalize_integer_numbers),
-        Value::Object(o) => o.values_mut().for_each(normalize_integer_numbers),
-        _ => {},
-    }
 }
 pub fn encode<T: WireRecord>(value: &T) -> Result<String, String> {
     let value = serde_json::to_value(value).map_err(|e| e.to_string())?;
     validate(T::SCHEMA_NAME, &value)?;
-    serde_json::to_string(&value).map_err(|e| e.to_string())
+    let json = serde_json::to_string(&value).map_err(|e| e.to_string())?;
+    validate(T::SCHEMA_NAME, &parse_wire_json(&json)?)?;
+    Ok(json)
 }
 
 /// Restricted JSON Schema interpreter. Unsupported keywords fail code generation.
@@ -68,7 +53,7 @@ fn accepts(s: &Value, v: &Value) -> bool {
         let valid = match t {
             "object" => v.is_object(), "array" => v.is_array(), "string" => v.is_string(),
             "boolean" => v.is_boolean(), "number" => v.is_number(),
-            "integer" => v.as_f64().is_some_and(|n| n.is_finite() && n.fract() == 0.0),
+            "integer" => v.as_u64().is_some(),
             _ => false,
         };
         if !valid { return false; }
@@ -95,7 +80,9 @@ fn accepts(s: &Value, v: &Value) -> bool {
         if !bounds(s, text.chars().count() as f64, "minLength", "maxLength") { return false; }
         if let Some(pattern) = s.get("pattern").and_then(Value::as_str) {
             // JSON Schema uses ECMA escapes for Unicode; Rust's engine uses \x{NNNN}.
-            let pattern = pattern.replace("\\u0085", "\\x{0085}")
+            let pattern = pattern.replace("\\u0000", "\\x{0000}")
+                .replace("\\u001F", "\\x{001F}").replace("\\u007F", "\\x{007F}")
+                .replace("\\u009F", "\\x{009F}").replace("\\u0085", "\\x{0085}")
                 .replace("\\u2028", "\\x{2028}").replace("\\u2029", "\\x{2029}");
             if !regex::Regex::new(&pattern).expect("generator-tested regex").is_match(text) { return false; }
         }
@@ -106,4 +93,97 @@ fn accepts(s: &Value, v: &Value) -> bool {
 fn bounds(s: &Value, n: f64, min: &str, max: &str) -> bool {
     s.get(min).and_then(Value::as_f64).is_none_or(|m| n >= m)
         && s.get(max).and_then(Value::as_f64).is_none_or(|m| n <= m)
+}
+
+// A small strict parser retains numeric token kinds and rejects duplicates at
+// every object depth before serde can collapse them. Strings use serde's scalar
+// parser, which rejects malformed escapes and unpaired UTF-16 surrogates.
+fn parse_wire_json(json: &str) -> Result<Value, String> {
+    struct Parser<'a> { text: &'a str, i: usize }
+    impl Parser<'_> {
+        fn byte(&self) -> Option<u8> { self.text.as_bytes().get(self.i).copied() }
+        fn space(&mut self) { while self.byte().is_some_and(|b| b" \t\r\n".contains(&b)) { self.i += 1; } }
+        fn take(&mut self, b: u8) -> Result<(), String> {
+            if self.byte() != Some(b) { return Err("Invalid wire JSON".into()); }
+            self.i += 1; Ok(())
+        }
+        fn string(&mut self) -> Result<String, String> {
+            let start = self.i;
+            self.take(b'"')?;
+            loop {
+                let b = self.byte().ok_or("Unterminated JSON string")?;
+                self.i += 1;
+                if b < 0x20 { return Err("Unescaped JSON control".into()); }
+                if b == b'"' { break; }
+                if b == b'\\' {
+                    if self.byte().is_none() { return Err("Unterminated escape".into()); }
+                    self.i += 1;
+                }
+            }
+            serde_json::from_str(&self.text[start..self.i]).map_err(|_| "Invalid JSON string".into())
+        }
+        fn digits(&mut self) { while self.byte().is_some_and(|b| b.is_ascii_digit()) { self.i += 1; } }
+        fn number(&mut self) -> Result<Value, String> {
+            let start = self.i;
+            if self.byte() == Some(b'-') { self.i += 1; }
+            if self.byte() == Some(b'0') { self.i += 1; }
+            else if self.byte().is_some_and(|b| (b'1'..=b'9').contains(&b)) { self.digits(); }
+            else { return Err("Invalid JSON number".into()); }
+            if self.byte() == Some(b'.') {
+                self.i += 1; let digits = self.i; self.digits();
+                if self.i == digits { return Err("Invalid JSON fraction".into()); }
+            }
+            if self.byte().is_some_and(|b| b == b'e' || b == b'E') {
+                self.i += 1;
+                if self.byte().is_some_and(|b| b == b'+' || b == b'-') { self.i += 1; }
+                let digits = self.i; self.digits();
+                if self.i == digits { return Err("Invalid JSON exponent".into()); }
+            }
+            let token = &self.text[start..self.i];
+            let value: Value = serde_json::from_str(token).map_err(|_| "Invalid JSON number")?;
+            let number = value.as_f64().ok_or("Invalid JSON number")?;
+            let nonzero = token.split(['e', 'E']).next().unwrap().bytes().any(|b| (b'1'..=b'9').contains(&b));
+            if !number.is_finite() || (number == 0.0 && nonzero) { return Err("JSON number overflow/underflow".into()); }
+            // -0 is a literal JSON integer; serde otherwise represents it as f64.
+            Ok(if token == "-0" { Value::from(0) } else { value })
+        }
+        fn value(&mut self, depth: usize) -> Result<Value, String> {
+            if depth > 64 { return Err("JSON nesting limit".into()); }
+            self.space();
+            match self.byte() {
+                Some(b'"') => Ok(Value::String(self.string()?)),
+                Some(b'{') => {
+                    self.i += 1; self.space(); let mut object = serde_json::Map::new();
+                    if self.byte() == Some(b'}') { self.i += 1; return Ok(Value::Object(object)); }
+                    loop {
+                        self.space(); let key = self.string()?;
+                        if object.contains_key(&key) { return Err("Duplicate JSON key".into()); }
+                        self.space(); self.take(b':')?;
+                        object.insert(key, self.value(depth + 1)?); self.space();
+                        if self.byte() == Some(b'}') { self.i += 1; return Ok(Value::Object(object)); }
+                        self.take(b',')?;
+                    }
+                }
+                Some(b'[') => {
+                    self.i += 1; self.space(); let mut array = Vec::new();
+                    if self.byte() == Some(b']') { self.i += 1; return Ok(Value::Array(array)); }
+                    loop {
+                        array.push(self.value(depth + 1)?); self.space();
+                        if self.byte() == Some(b']') { self.i += 1; return Ok(Value::Array(array)); }
+                        self.take(b',')?;
+                    }
+                }
+                Some(b't') if self.text[self.i..].starts_with("true") => { self.i += 4; Ok(Value::Bool(true)) }
+                Some(b'f') if self.text[self.i..].starts_with("false") => { self.i += 5; Ok(Value::Bool(false)) }
+                Some(b'n') if self.text[self.i..].starts_with("null") => { self.i += 4; Ok(Value::Null) }
+                Some(b'-' | b'0'..=b'9') => self.number(),
+                _ => Err("Invalid wire JSON".into()),
+            }
+        }
+    }
+    let mut parser = Parser { text: json, i: 0 };
+    let value = parser.value(0)?;
+    parser.space();
+    if parser.i != json.len() { return Err("Trailing JSON data".into()); }
+    Ok(value)
 }

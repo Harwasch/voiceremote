@@ -236,10 +236,10 @@
           "$ref": "#/$defs/Base64"
         },
         "one_use_token": {
-          "$ref": "#/$defs/Base64"
+          "$ref": "#/$defs/PairingToken"
         },
         "expires_at": {
-          "$ref": "#/$defs/Timestamp"
+          "$ref": "#/$defs/PairingExpiry"
         },
         "relay_room_id": {
           "$ref": "#/$defs/Identifier"
@@ -284,7 +284,7 @@
           "type": "string",
           "maxLength": 16384,
           "not": {
-            "pattern": "[\\r\\n\\u0085\\u2028\\u2029]"
+            "pattern": "[\\u0000-\\u001F\\u007F-\\u009F\\u2028\\u2029]"
           }
         }
       },
@@ -959,6 +959,22 @@
           "$ref": "#/$defs/CaptureStateReport"
         }
       ]
+    },
+    "PairingToken": {
+      "type": "string",
+      "minLength": 44,
+      "maxLength": 44,
+      "pattern": "^[A-Za-z0-9+/]{43}=$",
+      "not": {
+        "pattern": "[^A-Za-z0-9+/=]"
+      },
+      "description": "32-byte single-use bootstrap token; not a lasting credential."
+    },
+    "PairingExpiry": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991,
+      "description": "Positive Unix epoch milliseconds. Enrollment additionally checks now < expires_at <= now + 120000 using trusted time."
     }
   }
 }

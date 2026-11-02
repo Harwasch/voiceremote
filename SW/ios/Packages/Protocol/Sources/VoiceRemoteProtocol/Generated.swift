@@ -491,10 +491,10 @@ public struct PairingPayload: ProtocolRecord, Equatable {
     public let kind: PairingPayloadKind
     public let account_id: Identifier
     public let desktop_public_key: Base64
-    public let one_use_token: Base64
-    public let expires_at: Timestamp
+    public let one_use_token: PairingToken
+    public let expires_at: PairingExpiry
     public let relay_room_id: Identifier
-    public init(kind: PairingPayloadKind = .pairing, account_id: Identifier, desktop_public_key: Base64, one_use_token: Base64, expires_at: Timestamp, relay_room_id: Identifier) {
+    public init(kind: PairingPayloadKind = .pairing, account_id: Identifier, desktop_public_key: Base64, one_use_token: PairingToken, expires_at: PairingExpiry, relay_room_id: Identifier) {
         self.kind = kind
         self.account_id = account_id
         self.desktop_public_key = desktop_public_key
@@ -509,8 +509,8 @@ public struct PairingPayload: ProtocolRecord, Equatable {
         self.kind = try c.decode(PairingPayloadKind.self, forKey: .kind)
         self.account_id = try c.decode(Identifier.self, forKey: .account_id)
         self.desktop_public_key = try c.decode(Base64.self, forKey: .desktop_public_key)
-        self.one_use_token = try c.decode(Base64.self, forKey: .one_use_token)
-        self.expires_at = try c.decode(Timestamp.self, forKey: .expires_at)
+        self.one_use_token = try c.decode(PairingToken.self, forKey: .one_use_token)
+        self.expires_at = try c.decode(PairingExpiry.self, forKey: .expires_at)
         self.relay_room_id = try c.decode(Identifier.self, forKey: .relay_room_id)
     }
 }
@@ -1011,6 +1011,10 @@ public enum InnerMessage: ProtocolRecord, Equatable {
     }
 }
 
+public typealias PairingToken = String
+
+public typealias PairingExpiry = Int64
+
 
 
 // Unicode scalars match JSON Schema string lengths, rather than Swift graphemes.
@@ -1045,40 +1049,43 @@ indirect enum JSONValue: Codable, Equatable, Sendable {
 
 public enum ProtocolCodec {
     public static func decode<T: ProtocolRecord>(_ type: T.Type, from data: Data) throws -> T {
-        try JSONDecoder().decode(type, from: data)
+        try validate(T.schemaName, json: data)
+        return try JSONDecoder().decode(type, from: data)
     }
     public static func encode<T: ProtocolRecord>(_ value: T) throws -> Data {
         let data = try JSONEncoder().encode(value)
-        try Schema.validate(T.schemaName, JSONDecoder().decode(JSONValue.self, from: data))
+        try validate(T.schemaName, json: data)
         return data
     }
     public static func validate(_ name: String, json: Data) throws {
-        try Schema.validate(name, JSONDecoder().decode(JSONValue.self, from: json))
+        var parser = try WireJSONParser(json)
+        let value = try parser.parse()
+        try Schema.validate(name, value, nonIntegers: parser.nonIntegers)
     }
 }
 
 enum Schema {
     static let document: JSONValue = try! JSONDecoder().decode(JSONValue.self, from: Data(#"""
-{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"https://voiceremote.invalid/bundle/v1","$defs":{"SelectTargetTool":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"select_target"},"account_id":{"$ref":"#/$defs/Identifier"},"device_id":{"$ref":"#/$defs/Identifier"}},"required":["kind","account_id","device_id"]},"OpenResourceTool":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"open_resource"},"account_id":{"$ref":"#/$defs/Identifier"},"device_id":{"$ref":"#/$defs/Identifier"},"resource_uri":{"type":"string","minLength":1,"maxLength":2048}},"required":["kind","account_id","device_id","resource_uri"]},"DelegateTaskTool":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"delegate_task"},"account_id":{"$ref":"#/$defs/Identifier"},"device_id":{"$ref":"#/$defs/Identifier"},"project_id":{"$ref":"#/$defs/Identifier"},"provider_session_id":{"$ref":"#/$defs/Identifier"},"instruction":{"type":"string","minLength":1,"maxLength":16384}},"required":["kind","account_id","device_id","project_id","instruction"]},"CancelTaskTool":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"cancel_task"},"account_id":{"$ref":"#/$defs/Identifier"},"command_id":{"$ref":"#/$defs/Identifier"}},"required":["kind","account_id","command_id"]},"PrepareSendTool":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"prepare_send"},"account_id":{"$ref":"#/$defs/Identifier"},"device_id":{"$ref":"#/$defs/Identifier"},"recipient":{"type":"string","minLength":1,"maxLength":512},"content":{"type":"string","minLength":1,"maxLength":16384}},"required":["kind","account_id","device_id","recipient","content"]},"ToolCall":{"oneOf":[{"$ref":"#/$defs/SelectTargetTool"},{"$ref":"#/$defs/OpenResourceTool"},{"$ref":"#/$defs/DelegateTaskTool"},{"$ref":"#/$defs/CancelTaskTool"},{"$ref":"#/$defs/PrepareSendTool"}]},"Identifier":{"type":"string","minLength":1,"maxLength":128},"Timestamp":{"type":"integer","minimum":0,"maximum":9007199254740991,"description":"Unix epoch milliseconds; safe in JavaScript."},"Counter":{"type":"integer","minimum":0,"maximum":9007199254740991},"Base64":{"type":"string","minLength":4,"maxLength":1048576,"pattern":"^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$","not":{"pattern":"[^A-Za-z0-9+/=]"}},"PayloadHash":{"type":"string","minLength":64,"maxLength":64,"pattern":"^[0-9a-f]+$","not":{"pattern":"[^0-9a-f]"},"description":"SHA-256 of the immutable UTF-8 task preview bytes retained by trusted policy; JSON serialization is not canonicalized by this contract."},"Mode":{"type":"string","enum":["dictation","ai_control"]},"CaptureState":{"type":"string","enum":["off","hold","continuous"]},"RiskClass":{"type":"string","enum":["read_display","workspace_modify","sensitive"]},"Capability":{"type":"string","enum":["receive_text","open_resource","delegate_task","cancel_task","external_send"]},"ExecutionState":{"type":"string","enum":["queued","dispatched","running","succeeded","failed","cancelled"]},"CandidateState":{"type":"string","enum":["suggested","edited","approved","dismissed","expired"]},"ActivationKind":{"type":"string","enum":["ptt","wake_word","approval_tap"]},"ApprovalCredentialClass":{"type":"string","enum":["scoped_grant","user_presence","biometric","passcode"]},"RelayCiphertext":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"ciphertext"},"account_id":{"$ref":"#/$defs/Identifier"},"room_id":{"$ref":"#/$defs/Identifier"},"sender_device_id":{"$ref":"#/$defs/Identifier"},"ciphertext":{"$ref":"#/$defs/Base64"}},"required":["kind","account_id","room_id","sender_device_id","ciphertext"]},"RelayPresence":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"presence"},"account_id":{"$ref":"#/$defs/Identifier"},"room_id":{"$ref":"#/$defs/Identifier"},"sender_device_id":{"$ref":"#/$defs/Identifier"},"state":{"type":"string","enum":["online","offline"]}},"required":["kind","account_id","room_id","sender_device_id","state"]},"RelayWakeRegistration":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"wake_registration"},"account_id":{"$ref":"#/$defs/Identifier"},"room_id":{"$ref":"#/$defs/Identifier"},"sender_device_id":{"$ref":"#/$defs/Identifier"},"apns_wake_token":{"$ref":"#/$defs/Base64"},"environment":{"type":"string","enum":["sandbox","production"]}},"required":["kind","account_id","room_id","sender_device_id","apns_wake_token","environment"]},"RelayFrame":{"oneOf":[{"$ref":"#/$defs/RelayCiphertext"},{"$ref":"#/$defs/RelayPresence"},{"$ref":"#/$defs/RelayWakeRegistration"}]},"PairingPayload":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"pairing"},"account_id":{"$ref":"#/$defs/Identifier"},"desktop_public_key":{"$ref":"#/$defs/Base64"},"one_use_token":{"$ref":"#/$defs/Base64"},"expires_at":{"$ref":"#/$defs/Timestamp"},"relay_room_id":{"$ref":"#/$defs/Identifier"}},"required":["kind","account_id","desktop_public_key","one_use_token","expires_at","relay_room_id"]},"DictationText":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"dictation_text"},"account_id":{"$ref":"#/$defs/Identifier"},"segment_id":{"$ref":"#/$defs/Identifier"},"revision":{"$ref":"#/$defs/Counter"},"state":{"type":"string","enum":["partial","committed"]},"target_device_id":{"$ref":"#/$defs/Identifier"},"text":{"type":"string","maxLength":16384,"not":{"pattern":"[\\r\\n\\u0085\\u2028\\u2029]"}}},"required":["kind","account_id","segment_id","revision","state","target_device_id","text"]},"FocusReport":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"focus_report"},"account_id":{"$ref":"#/$defs/Identifier"},"device_id":{"$ref":"#/$defs/Identifier"},"text_field_focused":{"type":"boolean"},"last_activity_at":{"$ref":"#/$defs/Timestamp"}},"required":["kind","account_id","device_id","text_field_focused","last_activity_at"]},"DeviceInfo":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"device_info"},"account_id":{"$ref":"#/$defs/Identifier"},"device_id":{"$ref":"#/$defs/Identifier"},"display_name":{"type":"string","minLength":1,"maxLength":128},"platform":{"type":"string","enum":["ios","windows","linux","remote"]},"role":{"type":"string","enum":["text_receiver","agent","both","capture"]},"capabilities":{"type":"array","items":{"$ref":"#/$defs/Capability"},"maxItems":256}},"required":["kind","account_id","device_id","display_name","platform","role","capabilities"]},"Revoke":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"revoke"},"account_id":{"$ref":"#/$defs/Identifier"},"device_id":{"$ref":"#/$defs/Identifier"},"command_id":{"$ref":"#/$defs/Identifier"},"idempotency_key":{"$ref":"#/$defs/Identifier"},"revoked_at":{"$ref":"#/$defs/Timestamp"}},"required":["kind","account_id","device_id","command_id","idempotency_key","revoked_at"]},"TaskStatus":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"task_status"},"account_id":{"$ref":"#/$defs/Identifier"},"command_id":{"$ref":"#/$defs/Identifier"},"execution_state":{"$ref":"#/$defs/ExecutionState"},"updated_at":{"$ref":"#/$defs/Timestamp"},"outcome":{"type":"string","enum":["ok","denied","unavailable","error"]}},"required":["kind","account_id","command_id","execution_state","updated_at"]},"CaptureSegment":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"capture_segment"},"account_id":{"$ref":"#/$defs/Identifier"},"capture_session_id":{"$ref":"#/$defs/Identifier"},"source_id":{"$ref":"#/$defs/Identifier"},"source_type":{"type":"string","enum":["iphone","airpods","desktop","remote"]},"source_clock":{"$ref":"#/$defs/Counter"},"receive_timestamp":{"$ref":"#/$defs/Timestamp"},"partial_revision":{"$ref":"#/$defs/Counter"},"committed_segment_id":{"$ref":"#/$defs/Identifier"},"speaker_evidence":{"type":"string","enum":["unknown","matched","ambiguous"]},"recording_consent_state":{"type":"string","enum":["unknown","granted","denied"]},"segment_text":{"type":"string","maxLength":16384}},"required":["kind","account_id","capture_session_id","source_id","source_type","source_clock","receive_timestamp","partial_revision","committed_segment_id","speaker_evidence","recording_consent_state","segment_text"]},"CandidateAction":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"candidate_action"},"account_id":{"$ref":"#/$defs/Identifier"},"candidate_id":{"$ref":"#/$defs/Identifier"},"parent_capture_session":{"$ref":"#/$defs/Identifier"},"segment_span_ids":{"type":"array","items":{"$ref":"#/$defs/Identifier"},"maxItems":256},"proposed_task_kind":{"$ref":"#/$defs/Capability"},"proposed_task":{"$ref":"#/$defs/ToolCall"},"proposed_payload_hash":{"$ref":"#/$defs/PayloadHash"},"destination_hint":{"$ref":"#/$defs/Identifier"},"origin_confidence":{"type":"number","minimum":0,"maximum":1},"proposed_risk_class":{"$ref":"#/$defs/RiskClass"},"suggestion_expiry":{"$ref":"#/$defs/Timestamp"},"card_visibility":{"type":"string","enum":["visible","muted"]},"candidate_state":{"$ref":"#/$defs/CandidateState"}},"required":["kind","account_id","candidate_id","parent_capture_session","segment_span_ids","proposed_task_kind","proposed_task","proposed_payload_hash","origin_confidence","proposed_risk_class","suggestion_expiry","card_visibility","candidate_state"]},"AuthorizedCommand":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"authorized_command"},"account_id":{"$ref":"#/$defs/Identifier"},"command_id":{"$ref":"#/$defs/Identifier"},"candidate_id":{"$ref":"#/$defs/Identifier"},"immutable_task_payload":{"$ref":"#/$defs/ToolCall"},"payload_hash":{"$ref":"#/$defs/PayloadHash"},"source_tier":{"type":"string","enum":["inferred","explicit"]},"activation_kind":{"$ref":"#/$defs/ActivationKind"},"authenticated_actor":{"$ref":"#/$defs/Identifier"},"approval_credential_class":{"$ref":"#/$defs/ApprovalCredentialClass"},"approval_event_id":{"$ref":"#/$defs/Identifier"},"risk_class":{"$ref":"#/$defs/RiskClass"},"policy_version":{"$ref":"#/$defs/Identifier"},"granted_scope_id":{"$ref":"#/$defs/Identifier"},"destination_id":{"$ref":"#/$defs/Identifier"},"provider_session_id":{"$ref":"#/$defs/Identifier"},"idempotency_key":{"$ref":"#/$defs/Identifier"},"execution_state":{"$ref":"#/$defs/ExecutionState"},"outcome":{"type":"string","enum":["ok","denied","unavailable","error"]},"created_at":{"$ref":"#/$defs/Timestamp"},"updated_at":{"$ref":"#/$defs/Timestamp"}},"required":["kind","account_id","command_id","candidate_id","immutable_task_payload","payload_hash","source_tier","activation_kind","authenticated_actor","approval_credential_class","risk_class","policy_version","granted_scope_id","destination_id","idempotency_key","execution_state","created_at","updated_at"],"allOf":[{"if":{"properties":{"source_tier":{"const":"inferred"}}},"then":{"required":["approval_event_id"],"properties":{"activation_kind":{"const":"approval_tap"},"approval_credential_class":{"type":"string","enum":["user_presence","biometric","passcode"]}}}},{"if":{"properties":{"activation_kind":{"const":"approval_tap"}}},"then":{"required":["approval_event_id"],"properties":{"approval_credential_class":{"type":"string","enum":["user_presence","biometric","passcode"]}}}},{"if":{"properties":{"risk_class":{"const":"sensitive"}}},"then":{"required":["approval_event_id"],"properties":{"approval_credential_class":{"type":"string","enum":["biometric","passcode"]}}}}]},"AuditEntry":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"audit_entry"},"account_id":{"$ref":"#/$defs/Identifier"},"audit_id":{"$ref":"#/$defs/Identifier"},"command_id":{"$ref":"#/$defs/Identifier"},"authenticated_actor":{"$ref":"#/$defs/Identifier"},"event":{"type":"string","enum":["approved","denied","queued","dispatched","running","succeeded","failed","cancelled","revoked"]},"payload_hash":{"$ref":"#/$defs/PayloadHash"},"policy_version":{"$ref":"#/$defs/Identifier"},"recorded_at":{"$ref":"#/$defs/Timestamp"},"approval_event_id":{"$ref":"#/$defs/Identifier"}},"required":["kind","account_id","audit_id","command_id","authenticated_actor","event","payload_hash","policy_version","recorded_at"]},"Grant":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"grant"},"account_id":{"$ref":"#/$defs/Identifier"},"grant_id":{"$ref":"#/$defs/Identifier"},"authenticated_actor":{"$ref":"#/$defs/Identifier"},"device_id":{"$ref":"#/$defs/Identifier"},"project_id":{"$ref":"#/$defs/Identifier"},"capability":{"$ref":"#/$defs/Capability"},"risk_class":{"$ref":"#/$defs/RiskClass"},"expires_at":{"$ref":"#/$defs/Timestamp"}},"required":["kind","account_id","grant_id","authenticated_actor","device_id","project_id","capability","risk_class","expires_at"]},"ModeState":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"mode"},"account_id":{"$ref":"#/$defs/Identifier"},"device_id":{"$ref":"#/$defs/Identifier"},"mode":{"$ref":"#/$defs/Mode"}},"required":["kind","account_id","device_id","mode"]},"CaptureStateReport":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"capture_state"},"account_id":{"$ref":"#/$defs/Identifier"},"device_id":{"$ref":"#/$defs/Identifier"},"capture_state":{"$ref":"#/$defs/CaptureState"}},"required":["kind","account_id","device_id","capture_state"]},"InnerMessage":{"oneOf":[{"$ref":"#/$defs/DictationText"},{"$ref":"#/$defs/FocusReport"},{"$ref":"#/$defs/DeviceInfo"},{"$ref":"#/$defs/Revoke"},{"$ref":"#/$defs/TaskStatus"},{"$ref":"#/$defs/CaptureSegment"},{"$ref":"#/$defs/CandidateAction"},{"$ref":"#/$defs/AuthorizedCommand"},{"$ref":"#/$defs/AuditEntry"},{"$ref":"#/$defs/Grant"},{"$ref":"#/$defs/ModeState"},{"$ref":"#/$defs/CaptureStateReport"}]}}}
+{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"https://voiceremote.invalid/bundle/v1","$defs":{"SelectTargetTool":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"select_target"},"account_id":{"$ref":"#/$defs/Identifier"},"device_id":{"$ref":"#/$defs/Identifier"}},"required":["kind","account_id","device_id"]},"OpenResourceTool":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"open_resource"},"account_id":{"$ref":"#/$defs/Identifier"},"device_id":{"$ref":"#/$defs/Identifier"},"resource_uri":{"type":"string","minLength":1,"maxLength":2048}},"required":["kind","account_id","device_id","resource_uri"]},"DelegateTaskTool":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"delegate_task"},"account_id":{"$ref":"#/$defs/Identifier"},"device_id":{"$ref":"#/$defs/Identifier"},"project_id":{"$ref":"#/$defs/Identifier"},"provider_session_id":{"$ref":"#/$defs/Identifier"},"instruction":{"type":"string","minLength":1,"maxLength":16384}},"required":["kind","account_id","device_id","project_id","instruction"]},"CancelTaskTool":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"cancel_task"},"account_id":{"$ref":"#/$defs/Identifier"},"command_id":{"$ref":"#/$defs/Identifier"}},"required":["kind","account_id","command_id"]},"PrepareSendTool":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"prepare_send"},"account_id":{"$ref":"#/$defs/Identifier"},"device_id":{"$ref":"#/$defs/Identifier"},"recipient":{"type":"string","minLength":1,"maxLength":512},"content":{"type":"string","minLength":1,"maxLength":16384}},"required":["kind","account_id","device_id","recipient","content"]},"ToolCall":{"oneOf":[{"$ref":"#/$defs/SelectTargetTool"},{"$ref":"#/$defs/OpenResourceTool"},{"$ref":"#/$defs/DelegateTaskTool"},{"$ref":"#/$defs/CancelTaskTool"},{"$ref":"#/$defs/PrepareSendTool"}]},"Identifier":{"type":"string","minLength":1,"maxLength":128},"Timestamp":{"type":"integer","minimum":0,"maximum":9007199254740991,"description":"Unix epoch milliseconds; safe in JavaScript."},"Counter":{"type":"integer","minimum":0,"maximum":9007199254740991},"Base64":{"type":"string","minLength":4,"maxLength":1048576,"pattern":"^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$","not":{"pattern":"[^A-Za-z0-9+/=]"}},"PayloadHash":{"type":"string","minLength":64,"maxLength":64,"pattern":"^[0-9a-f]+$","not":{"pattern":"[^0-9a-f]"},"description":"SHA-256 of the immutable UTF-8 task preview bytes retained by trusted policy; JSON serialization is not canonicalized by this contract."},"Mode":{"type":"string","enum":["dictation","ai_control"]},"CaptureState":{"type":"string","enum":["off","hold","continuous"]},"RiskClass":{"type":"string","enum":["read_display","workspace_modify","sensitive"]},"Capability":{"type":"string","enum":["receive_text","open_resource","delegate_task","cancel_task","external_send"]},"ExecutionState":{"type":"string","enum":["queued","dispatched","running","succeeded","failed","cancelled"]},"CandidateState":{"type":"string","enum":["suggested","edited","approved","dismissed","expired"]},"ActivationKind":{"type":"string","enum":["ptt","wake_word","approval_tap"]},"ApprovalCredentialClass":{"type":"string","enum":["scoped_grant","user_presence","biometric","passcode"]},"RelayCiphertext":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"ciphertext"},"account_id":{"$ref":"#/$defs/Identifier"},"room_id":{"$ref":"#/$defs/Identifier"},"sender_device_id":{"$ref":"#/$defs/Identifier"},"ciphertext":{"$ref":"#/$defs/Base64"}},"required":["kind","account_id","room_id","sender_device_id","ciphertext"]},"RelayPresence":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"presence"},"account_id":{"$ref":"#/$defs/Identifier"},"room_id":{"$ref":"#/$defs/Identifier"},"sender_device_id":{"$ref":"#/$defs/Identifier"},"state":{"type":"string","enum":["online","offline"]}},"required":["kind","account_id","room_id","sender_device_id","state"]},"RelayWakeRegistration":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"wake_registration"},"account_id":{"$ref":"#/$defs/Identifier"},"room_id":{"$ref":"#/$defs/Identifier"},"sender_device_id":{"$ref":"#/$defs/Identifier"},"apns_wake_token":{"$ref":"#/$defs/Base64"},"environment":{"type":"string","enum":["sandbox","production"]}},"required":["kind","account_id","room_id","sender_device_id","apns_wake_token","environment"]},"RelayFrame":{"oneOf":[{"$ref":"#/$defs/RelayCiphertext"},{"$ref":"#/$defs/RelayPresence"},{"$ref":"#/$defs/RelayWakeRegistration"}]},"PairingPayload":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"pairing"},"account_id":{"$ref":"#/$defs/Identifier"},"desktop_public_key":{"$ref":"#/$defs/Base64"},"one_use_token":{"$ref":"#/$defs/PairingToken"},"expires_at":{"$ref":"#/$defs/PairingExpiry"},"relay_room_id":{"$ref":"#/$defs/Identifier"}},"required":["kind","account_id","desktop_public_key","one_use_token","expires_at","relay_room_id"]},"DictationText":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"dictation_text"},"account_id":{"$ref":"#/$defs/Identifier"},"segment_id":{"$ref":"#/$defs/Identifier"},"revision":{"$ref":"#/$defs/Counter"},"state":{"type":"string","enum":["partial","committed"]},"target_device_id":{"$ref":"#/$defs/Identifier"},"text":{"type":"string","maxLength":16384,"not":{"pattern":"[\\u0000-\\u001F\\u007F-\\u009F\\u2028\\u2029]"}}},"required":["kind","account_id","segment_id","revision","state","target_device_id","text"]},"FocusReport":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"focus_report"},"account_id":{"$ref":"#/$defs/Identifier"},"device_id":{"$ref":"#/$defs/Identifier"},"text_field_focused":{"type":"boolean"},"last_activity_at":{"$ref":"#/$defs/Timestamp"}},"required":["kind","account_id","device_id","text_field_focused","last_activity_at"]},"DeviceInfo":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"device_info"},"account_id":{"$ref":"#/$defs/Identifier"},"device_id":{"$ref":"#/$defs/Identifier"},"display_name":{"type":"string","minLength":1,"maxLength":128},"platform":{"type":"string","enum":["ios","windows","linux","remote"]},"role":{"type":"string","enum":["text_receiver","agent","both","capture"]},"capabilities":{"type":"array","items":{"$ref":"#/$defs/Capability"},"maxItems":256}},"required":["kind","account_id","device_id","display_name","platform","role","capabilities"]},"Revoke":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"revoke"},"account_id":{"$ref":"#/$defs/Identifier"},"device_id":{"$ref":"#/$defs/Identifier"},"command_id":{"$ref":"#/$defs/Identifier"},"idempotency_key":{"$ref":"#/$defs/Identifier"},"revoked_at":{"$ref":"#/$defs/Timestamp"}},"required":["kind","account_id","device_id","command_id","idempotency_key","revoked_at"]},"TaskStatus":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"task_status"},"account_id":{"$ref":"#/$defs/Identifier"},"command_id":{"$ref":"#/$defs/Identifier"},"execution_state":{"$ref":"#/$defs/ExecutionState"},"updated_at":{"$ref":"#/$defs/Timestamp"},"outcome":{"type":"string","enum":["ok","denied","unavailable","error"]}},"required":["kind","account_id","command_id","execution_state","updated_at"]},"CaptureSegment":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"capture_segment"},"account_id":{"$ref":"#/$defs/Identifier"},"capture_session_id":{"$ref":"#/$defs/Identifier"},"source_id":{"$ref":"#/$defs/Identifier"},"source_type":{"type":"string","enum":["iphone","airpods","desktop","remote"]},"source_clock":{"$ref":"#/$defs/Counter"},"receive_timestamp":{"$ref":"#/$defs/Timestamp"},"partial_revision":{"$ref":"#/$defs/Counter"},"committed_segment_id":{"$ref":"#/$defs/Identifier"},"speaker_evidence":{"type":"string","enum":["unknown","matched","ambiguous"]},"recording_consent_state":{"type":"string","enum":["unknown","granted","denied"]},"segment_text":{"type":"string","maxLength":16384}},"required":["kind","account_id","capture_session_id","source_id","source_type","source_clock","receive_timestamp","partial_revision","committed_segment_id","speaker_evidence","recording_consent_state","segment_text"]},"CandidateAction":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"candidate_action"},"account_id":{"$ref":"#/$defs/Identifier"},"candidate_id":{"$ref":"#/$defs/Identifier"},"parent_capture_session":{"$ref":"#/$defs/Identifier"},"segment_span_ids":{"type":"array","items":{"$ref":"#/$defs/Identifier"},"maxItems":256},"proposed_task_kind":{"$ref":"#/$defs/Capability"},"proposed_task":{"$ref":"#/$defs/ToolCall"},"proposed_payload_hash":{"$ref":"#/$defs/PayloadHash"},"destination_hint":{"$ref":"#/$defs/Identifier"},"origin_confidence":{"type":"number","minimum":0,"maximum":1},"proposed_risk_class":{"$ref":"#/$defs/RiskClass"},"suggestion_expiry":{"$ref":"#/$defs/Timestamp"},"card_visibility":{"type":"string","enum":["visible","muted"]},"candidate_state":{"$ref":"#/$defs/CandidateState"}},"required":["kind","account_id","candidate_id","parent_capture_session","segment_span_ids","proposed_task_kind","proposed_task","proposed_payload_hash","origin_confidence","proposed_risk_class","suggestion_expiry","card_visibility","candidate_state"]},"AuthorizedCommand":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"authorized_command"},"account_id":{"$ref":"#/$defs/Identifier"},"command_id":{"$ref":"#/$defs/Identifier"},"candidate_id":{"$ref":"#/$defs/Identifier"},"immutable_task_payload":{"$ref":"#/$defs/ToolCall"},"payload_hash":{"$ref":"#/$defs/PayloadHash"},"source_tier":{"type":"string","enum":["inferred","explicit"]},"activation_kind":{"$ref":"#/$defs/ActivationKind"},"authenticated_actor":{"$ref":"#/$defs/Identifier"},"approval_credential_class":{"$ref":"#/$defs/ApprovalCredentialClass"},"approval_event_id":{"$ref":"#/$defs/Identifier"},"risk_class":{"$ref":"#/$defs/RiskClass"},"policy_version":{"$ref":"#/$defs/Identifier"},"granted_scope_id":{"$ref":"#/$defs/Identifier"},"destination_id":{"$ref":"#/$defs/Identifier"},"provider_session_id":{"$ref":"#/$defs/Identifier"},"idempotency_key":{"$ref":"#/$defs/Identifier"},"execution_state":{"$ref":"#/$defs/ExecutionState"},"outcome":{"type":"string","enum":["ok","denied","unavailable","error"]},"created_at":{"$ref":"#/$defs/Timestamp"},"updated_at":{"$ref":"#/$defs/Timestamp"}},"required":["kind","account_id","command_id","candidate_id","immutable_task_payload","payload_hash","source_tier","activation_kind","authenticated_actor","approval_credential_class","risk_class","policy_version","granted_scope_id","destination_id","idempotency_key","execution_state","created_at","updated_at"],"allOf":[{"if":{"properties":{"source_tier":{"const":"inferred"}}},"then":{"required":["approval_event_id"],"properties":{"activation_kind":{"const":"approval_tap"},"approval_credential_class":{"type":"string","enum":["user_presence","biometric","passcode"]}}}},{"if":{"properties":{"activation_kind":{"const":"approval_tap"}}},"then":{"required":["approval_event_id"],"properties":{"approval_credential_class":{"type":"string","enum":["user_presence","biometric","passcode"]}}}},{"if":{"properties":{"risk_class":{"const":"sensitive"}}},"then":{"required":["approval_event_id"],"properties":{"approval_credential_class":{"type":"string","enum":["biometric","passcode"]}}}}]},"AuditEntry":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"audit_entry"},"account_id":{"$ref":"#/$defs/Identifier"},"audit_id":{"$ref":"#/$defs/Identifier"},"command_id":{"$ref":"#/$defs/Identifier"},"authenticated_actor":{"$ref":"#/$defs/Identifier"},"event":{"type":"string","enum":["approved","denied","queued","dispatched","running","succeeded","failed","cancelled","revoked"]},"payload_hash":{"$ref":"#/$defs/PayloadHash"},"policy_version":{"$ref":"#/$defs/Identifier"},"recorded_at":{"$ref":"#/$defs/Timestamp"},"approval_event_id":{"$ref":"#/$defs/Identifier"}},"required":["kind","account_id","audit_id","command_id","authenticated_actor","event","payload_hash","policy_version","recorded_at"]},"Grant":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"grant"},"account_id":{"$ref":"#/$defs/Identifier"},"grant_id":{"$ref":"#/$defs/Identifier"},"authenticated_actor":{"$ref":"#/$defs/Identifier"},"device_id":{"$ref":"#/$defs/Identifier"},"project_id":{"$ref":"#/$defs/Identifier"},"capability":{"$ref":"#/$defs/Capability"},"risk_class":{"$ref":"#/$defs/RiskClass"},"expires_at":{"$ref":"#/$defs/Timestamp"}},"required":["kind","account_id","grant_id","authenticated_actor","device_id","project_id","capability","risk_class","expires_at"]},"ModeState":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"mode"},"account_id":{"$ref":"#/$defs/Identifier"},"device_id":{"$ref":"#/$defs/Identifier"},"mode":{"$ref":"#/$defs/Mode"}},"required":["kind","account_id","device_id","mode"]},"CaptureStateReport":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"capture_state"},"account_id":{"$ref":"#/$defs/Identifier"},"device_id":{"$ref":"#/$defs/Identifier"},"capture_state":{"$ref":"#/$defs/CaptureState"}},"required":["kind","account_id","device_id","capture_state"]},"InnerMessage":{"oneOf":[{"$ref":"#/$defs/DictationText"},{"$ref":"#/$defs/FocusReport"},{"$ref":"#/$defs/DeviceInfo"},{"$ref":"#/$defs/Revoke"},{"$ref":"#/$defs/TaskStatus"},{"$ref":"#/$defs/CaptureSegment"},{"$ref":"#/$defs/CandidateAction"},{"$ref":"#/$defs/AuthorizedCommand"},{"$ref":"#/$defs/AuditEntry"},{"$ref":"#/$defs/Grant"},{"$ref":"#/$defs/ModeState"},{"$ref":"#/$defs/CaptureStateReport"}]},"PairingToken":{"type":"string","minLength":44,"maxLength":44,"pattern":"^[A-Za-z0-9+/]{43}=$","not":{"pattern":"[^A-Za-z0-9+/=]"},"description":"32-byte single-use bootstrap token; not a lasting credential."},"PairingExpiry":{"type":"integer","minimum":1,"maximum":9007199254740991,"description":"Positive Unix epoch milliseconds. Enrollment additionally checks now < expires_at <= now + 120000 using trusted time."}}}
 """#.utf8))
-    static func validate(_ name: String, _ value: JSONValue) throws {
+    static func validate(_ name: String, _ value: JSONValue, nonIntegers: Set<String> = []) throws {
         let schema = document["$defs"][name]
-        guard schema != .null, accepts(schema, value) else { throw WireError.invalid(name) }
+        guard schema != .null, accepts(schema, value, nonIntegers: nonIntegers) else { throw WireError.invalid(name) }
     }
-    static func accepts(_ s: JSONValue, _ v: JSONValue) -> Bool {
-        if let r = s["$ref"].string { return accepts(document["$defs"][String(r.split(separator: "/").last!)], v) }
+    static func accepts(_ s: JSONValue, _ v: JSONValue, path: String = "", nonIntegers: Set<String> = []) -> Bool {
+        if let r = s["$ref"].string { return accepts(document["$defs"][String(r.split(separator: "/").last!)], v, path: path, nonIntegers: nonIntegers) }
         if s.object?["const"] != nil && s["const"] != v { return false }
         if let e = s["enum"].array, !e.contains(v) { return false }
-        if let variants = s["oneOf"].array, variants.filter({ accepts($0, v) }).count != 1 { return false }
-        if let rules = s["allOf"].array, !rules.allSatisfy({ accepts($0, v) }) { return false }
-        if let condition = s.object?["if"], accepts(condition, v), !accepts(s["then"], v) { return false }
-        if let n = s.object?["not"], accepts(n, v) { return false }
+        if let variants = s["oneOf"].array, variants.filter({ accepts($0, v, path: path, nonIntegers: nonIntegers) }).count != 1 { return false }
+        if let rules = s["allOf"].array, !rules.allSatisfy({ accepts($0, v, path: path, nonIntegers: nonIntegers) }) { return false }
+        if let condition = s.object?["if"], accepts(condition, v, path: path, nonIntegers: nonIntegers), !accepts(s["then"], v, path: path, nonIntegers: nonIntegers) { return false }
+        if let n = s.object?["not"], accepts(n, v, path: path, nonIntegers: nonIntegers) { return false }
         if let t = s["type"].string {
             let valid: Bool
             switch (t, v) {
             case ("object", .object), ("array", .array), ("string", .string), ("boolean", .bool): valid = true
             case ("number", .number(let n)): valid = n.isFinite
-            case ("integer", .number(let n)): valid = n.isFinite && n.rounded(.towardZero) == n
+            case ("integer", .number(let n)): valid = n.isFinite && n.rounded(.towardZero) == n && !nonIntegers.contains(path)
             default: valid = false
             }
             if !valid { return false }
@@ -1087,14 +1094,14 @@ enum Schema {
             if let required = s["required"].array, required.contains(where: { object[$0.string!] == nil }) { return false }
             if let props = s["properties"].object {
                 for (key, value) in object {
-                    if let child = props[key] { if !accepts(child, value) { return false } }
+                    if let child = props[key] { if !accepts(child, value, path: wirePath(path, key), nonIntegers: nonIntegers) { return false } }
                     else if s["additionalProperties"] == .bool(false) { return false }
                 }
             }
         }
         if let array = v.array {
             if !bounds(s, Double(array.count), "minItems", "maxItems") { return false }
-            if let items = s.object?["items"], !array.allSatisfy({ accepts(items, $0) }) { return false }
+            if let items = s.object?["items"], !array.enumerated().allSatisfy({ accepts(items, $0.element, path: wirePath(path, String($0.offset)), nonIntegers: nonIntegers) }) { return false }
         }
         if let text = v.string {
             if !bounds(s, Double(text.unicodeScalars.count), "minLength", "maxLength") { return false }
@@ -1105,5 +1112,128 @@ enum Schema {
     }
     static func bounds(_ s: JSONValue, _ n: Double, _ min: String, _ max: String) -> Bool {
         (s[min].number.map { n >= $0 } ?? true) && (s[max].number.map { n <= $0 } ?? true)
+    }
+}
+
+private func wirePath(_ path: String, _ key: String) -> String {
+    path + "/" + key.replacingOccurrences(of: "~", with: "~0").replacingOccurrences(of: "/", with: "~1")
+}
+
+// Validate grammar before Foundation decoding, which otherwise accepts duplicate
+// keys, BOMs, trailing commas and rounded integer spellings on some platforms.
+private struct WireJSONParser {
+    let bytes: [UInt8]
+    var i = 0
+    var nonIntegers: Set<String> = []
+    init(_ data: Data) throws {
+        guard String(data: data, encoding: .utf8) != nil else { throw WireError.invalid("Invalid UTF-8") }
+        bytes = Array(data)
+    }
+    var byte: Int { i < bytes.count ? Int(bytes[i]) : -1 }
+    mutating func space() { while [32, 9, 10, 13].contains(byte) { i += 1 } }
+    mutating func take(_ expected: Int) throws {
+        guard byte == expected else { throw WireError.invalid("Invalid wire JSON") }
+        i += 1
+    }
+    mutating func parse() throws -> JSONValue {
+        let result = try value("", 0)
+        space()
+        guard i == bytes.count else { throw WireError.invalid("Trailing JSON data") }
+        return result
+    }
+    mutating func hex4() throws -> Int {
+        var result = 0
+        for _ in 0..<4 {
+            let digit: Int
+            switch byte {
+            case 48...57: digit = byte - 48
+            case 65...70: digit = byte - 55
+            case 97...102: digit = byte - 87
+            default: throw WireError.invalid("Invalid Unicode escape")
+            }
+            result = result * 16 + digit; i += 1
+        }
+        return result
+    }
+    mutating func string() throws -> String {
+        let start = i
+        try take(34)
+        while true {
+            guard byte >= 32 else { throw WireError.invalid("Invalid JSON string") }
+            let c = byte; i += 1
+            if c == 34 { break }
+            if c == 92 {
+                let escape = byte; i += 1
+                if escape == 117 {
+                    let unit = try hex4()
+                    if (0xD800...0xDBFF).contains(unit) {
+                        try take(92); try take(117)
+                        guard (0xDC00...0xDFFF).contains(try hex4()) else { throw WireError.invalid("Unpaired surrogate") }
+                    } else if (0xDC00...0xDFFF).contains(unit) { throw WireError.invalid("Unpaired surrogate") }
+                } else if ![34, 92, 47, 98, 102, 110, 114, 116].contains(escape) {
+                    throw WireError.invalid("Invalid JSON escape")
+                }
+            }
+        }
+        return try JSONDecoder().decode(String.self, from: Data(bytes[start..<i]))
+    }
+    mutating func digits() { while (48...57).contains(byte) { i += 1 } }
+    mutating func number(_ path: String) throws -> JSONValue {
+        let start = i
+        if byte == 45 { i += 1 }
+        if byte == 48 { i += 1 }
+        else if (49...57).contains(byte) { digits() }
+        else { throw WireError.invalid("Invalid JSON number") }
+        if byte == 46 {
+            i += 1; let startDigits = i; digits()
+            guard i > startDigits else { throw WireError.invalid("Invalid JSON fraction") }
+        }
+        if byte == 101 || byte == 69 {
+            i += 1
+            if byte == 43 || byte == 45 { i += 1 }
+            let startDigits = i; digits()
+            guard i > startDigits else { throw WireError.invalid("Invalid JSON exponent") }
+        }
+        let token = String(decoding: bytes[start..<i], as: UTF8.self)
+        let nonzero = token.split(whereSeparator: { $0 == "e" || $0 == "E" })[0].contains(where: { $0 >= "1" && $0 <= "9" })
+        guard let number = Double(token), number.isFinite, !(number == 0 && nonzero) else {
+            throw WireError.invalid("JSON number overflow/underflow")
+        }
+        if token.contains(where: { $0 == "." || $0 == "e" || $0 == "E" }) { nonIntegers.insert(path) }
+        return .number(number)
+    }
+    mutating func value(_ path: String, _ depth: Int) throws -> JSONValue {
+        guard depth <= 64 else { throw WireError.invalid("JSON nesting limit") }
+        space()
+        switch byte {
+        case 34: return .string(try string())
+        case 123:
+            i += 1; space()
+            var object: [String: JSONValue] = [:]
+            var keys: Set<[UInt8]> = []
+            if byte == 125 { i += 1; return .object(object) }
+            while true {
+                space(); let key = try string()
+                guard keys.insert(Array(key.utf8)).inserted else { throw WireError.invalid("Duplicate JSON key") }
+                space(); try take(58)
+                object[key] = try value(wirePath(path, key), depth + 1); space()
+                if byte == 125 { i += 1; return .object(object) }
+                try take(44)
+            }
+        case 91:
+            i += 1; space(); var array: [JSONValue] = []
+            if byte == 93 { i += 1; return .array(array) }
+            while true {
+                array.append(try value(wirePath(path, String(array.count)), depth + 1)); space()
+                if byte == 93 { i += 1; return .array(array) }
+                try take(44)
+            }
+        case 116, 102, 110:
+            let token = byte == 116 ? "true" : byte == 102 ? "false" : "null"
+            for b in token.utf8 { try take(Int(b)) }
+            return token == "true" ? .bool(true) : token == "false" ? .bool(false) : .null
+        case 45, 48...57: return try number(path)
+        default: throw WireError.invalid("Invalid wire JSON")
+        }
     }
 }

@@ -4,8 +4,9 @@ import { describe, it, expect } from "vitest";
 import { decode, encode, validate, type Records, type ToolCall, type InnerMessage } from "../src/protocol/generated.js";
 
 interface Vector { name: string; schema: keyof Records; value: unknown; json?: string }
+interface RawVector { name: string; schema: keyof Records; json: string }
 const root = new URL("../../../", import.meta.url);
-const vectors: { valid: Vector[]; invalid: Vector[] } = JSON.parse(
+const vectors: { valid: Vector[]; invalid: Vector[]; raw_invalid: RawVector[] } = JSON.parse(
   readFileSync(new URL("SYS/protocol/vectors/golden.json", root), "utf8"),
 );
 const tools = JSON.parse(readFileSync(new URL("SYS/tools/tool-call.schema.json", root), "utf8"));
@@ -36,12 +37,25 @@ describe("shared protocol vectors", () => {
       expect(() => decode(v.schema, JSON.stringify(v.value))).toThrow();
     });
   }
+  for (const v of vectors.raw_invalid) {
+    it(`rejects raw ${v.name}`, () => {
+      expect(() => decode(v.schema, v.json)).toThrow();
+    });
+  }
   it("validates constructed values on encode", () => {
     const v = vectors.valid.find(v => v.schema === "DictationText")!;
     const value = decode("DictationText", JSON.stringify(v.value));
     expect(() => encode("DictationText", { ...value, text: "SYNTHETIC\n" })).toThrow();
     expect(() => decode("InnerMessage", '{"kind":"unknown"}')).toThrow();
     expect(() => decode("RelayFrame", "not JSON")).toThrow();
+    expect(() => encode("DictationText", { ...value, text: "SYNTHETIC\ud800" })).toThrow();
+  });
+  it("rejects non-UTF-8 source strings before decoding escapes", () => {
+    const v = vectors.valid.find(v => v.schema === "DictationText")!;
+    const raw = JSON.stringify({ ...(v.value as object), text: "MARKER" });
+    for (const malformed of ["\ud800", "\udc00", "\\ud800" + "\udc00", "\ud800" + "\\udc00"]) {
+      expect(() => decode("DictationText", raw.replace("MARKER", malformed))).toThrow();
+    }
   });
 });
 

@@ -19,4 +19,6 @@ from the root, or `make -C SYS check` for all contract checks. Cargo creates a
 workspace lockfile; the Make recipe cleans it up if it did not already exist.
 
 Edit `SYS/protocol` / `SYS/tools`, then regenerate. Trace: product §4/§7;
-`[REQ-n]` is TBD. Noise, policy, dispatch and Windows linking are **unverified** here.
+[REQ-59](../../../../SYS/requirements.md#extensibility), [REQ-61](../../../../SYS/requirements.md#extensibility). Noise, policy, dispatch and Windows linking are **unverified** here.
+
+Wire parsing rejects duplicates, lone surrogates, underflow and nonliteral integer spellings before typed serde decoding.
