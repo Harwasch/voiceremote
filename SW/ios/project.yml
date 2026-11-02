@@ -18,6 +18,8 @@ packages:
     path: Packages/Stt
   Brain:
     path: Packages/Brain
+  KeyboardBridge:
+    path: Packages/KeyboardBridge
 targets:
   VoiceRemote:
     type: application
@@ -47,6 +49,8 @@ targets:
       - target: LiveActivity
         embed: true
   KeyboardExt:
+    dependencies:
+      - package: KeyboardBridge
     type: app-extension
     platform: iOS
     sources:
