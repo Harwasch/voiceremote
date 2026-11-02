@@ -21,6 +21,8 @@ flowchart LR
 | [Packages/Pairing/](Packages/Pairing/README.md) | Noise XX, QR checks, four-word phrase and both-screen confirmation gate | ✅ Cacophony/Linux tests; live desktop pairing **unverified** |
 | [Packages/Protocol/](Packages/Protocol/README.md) | Generated validating wire codecs | ✅ Linux round-trip tests |
 | [Packages/](Packages/README.md) | Stt and Brain skeletons; portable package map | 🟡 Feature implementations pending |
+| [Packages/](Packages/README.md) | Core, Stt, Brain: portable Swift skeletons with tests | ✅ Linux tests; features not implemented |
+| [Packages/Policy/](Packages/Policy/README.md) | Deterministic gate, bounded grants, durable revocation, payload-bound approval and authenticated audit recovery; REQ-28–35 | ✅ Linux tests; phone/checkpoint integration **unverified** |
 | [Tests/](Tests/README.md) | Hosted app unit test | 🟡 macOS test **unverified** |
 | [ci/](ci/README.md) | Tested release guard and simulator discovery | ✅ Linux helper tests |
 | [ios.yml](../../.github/workflows/ios.yml) | Unsigned simulator tests; optional TestFlight release | 🟡 GitHub run **unverified** |
