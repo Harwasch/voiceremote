@@ -1,0 +1,290 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "synthetic": {
+      "type": "boolean"
+    },
+    "device": {
+      "type": "string",
+      "minLength": 1
+    },
+    "capture_source": {
+      "enum": [
+        "iphone_mic",
+        "airpods",
+        "synthetic"
+      ]
+    },
+    "session_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+    },
+    "vocabulary": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "stt_cases": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/stt_case"
+      }
+    },
+    "brain_cases": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/brain_case"
+      }
+    },
+    "engines": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+          },
+          "kind": {
+            "enum": [
+              "stt",
+              "brain"
+            ]
+          },
+          "version": {
+            "type": "string",
+            "minLength": 1
+          },
+          "results": {
+            "type": "array",
+            "minItems": 1
+          },
+          "battery": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "duration_seconds": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "drain_percentage_points": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 100
+              }
+            },
+            "required": [
+              "duration_seconds",
+              "drain_percentage_points"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "version",
+          "results"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "stt"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "results": {
+                  "items": {
+                    "$ref": "#/$defs/stt_result"
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "brain"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "results": {
+                  "items": {
+                    "$ref": "#/$defs/brain_result"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "required": [
+    "schema_version",
+    "synthetic",
+    "device",
+    "capture_source",
+    "session_id",
+    "vocabulary",
+    "stt_cases",
+    "brain_cases",
+    "engines"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://voiceremote.invalid/bench/run/v1",
+  "title": "Phone benchmark export v1 — no audio or credentials",
+  "$comment": "Purpose: phone/scorer contract; inputs: owner recordings or labelled fixtures; verified by synthetic tests. Durations in milliseconds, battery drain in percentage points. External refs resolve to SYS schemas offline.",
+  "$defs": {
+    "stt_case": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+        },
+        "category": {
+          "enum": [
+            "normal",
+            "whispering",
+            "names",
+            "numbers",
+            "tech_terms"
+          ]
+        },
+        "expected_text": {
+          "type": "string",
+          "minLength": 1
+        },
+        "recording_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "id",
+        "category",
+        "expected_text",
+        "recording_id"
+      ]
+    },
+    "brain_case": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+        },
+        "prompt": {
+          "type": "string",
+          "minLength": 1
+        },
+        "context": {
+          "type": "string",
+          "minLength": 1
+        },
+        "expected_calls": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "https://voiceremote.invalid/tools/v1"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "prompt",
+        "context",
+        "expected_calls"
+      ]
+    },
+    "stt_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "case_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+        },
+        "text": {
+          "type": "string"
+        },
+        "first_text_ms": {
+          "type": "number",
+          "minimum": 0
+        },
+        "final_after_eos_ms": {
+          "type": "number",
+          "minimum": 0
+        },
+        "clipped_first_word": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "case_id",
+        "text"
+      ]
+    },
+    "brain_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "case_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+        },
+        "calls": {
+          "type": "array",
+          "items": {}
+        },
+        "latency_ms": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "case_id",
+        "calls"
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "synthetic": {
+            "const": false
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "capture_source": {
+            "enum": [
+              "iphone_mic",
+              "airpods"
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

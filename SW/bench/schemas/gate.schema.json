@@ -1,0 +1,25 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "apple_engine_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"
+    },
+    "minimum_term_error_reduction": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "target_status": {
+      "const": "TBC"
+    }
+  },
+  "required": [
+    "apple_engine_id",
+    "minimum_term_error_reduction",
+    "target_status"
+  ],
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Owner-editable proposed gate; target remains TBC"
+}

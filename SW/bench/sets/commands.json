@@ -1,0 +1,667 @@
+{
+  "purpose": "50 spoken command reading prompts and expected proposals; never executed",
+  "inputs": "SYS/tools/tool-call.schema.json and synthetic registry",
+  "verification": "Expected proposals validated offline in tests; owner wording review unverified",
+  "commands": [
+    {
+      "id": "select-001",
+      "prompt": "Select hwgeekom as the target.",
+      "context": "Synthetic registry: account_id=bench-account; hwgeekom device_id=bench-hwgeekom; hworker device_id=bench-hworker; laptop device_id=bench-laptop; project_id=bench-project; Codex session provider_session_id=bench-codex; task command_id=bench-task. All names, resources and recipients are fictional. Propose calls only; phone policy decides approval and execution.",
+      "expected_calls": [
+        {
+          "kind": "select_target",
+          "account_id": "bench-account",
+          "device_id": "bench-hwgeekom"
+        }
+      ]
+    },
+    {
+      "id": "open-001",
+      "prompt": "Open the synthetic overview resource on the laptop at bench://overview.",
+      "context": "Synthetic registry: account_id=bench-account; hwgeekom device_id=bench-hwgeekom; hworker device_id=bench-hworker; laptop device_id=bench-laptop; project_id=bench-project; Codex session provider_session_id=bench-codex; task command_id=bench-task. All names, resources and recipients are fictional. Propose calls only; phone policy decides approval and execution.",
+      "expected_calls": [
+        {
+          "kind": "open_resource",
+          "account_id": "bench-account",
+          "device_id": "bench-laptop",
+          "resource_uri": "bench://overview"
+        }
+      ]
+    },
+    {
+      "id": "delegate-001",
+      "prompt": "Ask the Codex session in the synthetic project on hwgeekom to do this exactly: Compare the two synthetic layouts.",
+      "context": "Synthetic registry: account_id=bench-account; hwgeekom device_id=bench-hwgeekom; hworker device_id=bench-hworker; laptop device_id=bench-laptop; project_id=bench-project; Codex session provider_session_id=bench-codex; task command_id=bench-task. All names, resources and recipients are fictional. Propose calls only; phone policy decides approval and execution.",
+      "expected_calls": [
+        {
+          "kind": "delegate_task",
+          "account_id": "bench-account",
+          "device_id": "bench-hwgeekom",
+          "project_id": "bench-project",
+          "provider_session_id": "bench-codex",
+          "instruction": "Compare the two synthetic layouts."
+        }
+      ]
+    },
+    {
+      "id": "cancel-001",
+      "prompt": "Cancel the synthetic task.",
+      "context": "Synthetic registry: account_id=bench-account; hwgeekom device_id=bench-hwgeekom; hworker device_id=bench-hworker; laptop device_id=bench-laptop; project_id=bench-project; Codex session provider_session_id=bench-codex; task command_id=bench-task. All names, resources and recipients are fictional. Propose calls only; phone policy decides approval and execution.",
+      "expected_calls": [
+        {
+          "kind": "cancel_task",
+          "account_id": "bench-account",
+          "command_id": "bench-task"
+        }
+      ]
+    },
+    {
+      "id": "prepare_send-001",
+      "prompt": "Prepare a message on the laptop to the fictional character Zorla Vennix saying exactly: The mock review is ready.",
+      "context": "Synthetic registry: account_id=bench-account; hwgeekom device_id=bench-hwgeekom; hworker device_id=bench-hworker; laptop device_id=bench-laptop; project_id=bench-project; Codex session provider_session_id=bench-codex; task command_id=bench-task. All names, resources and recipients are fictional. Propose calls only; phone policy decides approval and execution.",
+      "expected_calls": [
+        {
+          "kind": "prepare_send",
+          "account_id": "bench-account",
+          "device_id": "bench-laptop",
+          "recipient": "Zorla Vennix",
+          "content": "The mock review is ready."
+        }
+      ]
+    },
+    {
+      "id": "select-002",
+      "prompt": "Switch the target to hworker.",
+      "context": "Synthetic registry: account_id=bench-account; hwgeekom device_id=bench-hwgeekom; hworker device_id=bench-hworker; laptop device_id=bench-laptop; project_id=bench-project; Codex session provider_session_id=bench-codex; task command_id=bench-task. All names, resources and recipients are fictional. Propose calls only; phone policy decides approval and execution.",
+      "expected_calls": [
+        {
+          "kind": "select_target",
+          "account_id": "bench-account",
+          "device_id": "bench-hworker"
+        }
+      ]
+    },
+    {
+      "id": "open-002",
+      "prompt": "Open the synthetic schematic resource on the laptop at bench://schematic.",
+      "context": "Synthetic registry: account_id=bench-account; hwgeekom device_id=bench-hwgeekom; hworker device_id=bench-hworker; laptop device_id=bench-laptop; project_id=bench-project; Codex session provider_session_id=bench-codex; task command_id=bench-task. All names, resources and recipients are fictional. Propose calls only; phone policy decides approval and execution.",
+      "expected_calls": [
+        {
+          "kind": "open_resource",
+          "account_id": "bench-account",
+          "device_id": "bench-laptop",
+          "resource_uri": "bench://schematic"
+        }
+      ]
+    },
+    {
+      "id": "delegate-002",
+      "prompt": "Ask the Codex session in the synthetic project on hwgeekom to do this exactly: Summarize the synthetic test plan.",
+      "context": "Synthetic registry: account_id=bench-account; hwgeekom device_id=bench-hwgeekom; hworker device_id=bench-hworker; laptop device_id=bench-laptop; project_id=bench-project; Codex session provider_session_id=bench-codex; task command_id=bench-task. All names, resources and recipients are fictional. Propose calls only; phone policy decides approval and execution.",
+      "expected_calls": [
+        {
+          "kind": "delegate_task",
+          "account_id": "bench-account",
+          "device_id": "bench-hwgeekom",
+          "project_id": "bench-project",
+          "provider_session_id": "bench-codex",
+          "instruction": "Summarize the synthetic test plan."
+        }
+      ]
+    },
+    {
+      "id": "cancel-002",
+      "prompt": "Stop the mock task.",
+      "context": "Synthetic registry: account_id=bench-account; hwgeekom device_id=bench-hwgeekom; hworker device_id=bench-hworker; laptop device_id=bench-laptop; project_id=bench-project; Codex session provider_session_id=bench-codex; task command_id=bench-task. All names, resources and recipients are fictional. Propose calls only; phone policy decides approval and execution.",
+      "expected_calls": [
+        {
+          "kind": "cancel_task",
+          "account_id": "bench-account",
+          "command_id": "bench-task"
+        }
+      ]
+    },
+    {
+      "id": "prepare_send-002",
+      "prompt": "Prepare a message on the laptop to the fictional character Mivra Tollen saying exactly: The sample diagram is attached.",
+      "context": "Synthetic registry: account_id=bench-account; hwgeekom device_id=bench-hwgeekom; hworker device_id=bench-hworker; laptop device_id=bench-laptop; project_id=bench-project; Codex session provider_session_id=bench-codex; task command_id=bench-task. All names, resources and recipients are fictional. Propose calls only; phone policy decides approval and execution.",
+      "expected_calls": [
+        {
+          "kind": "prepare_send",
+          "account_id": "bench-account",
+          "device_id": "bench-laptop",
+          "recipient": "Mivra Tollen",
+          "content": "The sample diagram is attached."
+        }
+      ]
+    },
+    {
+      "id": "select-003",
+      "prompt": "Choose the laptop for dictation.",
+      "context": "Synthetic registry: account_id=bench-account; hwgeekom device_id=bench-hwgeekom; hworker device_id=bench-hworker; laptop device_id=bench-laptop; project_id=bench-project; Codex session provider_session_id=bench-codex; task command_id=bench-task. All names, resources and recipients are fictional. Propose calls only; phone policy decides approval and execution.",
+      "expected_calls": [
+        {
+          "kind": "select_target",
+          "account_id": "bench-account",
+          "device_id": "bench-laptop"
+        }
+      ]
+    },
+    {
+      "id": "open-003",
+      "prompt": "Open the synthetic latency-chart resource on the laptop at bench://latency-chart.",
+      "context": "Synthetic registry: account_id=bench-account; hwgeekom device_id=bench-hwgeekom; hworker device_id=bench-hworker; laptop device_id=bench-laptop; project_id=bench-project; Codex session provider_session_id=bench-codex; task command_id=bench-task. All names, resources and recipients are fictional. Propose calls only; phone policy decides approval and execution.",
+      "expected_calls": [
+        {
+          "kind": "open_resource",
+          "account_id": "bench-account",
+          "device_id": "bench-laptop",
+          "resource_uri": "bench://latency-chart"
+        }
+      ]
+    },
+    {
+      "id": "delegate-003",
+      "prompt": "Ask the Codex session in the synthetic project on hwgeekom to do this exactly: Review the mock latency table.",
+      "context": "Synthetic registry: account_id=bench-account; hwgeekom device_id=bench-hwgeekom; hworker device_id=bench-hworker; laptop device_id=bench-laptop; project_id=bench-project; Codex session provider_session_id=bench-codex; task command_id=bench-task. All names, resources and recipients are fictional. Propose calls only; phone policy decides approval and execution.",
+      "expected_calls": [
+        {
+          "kind": "delegate_task",
+          "account_id": "bench-account",
+          "device_id": "bench-hwgeekom",
+          "project_id": "bench-project",
+          "provider_session_id": "bench-codex",
+          "instruction": "Review the mock latency table."
+        }
+      ]
+    },
+    {
+      "id": "cancel-003",
+      "prompt": "Cancel bench-task.",
+      "context": "Synthetic registry: account_id=bench-account; hwgeekom device_id=bench-hwgeekom; hworker device_id=bench-hworker; laptop device_id=bench-laptop; project_id=bench-project; Codex session provider_session_id=bench-codex; task command_id=bench-task. All names, resources and recipients are fictional. Propose calls only; phone policy decides approval and execution.",
+      "expected_calls": [
+        {
+          "kind": "cancel_task",
+          "account_id": "bench-account",
+          "command_id": "bench-task"
+        }
+      ]
+    },
+    {
+      "id": "prepare_send-003",
+      "prompt": "Prepare a message on the laptop to the fictional character Quenlo Saffin saying exactly: The fictional meeting is tomorrow.",
+      "context": "Synthetic registry: account_id=bench-account; hwgeekom device_id=bench-hwgeekom; hworker device_id=bench-hworker; laptop device_id=bench-laptop; project_id=bench-project; Codex session provider_session_id=bench-codex; task command_id=bench-task. All names, resources and recipients are fictional. Propose calls only; phone policy decides approval and execution.",
+      "expected_calls": [
+        {
+          "kind": "prepare_send",
+          "account_id": "bench-account",
+          "device_id": "bench-laptop",
+          "recipient": "Quenlo Saffin",
+          "content": "The fictional meeting is tomorrow."
+        }
+      ]
+    },
+    {
+      "id": "select-004",
+      "prompt": "Route my next words to hwgeekom.",
+      "context": "Synthetic registry: account_id=bench-account; hwgeekom device_id=bench-hwgeekom; hworker device_id=bench-hworker; laptop device_id=bench-laptop; project_id=bench-project; Codex session provider_session_id=bench-codex; task command_id=bench-task. All names, resources and recipients are fictional. Propose calls only; phone policy decides approval and execution.",
+      "expected_calls": [
+        {
+          "kind": "select_target",
+          "account_id": "bench-account",
+          "device_id": "bench-hwgeekom"
+        }
+      ]
+    },
+    {
+      "id": "open-004",
+      "prompt": "Open the synthetic capture-guide resource on the laptop at bench://capture-guide.",
+      "context": "Synthetic registry: account_id=bench-account; hwgeekom device_id=bench-hwgeekom; hworker device_id=bench-hworker; laptop device_id=bench-laptop; project_id=bench-project; Codex session provider_session_id=bench-codex; task command_id=bench-task. All names, resources and recipients are fictional. Propose calls only; phone policy decides approval and execution.",
+      "expected_calls": [
+        {
+          "kind": "open_resource",
+          "account_id": "bench-account",
+          "device_id": "bench-laptop",
+          "resource_uri": "bench://capture-guide"
+        }
+      ]
+    },
+    {
+      "id": "delegate-004",
+      "prompt": "Ask the Codex session in the synthetic project on hwgeekom to do this exactly: Explain the sample routing diagram.",
+      "context": "Synthetic registry: account_id=bench-account; hwgeekom device_id=bench-hwgeekom; hworker device_id=bench-hworker; laptop device_id=bench-laptop; project_id=bench-project; Codex session provider_session_id=bench-codex; task command_id=bench-task. All names, resources and recipients are fictional. Propose calls only; phone policy decides approval and execution.",
+      "expected_calls": [
+        {
+          "kind": "delegate_task",
+          "account_id": "bench-account",
+          "device_id": "bench-hwgeekom",
+          "project_id": "bench-project",
+          "provider_session_id": "bench-codex",
+          "instruction": "Explain the sample routing diagram."
+        }
+      ]
+    },
+    {
+      "id": "cancel-004",
+      "prompt": "Please cancel the task named bench-task.",
+      "context": "Synthetic registry: account_id=bench-account; hwgeekom device_id=bench-hwgeekom; hworker device_id=bench-hworker; laptop device_id=bench-laptop; project_id=bench-project; Codex session provider_session_id=bench-codex; task command_id=bench-task. All names, resources and recipients are fictional. Propose calls only; phone policy decides approval and execution.",
+      "expected_calls": [
+        {
+          "kind": "cancel_task",
+          "account_id": "bench-account",
+          "command_id": "bench-task"
+        }
+      ]
+    },
+    {
+      "id": "prepare_send-004",
+      "prompt": "Prepare a message on the laptop to the fictional character Dazri Pelwick saying exactly: The synthetic test is complete.",
+      "context": "Synthetic registry: account_id=bench-account; hwgeekom device_id=bench-hwgeekom; hworker device_id=bench-hworker; laptop device_id=bench-laptop; project_id=bench-project; Codex session provider_session_id=bench-codex; task command_id=bench-task. All names, resources and recipients are fictional. Propose calls only; phone policy decides approval and execution.",
+      "expected_calls": [
+        {
+          "kind": "prepare_send",
+          "account_id": "bench-account",
+          "device_id": "bench-laptop",
+          "recipient": "Dazri Pelwick",
+          "content": "The synthetic test is complete."
+        }
+      ]
+    },
+    {
+      "id": "select-005",
+      "prompt": "Make hworker the selected device.",
+      "context": "Synthetic registry: account_id=bench-account; hwgeekom device_id=bench-hwgeekom; hworker device_id=bench-hworker; laptop device_id=bench-laptop; project_id=bench-project; Codex session provider_session_id=bench-codex; task command_id=bench-task. All names, resources and recipients are fictional. Propose calls only; phone policy decides approval and execution.",
+      "expected_calls": [
+        {
+          "kind": "select_target",
+          "account_id": "bench-account",
+          "device_id": "bench-hworker"
+        }
+      ]
+    },
+    {
+      "id": "open-005",
+      "prompt": "Open the synthetic test-plan resource on the laptop at bench://test-plan.",
+      "context": "Synthetic registry: account_id=bench-account; hwgeekom device_id=bench-hwgeekom; hworker device_id=bench-hworker; laptop device_id=bench-laptop; project_id=bench-project; Codex session provider_session_id=bench-codex; task command_id=bench-task. All names, resources and recipients are fictional. Propose calls only; phone policy decides approval and execution.",
+      "expected_calls": [
+        {
+          "kind": "open_resource",
+          "account_id": "bench-account",
+          "device_id": "bench-laptop",
+          "resource_uri": "bench://test-plan"
+        }
+      ]
+    },
+    {
+      "id": "delegate-005",
+      "prompt": "Ask the Codex session in the synthetic project on hwgeekom to do this exactly: List the mock fixture dependencies.",
+      "context": "Synthetic registry: account_id=bench-account; hwgeekom device_id=bench-hwgeekom; hworker device_id=bench-hworker; laptop device_id=bench-laptop; project_id=bench-project; Codex session provider_session_id=bench-codex; task command_id=bench-task. All names, resources and recipients are fictional. Propose calls only; phone policy decides approval and execution.",
+      "expected_calls": [
+        {
+          "kind": "delegate_task",
+          "account_id": "bench-account",
+          "device_id": "bench-hwgeekom",
+          "project_id": "bench-project",
+          "provider_session_id": "bench-codex",
+          "instruction": "List the mock fixture dependencies."
+        }
+      ]
+    },
+    {
+      "id": "cancel-005",
+      "prompt": "Request cancellation of the synthetic task.",
+      "context": "Synthetic registry: account_id=bench-account; hwgeekom device_id=bench-hwgeekom; hworker device_id=bench-hworker; laptop device_id=bench-laptop; project_id=bench-project; Codex session provider_session_id=bench-codex; task command_id=bench-task. All names, resources and recipients are fictional. Propose calls only; phone policy decides approval and execution.",
+      "expected_calls": [
+        {
+          "kind": "cancel_task",
+          "account_id": "bench-account",
+          "command_id": "bench-task"
+        }
+      ]
+    },
+    {
+      "id": "prepare_send-005",
+      "prompt": "Prepare a message on the laptop to the fictional character Nerpo Valden saying exactly: The mock layout needs review.",
+      "context": "Synthetic registry: account_id=bench-account; hwgeekom device_id=bench-hwgeekom; hworker device_id=bench-hworker; laptop device_id=bench-laptop; project_id=bench-project; Codex session provider_session_id=bench-codex; task command_id=bench-task. All names, resources and recipients are fictional. Propose calls only; phone policy decides approval and execution.",
+      "expected_calls": [
+        {
+          "kind": "prepare_send",
+          "account_id": "bench-account",
+          "device_id": "bench-laptop",
+          "recipient": "Nerpo Valden",
+          "content": "The mock layout needs review."
+        }
+      ]
+    },
+    {
+      "id": "select-006",
+      "prompt": "Use the laptop as my current target.",
+      "context": "Synthetic registry: account_id=bench-account; hwgeekom device_id=bench-hwgeekom; hworker device_id=bench-hworker; laptop device_id=bench-laptop; project_id=bench-project; Codex session provider_session_id=bench-codex; task command_id=bench-task. All names, resources and recipients are fictional. Propose calls only; phone policy decides approval and execution.",
+      "expected_calls": [
+        {
+          "kind": "select_target",
+          "account_id": "bench-account",
+          "device_id": "bench-laptop"
+        }
+      ]
+    },
+    {
+      "id": "open-006",
+      "prompt": "Open the synthetic board-view resource on the laptop at bench://board-view.",
+      "context": "Synthetic registry: account_id=bench-account; hwgeekom device_id=bench-hwgeekom; hworker device_id=bench-hworker; laptop device_id=bench-laptop; project_id=bench-project; Codex session provider_session_id=bench-codex; task command_id=bench-task. All names, resources and recipients are fictional. Propose calls only; phone policy decides approval and execution.",
+      "expected_calls": [
+        {
+          "kind": "open_resource",
+          "account_id": "bench-account",
+          "device_id": "bench-laptop",
+          "resource_uri": "bench://board-view"
+        }
+      ]
+    },
+    {
+      "id": "delegate-006",
+      "prompt": "Ask the Codex session in the synthetic project on hwgeekom to do this exactly: Check the synthetic packet example.",
+      "context": "Synthetic registry: account_id=bench-account; hwgeekom device_id=bench-hwgeekom; hworker device_id=bench-hworker; laptop device_id=bench-laptop; project_id=bench-project; Codex session provider_session_id=bench-codex; task command_id=bench-task. All names, resources and recipients are fictional. Propose calls only; phone policy decides approval and execution.",
+      "expected_calls": [
+        {
+          "kind": "delegate_task",
+          "account_id": "bench-account",
+          "device_id": "bench-hwgeekom",
+          "project_id": "bench-project",
+          "provider_session_id": "bench-codex",
+          "instruction": "Check the synthetic packet example."
+        }
+      ]
+    },
+    {
+      "id": "cancel-006",
+      "prompt": "Stop work on the mock task.",
+      "context": "Synthetic registry: account_id=bench-account; hwgeekom device_id=bench-hwgeekom; hworker device_id=bench-hworker; laptop device_id=bench-laptop; project_id=bench-project; Codex session provider_session_id=bench-codex; task command_id=bench-task. All names, resources and recipients are fictional. Propose calls only; phone policy decides approval and execution.",
+      "expected_calls": [
+        {
+          "kind": "cancel_task",
+          "account_id": "bench-account",
+          "command_id": "bench-task"
+        }
+      ]
+    },
+    {
+      "id": "prepare_send-006",
+      "prompt": "Prepare a message on the laptop to the fictional character Tivla Quorren saying exactly: The sample table is ready.",
+      "context": "Synthetic registry: account_id=bench-account; hwgeekom device_id=bench-hwgeekom; hworker device_id=bench-hworker; laptop device_id=bench-laptop; project_id=bench-project; Codex session provider_session_id=bench-codex; task command_id=bench-task. All names, resources and recipients are fictional. Propose calls only; phone policy decides approval and execution.",
+      "expected_calls": [
+        {
+          "kind": "prepare_send",
+          "account_id": "bench-account",
+          "device_id": "bench-laptop",
+          "recipient": "Tivla Quorren",
+          "content": "The sample table is ready."
+        }
+      ]
+    },
+    {
+      "id": "select-007",
+      "prompt": "Point dictation at hwgeekom.",
+      "context": "Synthetic registry: account_id=bench-account; hwgeekom device_id=bench-hwgeekom; hworker device_id=bench-hworker; laptop device_id=bench-laptop; project_id=bench-project; Codex session provider_session_id=bench-codex; task command_id=bench-task. All names, resources and recipients are fictional. Propose calls only; phone policy decides approval and execution.",
+      "expected_calls": [
+        {
+          "kind": "select_target",
+          "account_id": "bench-account",
+          "device_id": "bench-hwgeekom"
+        }
+      ]
+    },
+    {
+      "id": "open-007",
+      "prompt": "Open the synthetic release-notes resource on the laptop at bench://release-notes.",
+      "context": "Synthetic registry: account_id=bench-account; hwgeekom device_id=bench-hwgeekom; hworker device_id=bench-hworker; laptop device_id=bench-laptop; project_id=bench-project; Codex session provider_session_id=bench-codex; task command_id=bench-task. All names, resources and recipients are fictional. Propose calls only; phone policy decides approval and execution.",
+      "expected_calls": [
+        {
+          "kind": "open_resource",
+          "account_id": "bench-account",
+          "device_id": "bench-laptop",
+          "resource_uri": "bench://release-notes"
+        }
+      ]
+    },
+    {
+      "id": "delegate-007",
+      "prompt": "Ask the Codex session in the synthetic project on hwgeekom to do this exactly: Describe the sample board labels.",
+      "context": "Synthetic registry: account_id=bench-account; hwgeekom device_id=bench-hwgeekom; hworker device_id=bench-hworker; laptop device_id=bench-laptop; project_id=bench-project; Codex session provider_session_id=bench-codex; task command_id=bench-task. All names, resources and recipients are fictional. Propose calls only; phone policy decides approval and execution.",
+      "expected_calls": [
+        {
+          "kind": "delegate_task",
+          "account_id": "bench-account",
+          "device_id": "bench-hwgeekom",
+          "project_id": "bench-project",
+          "provider_session_id": "bench-codex",
+          "instruction": "Describe the sample board labels."
+        }
+      ]
+    },
+    {
+      "id": "cancel-007",
+      "prompt": "Cancel the current synthetic task.",
+      "context": "Synthetic registry: account_id=bench-account; hwgeekom device_id=bench-hwgeekom; hworker device_id=bench-hworker; laptop device_id=bench-laptop; project_id=bench-project; Codex session provider_session_id=bench-codex; task command_id=bench-task. All names, resources and recipients are fictional. Propose calls only; phone policy decides approval and execution.",
+      "expected_calls": [
+        {
+          "kind": "cancel_task",
+          "account_id": "bench-account",
+          "command_id": "bench-task"
+        }
+      ]
+    },
+    {
+      "id": "prepare_send-007",
+      "prompt": "Prepare a message on the laptop to the fictional character Fenzu Brallik saying exactly: The invented schedule has changed.",
+      "context": "Synthetic registry: account_id=bench-account; hwgeekom device_id=bench-hwgeekom; hworker device_id=bench-hworker; laptop device_id=bench-laptop; project_id=bench-project; Codex session provider_session_id=bench-codex; task command_id=bench-task. All names, resources and recipients are fictional. Propose calls only; phone policy decides approval and execution.",
+      "expected_calls": [
+        {
+          "kind": "prepare_send",
+          "account_id": "bench-account",
+          "device_id": "bench-laptop",
+          "recipient": "Fenzu Brallik",
+          "content": "The invented schedule has changed."
+        }
+      ]
+    },
+    {
+      "id": "select-008",
+      "prompt": "Change the destination to hworker.",
+      "context": "Synthetic registry: account_id=bench-account; hwgeekom device_id=bench-hwgeekom; hworker device_id=bench-hworker; laptop device_id=bench-laptop; project_id=bench-project; Codex session provider_session_id=bench-codex; task command_id=bench-task. All names, resources and recipients are fictional. Propose calls only; phone policy decides approval and execution.",
+      "expected_calls": [
+        {
+          "kind": "select_target",
+          "account_id": "bench-account",
+          "device_id": "bench-hworker"
+        }
+      ]
+    },
+    {
+      "id": "open-008",
+      "prompt": "Open the synthetic bench-table resource on the laptop at bench://bench-table.",
+      "context": "Synthetic registry: account_id=bench-account; hwgeekom device_id=bench-hwgeekom; hworker device_id=bench-hworker; laptop device_id=bench-laptop; project_id=bench-project; Codex session provider_session_id=bench-codex; task command_id=bench-task. All names, resources and recipients are fictional. Propose calls only; phone policy decides approval and execution.",
+      "expected_calls": [
+        {
+          "kind": "open_resource",
+          "account_id": "bench-account",
+          "device_id": "bench-laptop",
+          "resource_uri": "bench://bench-table"
+        }
+      ]
+    },
+    {
+      "id": "delegate-008",
+      "prompt": "Ask the Codex session in the synthetic project on hwgeekom to do this exactly: Compare the mock microphone placements.",
+      "context": "Synthetic registry: account_id=bench-account; hwgeekom device_id=bench-hwgeekom; hworker device_id=bench-hworker; laptop device_id=bench-laptop; project_id=bench-project; Codex session provider_session_id=bench-codex; task command_id=bench-task. All names, resources and recipients are fictional. Propose calls only; phone policy decides approval and execution.",
+      "expected_calls": [
+        {
+          "kind": "delegate_task",
+          "account_id": "bench-account",
+          "device_id": "bench-hwgeekom",
+          "project_id": "bench-project",
+          "provider_session_id": "bench-codex",
+          "instruction": "Compare the mock microphone placements."
+        }
+      ]
+    },
+    {
+      "id": "cancel-008",
+      "prompt": "Ask to cancel bench-task now.",
+      "context": "Synthetic registry: account_id=bench-account; hwgeekom device_id=bench-hwgeekom; hworker device_id=bench-hworker; laptop device_id=bench-laptop; project_id=bench-project; Codex session provider_session_id=bench-codex; task command_id=bench-task. All names, resources and recipients are fictional. Propose calls only; phone policy decides approval and execution.",
+      "expected_calls": [
+        {
+          "kind": "cancel_task",
+          "account_id": "bench-account",
+          "command_id": "bench-task"
+        }
+      ]
+    },
+    {
+      "id": "prepare_send-008",
+      "prompt": "Prepare a message on the laptop to the fictional character Wexra Nollin saying exactly: The mock fixture is idle.",
+      "context": "Synthetic registry: account_id=bench-account; hwgeekom device_id=bench-hwgeekom; hworker device_id=bench-hworker; laptop device_id=bench-laptop; project_id=bench-project; Codex session provider_session_id=bench-codex; task command_id=bench-task. All names, resources and recipients are fictional. Propose calls only; phone policy decides approval and execution.",
+      "expected_calls": [
+        {
+          "kind": "prepare_send",
+          "account_id": "bench-account",
+          "device_id": "bench-laptop",
+          "recipient": "Wexra Nollin",
+          "content": "The mock fixture is idle."
+        }
+      ]
+    },
+    {
+      "id": "select-009",
+      "prompt": "Set the active receiver to the laptop.",
+      "context": "Synthetic registry: account_id=bench-account; hwgeekom device_id=bench-hwgeekom; hworker device_id=bench-hworker; laptop device_id=bench-laptop; project_id=bench-project; Codex session provider_session_id=bench-codex; task command_id=bench-task. All names, resources and recipients are fictional. Propose calls only; phone policy decides approval and execution.",
+      "expected_calls": [
+        {
+          "kind": "select_target",
+          "account_id": "bench-account",
+          "device_id": "bench-laptop"
+        }
+      ]
+    },
+    {
+      "id": "open-009",
+      "prompt": "Open the synthetic routing-map resource on the laptop at bench://routing-map.",
+      "context": "Synthetic registry: account_id=bench-account; hwgeekom device_id=bench-hwgeekom; hworker device_id=bench-hworker; laptop device_id=bench-laptop; project_id=bench-project; Codex session provider_session_id=bench-codex; task command_id=bench-task. All names, resources and recipients are fictional. Propose calls only; phone policy decides approval and execution.",
+      "expected_calls": [
+        {
+          "kind": "open_resource",
+          "account_id": "bench-account",
+          "device_id": "bench-laptop",
+          "resource_uri": "bench://routing-map"
+        }
+      ]
+    },
+    {
+      "id": "delegate-009",
+      "prompt": "Ask the Codex session in the synthetic project on hwgeekom to do this exactly: Summarize the invented failure log.",
+      "context": "Synthetic registry: account_id=bench-account; hwgeekom device_id=bench-hwgeekom; hworker device_id=bench-hworker; laptop device_id=bench-laptop; project_id=bench-project; Codex session provider_session_id=bench-codex; task command_id=bench-task. All names, resources and recipients are fictional. Propose calls only; phone policy decides approval and execution.",
+      "expected_calls": [
+        {
+          "kind": "delegate_task",
+          "account_id": "bench-account",
+          "device_id": "bench-hwgeekom",
+          "project_id": "bench-project",
+          "provider_session_id": "bench-codex",
+          "instruction": "Summarize the invented failure log."
+        }
+      ]
+    },
+    {
+      "id": "cancel-009",
+      "prompt": "End the mock task by requesting cancellation.",
+      "context": "Synthetic registry: account_id=bench-account; hwgeekom device_id=bench-hwgeekom; hworker device_id=bench-hworker; laptop device_id=bench-laptop; project_id=bench-project; Codex session provider_session_id=bench-codex; task command_id=bench-task. All names, resources and recipients are fictional. Propose calls only; phone policy decides approval and execution.",
+      "expected_calls": [
+        {
+          "kind": "cancel_task",
+          "account_id": "bench-account",
+          "command_id": "bench-task"
+        }
+      ]
+    },
+    {
+      "id": "prepare_send-009",
+      "prompt": "Prepare a message on the laptop to the fictional character Jorvi Tazlen saying exactly: The sample notes are available.",
+      "context": "Synthetic registry: account_id=bench-account; hwgeekom device_id=bench-hwgeekom; hworker device_id=bench-hworker; laptop device_id=bench-laptop; project_id=bench-project; Codex session provider_session_id=bench-codex; task command_id=bench-task. All names, resources and recipients are fictional. Propose calls only; phone policy decides approval and execution.",
+      "expected_calls": [
+        {
+          "kind": "prepare_send",
+          "account_id": "bench-account",
+          "device_id": "bench-laptop",
+          "recipient": "Jorvi Tazlen",
+          "content": "The sample notes are available."
+        }
+      ]
+    },
+    {
+      "id": "select-010",
+      "prompt": "Choose hwgeekom again.",
+      "context": "Synthetic registry: account_id=bench-account; hwgeekom device_id=bench-hwgeekom; hworker device_id=bench-hworker; laptop device_id=bench-laptop; project_id=bench-project; Codex session provider_session_id=bench-codex; task command_id=bench-task. All names, resources and recipients are fictional. Propose calls only; phone policy decides approval and execution.",
+      "expected_calls": [
+        {
+          "kind": "select_target",
+          "account_id": "bench-account",
+          "device_id": "bench-hwgeekom"
+        }
+      ]
+    },
+    {
+      "id": "open-010",
+      "prompt": "Open the synthetic fixture-guide resource on the laptop at bench://fixture-guide.",
+      "context": "Synthetic registry: account_id=bench-account; hwgeekom device_id=bench-hwgeekom; hworker device_id=bench-hworker; laptop device_id=bench-laptop; project_id=bench-project; Codex session provider_session_id=bench-codex; task command_id=bench-task. All names, resources and recipients are fictional. Propose calls only; phone policy decides approval and execution.",
+      "expected_calls": [
+        {
+          "kind": "open_resource",
+          "account_id": "bench-account",
+          "device_id": "bench-laptop",
+          "resource_uri": "bench://fixture-guide"
+        }
+      ]
+    },
+    {
+      "id": "delegate-010",
+      "prompt": "Ask the Codex session in the synthetic project on hwgeekom to do this exactly: Review the sample README links.",
+      "context": "Synthetic registry: account_id=bench-account; hwgeekom device_id=bench-hwgeekom; hworker device_id=bench-hworker; laptop device_id=bench-laptop; project_id=bench-project; Codex session provider_session_id=bench-codex; task command_id=bench-task. All names, resources and recipients are fictional. Propose calls only; phone policy decides approval and execution.",
+      "expected_calls": [
+        {
+          "kind": "delegate_task",
+          "account_id": "bench-account",
+          "device_id": "bench-hwgeekom",
+          "project_id": "bench-project",
+          "provider_session_id": "bench-codex",
+          "instruction": "Review the sample README links."
+        }
+      ]
+    },
+    {
+      "id": "cancel-010",
+      "prompt": "Cancel the synthetic task again.",
+      "context": "Synthetic registry: account_id=bench-account; hwgeekom device_id=bench-hwgeekom; hworker device_id=bench-hworker; laptop device_id=bench-laptop; project_id=bench-project; Codex session provider_session_id=bench-codex; task command_id=bench-task. All names, resources and recipients are fictional. Propose calls only; phone policy decides approval and execution.",
+      "expected_calls": [
+        {
+          "kind": "cancel_task",
+          "account_id": "bench-account",
+          "command_id": "bench-task"
+        }
+      ]
+    },
+    {
+      "id": "prepare_send-010",
+      "prompt": "Prepare a message on the laptop to the fictional character Pelmio Farren saying exactly: The synthetic draft is ready.",
+      "context": "Synthetic registry: account_id=bench-account; hwgeekom device_id=bench-hwgeekom; hworker device_id=bench-hworker; laptop device_id=bench-laptop; project_id=bench-project; Codex session provider_session_id=bench-codex; task command_id=bench-task. All names, resources and recipients are fictional. Propose calls only; phone policy decides approval and execution.",
+      "expected_calls": [
+        {
+          "kind": "prepare_send",
+          "account_id": "bench-account",
+          "device_id": "bench-laptop",
+          "recipient": "Pelmio Farren",
+          "content": "The synthetic draft is ready."
+        }
+      ]
+    }
+  ]
+}
