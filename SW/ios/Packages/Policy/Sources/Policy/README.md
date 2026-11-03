@@ -8,7 +8,7 @@ flowchart LR
 
 | File | Content | Status |
 |---|---|---|
-| [PolicyGate.swift](PolicyGate.swift) | Risk floors, bounded grants, durable revocation/dismissal, reconnect cancellation, payload-bound approval | ✅ Linux tests |
+| [PolicyGate.swift](PolicyGate.swift) | Risk floors, bounded grants, durable revocation/dismissal, reconnect cancellation, payload-bound approval + live routing-permit verification | ✅ Linux tests |
 | [Biometric.swift](Biometric.swift) | Challenge protocol and thin conditional Apple adapter | ✅ Fake tested; Apple **unverified** |
 | [Audit.swift](Audit.swift) | Hash chain, exclusive append/sync journal, independent checkpoint + durable append intent, archive-age config | ✅ Linux file and corruption tests |
 | [AuditRecovery.swift](AuditRecovery.swift) | Authenticated crash/clock recovery; preserves original bytes and audits repair | ✅ Linux fault-injection tests |
