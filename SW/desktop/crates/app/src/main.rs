@@ -1,3 +1,4 @@
+#![cfg_attr(all(windows, feature = "tray"), windows_subsystem = "windows")]
 use anyhow::{Result, bail, ensure};
 use clap::{Parser, Subcommand};
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
@@ -11,6 +12,8 @@ use voiceremote_core::{
     storage::{FileKeyStore, Identity, KeyStore, ReceiverLease, Registry},
     transport::{RelayRoute, Transport},
 };
+#[path = "../../tray/src/control.rs"]
+mod control;
 #[cfg(any(windows, target_os = "linux", test))]
 mod desktop_receiver;
 #[cfg(any(windows, target_os = "linux", test))]
@@ -293,11 +296,22 @@ async fn main() -> Result<()> {
         .with_writer(std::io::stderr)
         .try_init();
     if matches!(cli.command, Command::Dictate { .. }) {
-        println!("dictate toggle: stub; phone capture control is not connected");
+        control::send(&cli.state_dir).await?;
+        println!("Capture request sent; phone confirmation pending");
         return Ok(());
     }
     let _lease = if !matches!(cli.command, Command::Devices | Command::Revoke { .. }) {
         Some(ReceiverLease::acquire(&cli.state_dir)?)
+    } else {
+        None
+    };
+    let _control_task = if matches!(cli.command, Command::Pair { .. } | Command::Run { .. }) {
+        let root = cli.state_dir.clone();
+        Some(tokio::spawn(async move {
+            if control::serve(&root, control::hub().clone()).await.is_err() {
+                eprintln!("Local hotkey control unavailable");
+            }
+        }))
     } else {
         None
     };

@@ -5,7 +5,10 @@ flowchart LR
     Phone <-->|relay WSS| Transport
     Transport <--> Core
     Schema[SYS/protocol] --> Protocol[generated protocol crate] --> Core
+    Tray[tray: Voice Receiver / Tauri 2] --> Core
+    Tray --> Transport
     CLI[app: voiceremote] --> Core
+    CLI --> IPC[user-only socket / named pipe] --> Tray
     CLI --> Supervisor[bounded LAN / relay retry]
     CLI --> Auth[Ed25519 relay provisioning + challenges]
     Core --> Injector[TextInjector: Windows + Linux paste / Unicode]
@@ -18,11 +21,12 @@ flowchart LR
 | [crates/protocol/](crates/protocol/) | Generated strict JSON wire types/codecs | ✅ |
 | [Cargo.lock](Cargo.lock) | Binary workspace dependency lockfile; retained for the coordinator to commit | ✅ |
 | [crates/core/](crates/core/) | Checked-DH XX, dual confirmation, signed relay auth, bounded receiver, fragments, storage and injection boundary | ✅ synthetic tests; deployed interoperability unverified |
-| [crates/app/](crates/app/) | CLI `voiceremote`, headless receiver, QR renderer, Windows/Linux injection and shared focus wiring | ✅ synthetic tests; Windows runtime and tray pending |
+| [crates/tray/](crates/tray/) | Tauri 2 tray, rotating QR, dual phrase confirmation, roles/devices/revoke, autostart and fixed event log | 🟡 plain logic tested; native GUI/installer/phone unverified |
+| [crates/app/](crates/app/) | CLI `voiceremote`, headless receiver, QR renderer, Windows/Linux injection and shared focus wiring | ✅ synthetic tests; Windows runtime unverified; local toggle transport implemented |
 | [crates/inject-linux/](crates/inject-linux/) | X11 XTest / persistent Wayland portal/EIS; bounded clipboard restore and conservative focus | 🟡 synthetic tests; Xvfb CI and GNOME runtime unverified |
 | [crates/inject-windows/](crates/inject-windows/) | Windows clipboard/Unicode injection, UIA focus and owner checklist | 🟡 Linux policy tests; Windows runtime and Notepad/Chrome/Teams unverified |
 | [../../SYS/protocol/noise.md](../../SYS/protocol/noise.md) | Exact suite, prologues, confirmations, words and transport profile | ✅ published synthetic vectors |
-| [../../.github/workflows/desktop.yml](../../.github/workflows/desktop.yml) | Daily Ubuntu/Windows tests, `desktop-v*` / `desktop-ci-*` tags, manual dispatch | 🟡 remote CI unverified |
+| [../../.github/workflows/desktop.yml](../../.github/workflows/desktop.yml) | Daily Ubuntu/Windows tests and native tray installers, draft releases on guarded `desktop-v*` tags | 🟡 remote CI unverified |
 
 Start with `core/tests/security.rs` and the [Noise profile](../../SYS/protocol/noise.md).
 Trace: REQ-16, REQ-22–25, REQ-27, REQ-34, REQ-60/61. Tests prove synthetic
@@ -78,7 +82,7 @@ No trusted prior phone-key exchange is required. [Exact flow and limitations](..
 | Commands | Default receiver reserves commands without execution. Opt-in headless `--agents-config` attaches exact-session CLI adapters through paired Noise; see [agent nodes](#agent-nodes) for authority, lifetime and cancellation limits. Core `AgentAdapter` remains a marker extension trait. |
 | Relay gaps | The 2,105,344-byte offline queue is bounded; whole-room deletion and end-to-end fragment acknowledgement are absent. First pairing uses QR redemption with the phone’s own signing key. Failed Noise pairing best-effort revokes the invited phone membership so a fresh invitation can be issued. |
 | Timing / deployment | Compute pairing under one minute tested over loopback TCP and fake relay. Human time, home/external network, physical iPhone, mDNS on actual LAN, live TLS and Windows runtime **unverified**. |
-| UI | `dictate toggle` explicitly reports a stub. `tray` feature reserved; no Tauri dependency. |
+| UI | Optional `crates/tray` Tauri 2 shell; `dictate toggle` sends a user-only local capture request. The app crate’s `tray` feature suppresses its Windows console for installed hotkeys; ordinary headless builds have no GUI dependency. Native acceptance remains unverified. |
 
 ## Agent nodes
 
@@ -157,3 +161,52 @@ default to `MemoryMax=2G`, `CPUQuota=100%` (**TBC**). Logs contain no transcript
 provider CLI storage follows the provider's own retention policy. Service deployment
 and permission-setting behavior on the owner machine are **unverified**.
 [Actual local E2E](../../SYS/tests/e2e/README.md): `bash SYS/tests/e2e/run.sh` verifies the production Worker, real CLI and Swift phone over WS/TCP using the fixed synthetic injector feature.
+
+
+### Install and use Voice Receiver (unverified until desktop CI acceptance)
+
+Download the Windows NSIS `.exe` or Linux `.deb` / `.AppImage` from the
+coordinator’s draft GitHub Release (`desktop-v0.1.0`). Install with the desktop
+installer/package manager, launch **Voice Receiver**, and choose **Pair a phone**.
+Enter the account ID shown on your phone and a stable computer name. On local
+Wi-Fi, leave Relay blank; remote networks need your deployment’s relay origin.
+The installer includes `voiceremote` beside the GUI (deb: `/usr/bin`; Windows:
+per-user application install directory). Point OS hotkey tools at that executable
+with arguments `dictate toggle`; the tray receiver must be running. The bundled
+Windows hotkey helper suppresses its console to avoid taking input focus. The AppImage
+contains the CLI inside its image; prefer the deb for a stable hotkey path.
+Scan the QR, compare the four words on both displays, enter them here, and also
+confirm on the phone. Choose Text receiver, Agent or Both. Agent execution still
+requires the separately configured headless node; choosing a role grants no tools.
+Use **Revoke** beside an enrolled device to remove trust immediately. Close hides
+the window; **Quit Voice Receiver** in the tray stops it. Autostart is opt-in and
+uses the installed executable. Linux needs a desktop with an AppIndicator tray
+host (GNOME may need an extension); AppImage systems also need FUSE support.
+The deb requires normal package-manager authorization, without a terminal.
+
+The tray shows D/A for Dictation/AI Control plus a listening dot; unknown/offline
+phone state is shown explicitly. A brief flash and a click-through, nonfocusable
+overlay announce incoming text addressed to this computer. Destination is the last
+observed target here, not the phone’s entire target picker. `tray.log` in the state
+directory contains bounded fixed event names and timestamps, never text, keys,
+QR payloads, device names or errors. State defaults are shared with the CLI. Windows GUI builds use the existing OS
+keychain adapter; Linux uses the core’s private file store.
+
+| Boundary | Implementation / evidence |
+|---|---|
+| Build separation | `crates/tray` excluded from `default-members`; default library has no Tauri dependency. `cargo test --workspace` still runs plain tray tests. `gui` is explicit and native GUI builds run only in CI. |
+| Local hotkey | `voiceremote dictate toggle`: fixed bounded socket/pipe request, no TCP. Unix 0700 directory + 0600 socket + peer UID on both ends. Windows protected current-SID DACL, remote clients rejected, server SID checked. Exactly one live phone session and reported capture state required. |
+| Phone toggle | Sends the existing encrypted `CaptureStateReport` addressed to the phone with desired Off/Continuous. Success means sent, not accepted. No toggle-request schema or phone handler exists in this scope; actual capture transition is **unverified** and requires phone integration. |
+| QR rotation / short code | Core one-use two-minute QR rotates on expiry. The QR is removed at phrase confirmation. Eight hexadecimal characters are a display reference derived from the QR, **not an enrollment credential**. Camera-free redemption has no current protocol and remains **unimplemented**. |
+| Auto announcement | Current schema carries no explicit target-selection event. Flash is triggered by authenticated text addressed here; strict Auto-before-first-word timing is **unverified**. |
+| Windows signing | CI imports base64 PFX `WINDOWS_CERT` only when supplied, with `WINDOWS_CERT_PASSWORD`. Otherwise installers are unsigned and Windows SmartScreen may warn or block launch. Signing does not establish SmartScreen reputation. See [Tauri signing](https://v2.tauri.app/distribute/sign/windows/). |
+| Licensing | Original UI + Tauri 2 (MIT OR Apache-2.0); CI rejects GPL-only Cargo packages. Linux dynamically links GTK/WebKit and AppIndicator under their native LGPL terms; no GPL application code was reused. |
+| Release guard | Tag must equal `desktop-v` + workspace `Cargo.toml` version; Tauri config must match. Windows NSIS + Ubuntu 22.04 deb/AppImage attach to a **draft** release; `desktop-ci-*` keeps installers as workflow artifacts. |
+
+**Unverified:** coordinator’s `desktop-ci-*` native Windows/Linux run, installation,
+tray visibility, autostart, overlay focus on real desktops, Windows cross-user pipe
+access, phone state/toggle handling, LAN/external-network pairing and remote relay
+cleanup. Unit tests are synthetic evidence only (REQ-18/21–25/57).
+
+The workspace lockfile is outside this task’s ownership and remains unchanged.
+The coordinator needs to refresh `Cargo.lock` before committing the new crate.

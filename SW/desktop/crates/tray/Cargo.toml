@@ -1,0 +1,50 @@
+[package]
+name = "voiceremote-tray"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "voiceremote-tray"
+path = "src/main.rs"
+required-features = ["gui"]
+
+[features]
+default = []
+gui = ["dep:tauri", "dep:tauri-build", "dep:tauri-plugin-autostart", "os-keychain"]
+os-keychain = ["voiceremote-core/os-keychain"]
+
+[dependencies]
+anyhow = "1"
+async-trait = "0.1"
+base64 = "0.22"
+futures-util = { version = "0.3", features = ["sink"] }
+if-addrs = "0.13"
+mdns-sd = "0.13"
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+socket2 = { version = "0.6", features = ["all"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "io-util"] }
+tokio-tungstenite = { version = "0.28", features = ["rustls-tls-webpki-roots"] }
+voiceremote-core = { path = "../core" }
+tauri = { version = "2", optional = true, features = ["tray-icon"] }
+tauri-plugin-autostart = { version = "2", optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+voiceremote-inject-linux = { path = "../inject-linux" }
+
+[target.'cfg(windows)'.dependencies]
+voiceremote-inject-windows = { path = "../inject-windows" }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_System_Threading", "Win32_System_Memory", "Win32_System_Pipes"] }
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", features = ["process"] }
+
+[build-dependencies]
+tauri-build = { version = "2", optional = true }
+
+[dev-dependencies]
+tempfile = "3"
+zeroize = "1.8"

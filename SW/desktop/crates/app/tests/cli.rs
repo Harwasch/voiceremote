@@ -52,14 +52,54 @@ fn pair_requires_explicit_mode_and_rejects_conflicting_transports() {
     );
 }
 #[test]
-fn dictate_toggle_is_an_explicit_stub() {
-    let output = cli().args(["dictate", "toggle"]).output().unwrap();
-    assert!(output.status.success());
-    assert!(String::from_utf8(output.stdout).unwrap().contains("stub"));
+fn dictate_toggle_fails_without_a_running_receiver() {
+    let dir = tempfile::tempdir().unwrap();
+    let output = cli()
+        .arg("--state-dir")
+        .arg(dir.path().join("missing"))
+        .args(["dictate", "toggle"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("stub"));
+}
+#[cfg(unix)]
+#[tokio::test]
+async fn dictate_toggle_cli_sends_fixed_request_to_user_socket() -> anyhow::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::UnixListener,
+    };
+    let dir = tempfile::tempdir()?;
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700))?;
+    let socket = UnixListener::bind(dir.path().join("control.sock"))?;
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = socket.accept().await?;
+        let mut request = [0; 7];
+        stream.read_exact(&mut request).await?;
+        assert_eq!(&request, b"toggle\n");
+        stream.write_all(b"sent\n").await?;
+        Ok::<_, anyhow::Error>(())
+    });
+    let output = tokio::process::Command::new(env!("CARGO_BIN_EXE_voiceremote"))
+        .arg("--state-dir")
+        .arg(dir.path())
+        .args(["dictate", "toggle"])
+        .output()
+        .await?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("phone confirmation pending"));
+    server.await??;
+    Ok(())
 }
 
-/// Exercise the actual binary's stdin confirmation, persisted enrollment and
-/// remote revoke. Only synthetic keys in temporary Unix 0700/0600 storage.
+/// Exercise actual stdin confirmation, persisted enrollment and remote revoke.
+/// Only synthetic identities in temporary private storage.
 #[cfg(unix)]
 #[tokio::test]
 async fn cli_code_pair_requires_both_confirmations_then_remote_revoke_exits() -> anyhow::Result<()>
