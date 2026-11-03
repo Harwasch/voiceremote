@@ -105,7 +105,7 @@ private final class LANTransport: PairingTransport, @unchecked Sendable {
             clock: SystemPairingClock(), transport: transport)
         guard epoch == pairingEpoch else { await confirmation.abort(transport: transport); throw CancellationError() }
         self.confirmation = confirmation
-        return confirmation.phrase
+        return await confirmation.phrase
     }
     func confirm(_ phrase: String) async throws -> DeviceInfo {
         guard let confirmation, let transport = pendingTransport, let runtime else { throw PairingError.invalidState }

@@ -61,3 +61,10 @@ API references: [Activity lookup](https://developer.apple.com/documentation/acti
 [async updates](https://developer.apple.com/documentation/activitykit/activity/update(_:alertconfiguration:)),
 [Bluetooth delegate queue](https://developer.apple.com/documentation/corebluetooth/cbcentralmanager/init(delegate:queue:)),
 [serial camera session](https://developer.apple.com/documentation/avfoundation/avcapturesession).
+
+Compiler follow-up: settings-save failure assigns `self.error`; Pairing's public
+actor-owned confirmation phrase is read with `await`. All app Swift sources were
+reread for catch shadowing, isolation, throwing calls and unresolved package names;
+package declarations were checked for public visibility and exact signatures.
+Both reported diagnostics were reproduced before the fixes with Linux compiler
+probes against the real package types. Apple SDK compilation remains **unverified**.

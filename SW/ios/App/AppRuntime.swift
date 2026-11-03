@@ -150,7 +150,7 @@ import VoiceRemoteProtocol
         guard savedSettings != settings else { return }
         model.stop(); model.settingsChanged()
         do { try settingsStore.save(settings); savedSettings = settings }
-        catch { error = "Settings could not be saved. Cloud processing has stopped; check storage before restarting." }
+        catch { self.error = "Settings could not be saved. Cloud processing has stopped; check storage before restarting." }
     }
     func publish(_ text: DictationText) throws {
         guard let id = UUID(uuidString: text.segment_id) else { throw BridgeError.invalidText }
