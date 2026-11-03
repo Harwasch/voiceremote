@@ -42,13 +42,16 @@ func testDeadline<Value: Sendable>(seconds: Double = 20, file: StaticString = #f
     }
 }
 
+// DispatchSemaphore.wait is unavailable from async code on Apple platforms.
+private func blockUntilSignalled(_ gate: DispatchSemaphore) { gate.wait() }
+
 final class TestDeadlineTests: XCTestCase, @unchecked Sendable {
     func testCancellationIgnoringWaitStillHasADeadline() async throws {
         try await testDeadline {
         let gate = DispatchSemaphore(value: 0)
         defer { gate.signal() }
         do {
-            try await testDeadline(seconds: 0.01) { gate.wait() }
+            try await testDeadline(seconds: 0.01) { blockUntilSignalled(gate) }
             XCTFail("deadline did not fire")
         } catch is TestDeadlineError { }
 
