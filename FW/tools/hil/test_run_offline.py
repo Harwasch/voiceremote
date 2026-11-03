@@ -76,6 +76,12 @@ class World:
             self.capture = 0
         elif command == 'p':
             self.capture = 1
+        elif command == 'd' and self.session and self.capture == 1:
+            self.ptt = True
+            self.session.frames += 250
+        elif command == 'u' and self.session and self.ptt and self.capture == 1:
+            self.ptt = False
+            self.session.reports.append('segment=2 frames=250 gaps=0')
         elif command == 'u':
             self.ptt = False
         elif command == 'r':
