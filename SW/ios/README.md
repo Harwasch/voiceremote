@@ -3,6 +3,7 @@ flowchart LR
   SYS[SYS design + product definition] --> App[VoiceRemote · SwiftUI]
   App --> Core[Packages/Core] & Pairing[Packages/Pairing] & Stt[Packages/Stt] & Brain[Packages/Brain]
   Core & Pairing --> Protocol[Packages/Protocol]
+  Brain --> BrainApple[Packages/BrainApple adapters] & Protocol
   App --> Keyboard[KeyboardExt · UIKit] & Live[LiveActivity · WidgetKit]
   Group[App Group entitlement] --- App & Keyboard & Live
   Tests[VoiceRemoteTests] --> App
@@ -27,6 +28,9 @@ flowchart LR
 | [Packages/](Packages/README.md) | Brain skeleton; portable package map | 🟡 Feature implementations pending |
 | [Packages/Stt/](Packages/Stt/README.md) | Streaming engines, router, per-user vocabulary, guarded cleanup, A/B bench export, proxy clients ([REQ-9]–[REQ-12]) | ✅ Linux synthetic tests; live use **unverified** |
 | [Packages/SttApple/](Packages/SttApple/README.md) | SpeechAnalyzer, MIT WhisperKit small.en, optional licensed Argmax; debug picker ready for UI embedding | 🟡 Coordinator `ios-ci-*` build and device use **unverified** |
+| [Packages/Brain/](Packages/Brain/README.md) | Strict non-executable proposals, relay Claude client, router, incremental suggestion cards and benchmark hook | ✅ Synthetic Linux tests; live/UI/Policy integration **unverified** |
+| [Packages/BrainApple/](Packages/BrainApple/README.md) | Foundation Models + optional on-demand MLX adapters | 🟡 Apple CI/device behavior **unverified** |
+| [Packages/](Packages/README.md) | Portable package map; Stt skeleton | 🟡 Feature implementations pending |
 | [Tests/](Tests/README.md) | Hosted app unit test | 🟡 macOS test **unverified** |
 | [ci/](ci/README.md) | Tested release guard and simulator discovery | ✅ Linux helper tests |
 | [ios.yml](../../.github/workflows/ios.yml) | Unsigned simulator tests; optional TestFlight release | 🟡 GitHub run **unverified** |

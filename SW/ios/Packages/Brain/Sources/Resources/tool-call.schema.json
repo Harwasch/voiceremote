@@ -1,0 +1,161 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://voiceremote.invalid/tools/v1",
+  "title": "Model proposals, never execution authority",
+  "$ref": "#/$defs/ToolCall",
+  "$defs": {
+    "SelectTargetTool": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "select_target"
+        },
+        "account_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "device_id": {
+          "$ref": "#/$defs/Identifier"
+        }
+      },
+      "required": [
+        "kind",
+        "account_id",
+        "device_id"
+      ]
+    },
+    "OpenResourceTool": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "open_resource"
+        },
+        "account_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "device_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "resource_uri": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
+        }
+      },
+      "required": [
+        "kind",
+        "account_id",
+        "device_id",
+        "resource_uri"
+      ]
+    },
+    "DelegateTaskTool": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "delegate_task"
+        },
+        "account_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "device_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "project_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "provider_session_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "instruction": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16384
+        }
+      },
+      "required": [
+        "kind",
+        "account_id",
+        "device_id",
+        "project_id",
+        "instruction"
+      ]
+    },
+    "CancelTaskTool": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "cancel_task"
+        },
+        "account_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "command_id": {
+          "$ref": "#/$defs/Identifier"
+        }
+      },
+      "required": [
+        "kind",
+        "account_id",
+        "command_id"
+      ]
+    },
+    "PrepareSendTool": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "prepare_send"
+        },
+        "account_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "device_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "recipient": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "content": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16384
+        }
+      },
+      "required": [
+        "kind",
+        "account_id",
+        "device_id",
+        "recipient",
+        "content"
+      ]
+    },
+    "Identifier": {
+      "$ref": "https://voiceremote.invalid/protocol/v1#/$defs/Identifier"
+    },
+    "ToolCall": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/SelectTargetTool"
+        },
+        {
+          "$ref": "#/$defs/OpenResourceTool"
+        },
+        {
+          "$ref": "#/$defs/DelegateTaskTool"
+        },
+        {
+          "$ref": "#/$defs/CancelTaskTool"
+        },
+        {
+          "$ref": "#/$defs/PrepareSendTool"
+        }
+      ]
+    }
+  }
+}
