@@ -364,7 +364,7 @@ StopWatch RTC availability/accuracy/persistence is **unverified** and unused her
 | 12 | 8 | Capture start monotonic ms |
 | 20 | 8 | Estimated UTC start ms; 0 unknown |
 | 28 | 1 | Captured mode: 0 dictation, 1 AI |
-| 29 | 1 | Flags: bit 0 approximate time (always 1 in this draft); bit 1 interrupted by power loss, full or write failure; others zero |
+| 29 | 1 | Flags: bit 0 approximate time (always 1 in this draft); bit 1 interrupted by power loss, full or write failure, or corrupt (Fetch and Confirm then return status 5); others zero |
 | 30 | 4 | Exported stream bytes |
 | 34 | 4 | Complete frame count; duration = count × 20 ms |
 | 38 | 4 | CRC-32 of exported stream |
