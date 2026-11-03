@@ -23,7 +23,8 @@ import VoiceRemoteProtocol
     private var info: RemoteInfo?
     private var tracker = RemoteInputTracker()
     private var stateCharacteristic: CBCharacteristic?
-    private var inputSubscribed = false, audioSubscribed = false
+    private var inputSubscribed = false
+    private var audioSubscribed = false
     private var writes: [Data] = []
     private struct DisplayRequest {
         let id: UUID
