@@ -85,6 +85,10 @@ if text == 'wait-tree':
         state['pids'].append(child.pid)
         with open(scope,'w') as f: json.dump(state,f)
     with open('child.pid','w') as f: f.write(str(child.pid))
+    if os.path.exists('launcher-ready.sock'):
+        import socket
+        with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as ready:
+            ready.sendto(str(child.pid).encode(), 'launcher-ready.sock')
     while True: time.sleep(1)
 if text == 'timeout': time.sleep(60)
 if text == 'flood':
@@ -1731,6 +1735,7 @@ async fn cloud_launch_cancel_signals_launcher_and_crash_receipt_is_unknown() -> 
         let mut f = cloud_fixture(CloudProvider::Codex)?;
         f.config.timeout_ms = 10_000;
         let node = f.node()?;
+        let ready = tokio::net::UnixDatagram::bind(f.root.path().join("launcher-ready.sock"))?;
         let (mut p, mut pt, d, mut dt) = f.pair().await?;
         let (stop, rx) = watch::channel(false);
         let worker = node.clone();
@@ -1742,8 +1747,12 @@ async fn cloud_launch_cancel_signals_launcher_and_crash_receipt_is_unknown() -> 
             &InnerMessage::AuthorizedCommand(command("cloud-launch", "wait-tree")),
         )
         .await?;
-        wait_file(f.root.path().join("child.pid")).await;
-        let pid: i32 = fs::read_to_string(f.root.path().join("child.pid"))?.parse()?;
+        // The fake sends only after its escaped child is registered in the scope.
+        // File existence alone can precede writing/flushing the PID.
+        let mut pid_bytes = [0; 32];
+        let count =
+            tokio::time::timeout(Duration::from_secs(3), ready.recv(&mut pid_bytes)).await??;
+        let pid: i32 = std::str::from_utf8(&pid_bytes[..count])?.parse()?;
         let cancel_node = if restarted { f.node()? } else { node.clone() };
         let mut cancel = command("cancel-cloud-launch", "synthetic");
         cancel.immutable_task_payload = ToolCall::CancelTaskTool(CancelTaskTool {
@@ -1752,9 +1761,6 @@ async fn cloud_launch_cancel_signals_launcher_and_crash_receipt_is_unknown() -> 
             command_id: "cloud-launch".into(),
         });
         f.call(cancel_node.clone(), cancel).await?;
-        let process = cancel_node.recent_results().pop().unwrap().process.unwrap();
-        assert_eq!(process.finish, Finish::CancelUnsupported);
-        assert_eq!(process.cloud.unwrap().state, CloudState::Unknown);
         if !restarted {
             tokio::time::timeout(Duration::from_secs(3), async {
                 loop {
@@ -1771,6 +1777,25 @@ async fn cloud_launch_cancel_signals_launcher_and_crash_receipt_is_unknown() -> 
                 "cancel did not signal and stop the launcher tree"
             );
         }
+        // Force the launcher result to arrive before inspecting the cancel receipt.
+        // Both commands append results; completion order cannot identify a command.
+        let results = cancel_node.recent_results();
+        if !restarted {
+            assert_eq!(results.last().unwrap().status.command_id, "cloud-launch");
+        } else {
+            assert!(
+                process_alive(pid),
+                "a restarted node does not own the launcher"
+            );
+        }
+        let process = results
+            .into_iter()
+            .find(|result| result.status.command_id == "cancel-cloud-launch")
+            .expect("cancel receipt")
+            .process
+            .unwrap();
+        assert_eq!(process.finish, Finish::CancelUnsupported);
+        assert_eq!(process.cloud.unwrap().state, CloudState::Unknown);
         stop.send(true)?;
         server.await??;
     }

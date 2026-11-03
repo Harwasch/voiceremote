@@ -38,6 +38,11 @@ child liveness and confirmed/unconfirmed cleanup assertions are unchanged.
 Cross-review regressions reject Claude titles as IDs, missing/duplicate ID lines,
 and read-only cloud launches without explicit override. Active launch cancellation
 stops the local tree; persisted launch receipts remain unknown after restart.
+The cloud launch/cancel test receives an explicit Unix datagram after the escaped
+child joins the fake scope, then awaits the launcher's task status before looking
+up the cancel receipt by command ID. This forces the completion order that made
+`recent_results().pop()` select the launcher receipt instead of the cancel receipt;
+no startup sleeps or PID-file polling are used in that test.
 The argv/environment test launches an isolated copy of itself with synthetic
 secret variables populated, verifies those inputs exist, then checks their names
 are absent from both fake provider environments. No global test environment is changed.
