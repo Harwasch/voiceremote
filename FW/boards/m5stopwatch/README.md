@@ -40,3 +40,5 @@ Vendor uses 468 logical columns with x gap 6; this adapter exposes the requested
 466 with the same gap. Alignment, RGB order, touch orientation and scanout are
 **unverified** until flashed. Haptic is 20% PWM for 25 ms; perceived strength TBC.
 See [licences](../../licences/) for retained MIT notices.
+
+Reports `virtual_sliders=true`: the shared UI draws the Orb capture ring.

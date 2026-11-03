@@ -1,6 +1,6 @@
 #include "board.h"
 /* Build-only stub. Never advertises a functional display, buttons or Opus. */
-static const board_info_t info={2,240,280,0,false,false};
+static const board_info_t info={2,240,280,0,false,false,false};
 const board_info_t *board_info(void) { return &info; }
 esp_err_t board_init(void) { return ESP_OK; }
 esp_err_t board_flush(int x1,int y1,int x2,int y2,const void *p)

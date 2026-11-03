@@ -3,6 +3,7 @@
 ```mermaid
 flowchart LR
     M5[M5 vendor sequences / register definitions] --> MIT[MIT notices]
+    Lexend[Lexend SemiBold subsets] --> OFL[SIL OFL 1.1]
     LV[LVGL 9.5.0] --> MIT
     ESP[CO5300 2.2.0 / cmake_utilities 0.5.3] --> Apache[Apache-2.0]
 ```
@@ -12,6 +13,7 @@ flowchart LR
 | `M5Stack-MIT.txt` | Vendor UserDemo/PowerDemo board sequence adaptation | ✅ Header retained in `boards/m5stopwatch/board.c` |
 | `M5IOE1-MIT.txt`, `M5PM1-MIT.txt` | Referenced register definitions | ✅ Notices retained |
 | `LVGL-MIT.txt` | LVGL 9.5.0 code | ✅ Dependency licence checked |
+| `Lexend-OFL.txt` | Supplied Lexend SemiBold target/pairing subsets; generation in `app/fonts/` | ✅ OFL included |
 | `Montserrat-OFL.txt`, `FontAwesome5.txt` | Bundled font glyphs: SIL OFL 1.1 (FontAwesome notice includes CC BY 4.0 / MIT) | ✅ Upstream notices included |
 | `Espressif-Apache-2.0.txt` | CO5300 2.2.0 and cmake_utilities 0.5.3 | ✅ Dependency licences checked |
 

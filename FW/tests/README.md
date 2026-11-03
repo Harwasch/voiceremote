@@ -13,7 +13,7 @@ flowchart LR
 |---|---|---|
 | `run.sh` | Single root-runnable host command | ✅ Reproducible |
 | `CMakeLists.txt` | Plain native C, warnings as errors, assertions enabled; Python ≥3.12 | ✅ No IDF/board needed |
-| `test.c` | I, E0–E5, P, A0–A2 round trips; malformed UTF-8/flags/enums/lengths, all split offsets, overflow, atomicity, transaction/input wrap, arm/OFF, debounce, layout | ✅ Host tested |
+| `test.c` | I, E0–E5, P, A0–A2 round trips; malformed UTF-8/flags/enums/lengths, all split offsets, overflow, atomicity, transaction/input wrap, arm/OFF, debounce, scaled Orb sectors/disc/target/modals/dead zones, listening truth table, UTF-8 fallback | ✅ Host tested |
 | `../tools/ble_client/test_wire.py` | Independent synthetic Python wire fixtures | ✅ Host tested |
 
 Run from repository root, exactly:
@@ -25,3 +25,6 @@ heavy bash FW/tests/run.sh
 [REQ-8], [REQ-18], [REQ-49–53] traceability only: these tests prove pure logic,
 not GPIO timing, BLE stack behavior, physical display visibility or safety.
 Audio examples test framing only; no audio implementation or codec is present.
+
+The actual LVGL interaction/display-barrier and pulse-bound checks run with
+`heavy bash FW/tools/ui_preview/run.sh`; see [the preview](../tools/ui_preview/README.md).

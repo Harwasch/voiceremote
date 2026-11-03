@@ -223,12 +223,50 @@ static void debounce(void)
 }
 static void layout(void)
 {
-    vr_layout_t r=vr_layout(466,466,true);
-    CHECK(r.row>=30 && r.x>0 && r.y>0 && r.y+9*r.row<=466-r.y);
-    int dx=2*r.x-466,dy=2*r.y-466;
-    CHECK(dx*dx+dy*dy<466*466); /* outer corner within round panel */
-    r=vr_layout(240,280,false);
-    CHECK(r.width==224 && r.row>=28 && r.x+r.width<=240 && r.y+9*r.row<=280);
+    vr_layout_t r=vr_layout(466,466,true,true);
+    CHECK(r.scale==1 && r.cx==233 && r.radius==112);
+    CHECK(vr_ui_hit(&r,233,233,false)==VR_HIT_ORB);
+    CHECK(vr_ui_hit(&r,345,233,false)==VR_HIT_ORB);
+    CHECK(vr_ui_hit(&r,346,233,false)==VR_HIT_REC);
+    CHECK(vr_ui_hit(&r,50,233,false)==VR_HIT_OFF);
+    CHECK(vr_ui_hit(&r,2,233,false)==VR_HIT_OFF); /* sector to screen edge */
+    CHECK(vr_ui_hit(&r,233,2,false)==VR_HIT_PTT);
+    CHECK(vr_ui_hit(&r,464,233,false)==VR_HIT_REC);
+    CHECK(vr_ui_hit(&r,233,100,false)==VR_HIT_PTT); /* inward of stroke */
+    CHECK(vr_ui_hit(&r,233,407,false)==VR_HIT_TARGET);
+    CHECK(vr_ui_hit(&r,0,0,false)==VR_HIT_NONE);
+    CHECK(vr_ui_hit(&r,233,465,false)==VR_HIT_NONE);
+    CHECK(vr_ui_hit(&r,233,370,false)==VR_HIT_NONE); /* pips */
+    CHECK(vr_ui_hit(&r,233,299,true)==VR_HIT_NONE);
+    CHECK(vr_ui_hit(&r,152,364,true)==VR_HIT_CANCEL);
+    CHECK(vr_ui_hit(&r,314,364,true)==VR_HIT_CONFIRM);
+    CHECK(vr_ui_hit(&r,233,364,true)==VR_HIT_NONE);
+    CHECK(vr_ui_hit(&r,30,450,true)==VR_HIT_NONE); /* outside circle */
+    const int angles[]={-140,-117,-115,-83,-51,-49,-30,-28,0,28,30,49,51,83,115,117,140};
+    const vr_hit_t hits[]={VR_HIT_NONE,VR_HIT_NONE,VR_HIT_OFF,VR_HIT_OFF,VR_HIT_OFF,VR_HIT_NONE,
+        VR_HIT_NONE,VR_HIT_PTT,VR_HIT_PTT,VR_HIT_PTT,VR_HIT_NONE,VR_HIT_NONE,
+        VR_HIT_REC,VR_HIT_REC,VR_HIT_REC,VR_HIT_NONE,VR_HIT_NONE};
+    for(unsigned i=0;i<sizeof angles/sizeof angles[0];i++) {
+        float a=angles[i]*3.14159265358979323846f/180;
+        CHECK(vr_ui_hit(&r,lroundf(233+180*sinf(a)),lroundf(233-180*cosf(a)),false)==hits[i]);
+    }
+    r=vr_layout(240,280,false,false);
+    CHECK(r.scale==1 && r.cx==120 && r.cy==112 && r.radius==84);
+    CHECK(vr_ui_hit(&r,120,112,false)==VR_HIT_ORB);
+    CHECK(vr_ui_hit(&r,120,10,false)==VR_HIT_NONE); /* no virtual sliders */
+    CHECK(vr_ui_hit(&r,120,264,false)==VR_HIT_TARGET);
+    CHECK(vr_ui_hit(&r,50,222,true)==VR_HIT_CANCEL);
+    CHECK(vr_ui_hit(&r,190,222,true)==VR_HIT_CONFIRM);
+    CHECK(vr_ui_hit(&r,240,222,true)==VR_HIT_NONE);
+    CHECK(vr_ui_hit(&r,-1,222,true)==VR_HIT_NONE);
+    r=vr_layout(932,932,true,true);
+    CHECK(r.scale==2 && vr_ui_hit(&r,466,466,false)==VR_HIT_ORB);
+    CHECK(vr_ui_hit(&r,466,814,false)==VR_HIT_TARGET);
+    for(unsigned link=0;link<2;link++) for(unsigned cap=0;cap<3;cap++) for(unsigned held=0;held<2;held++)
+        CHECK(vr_ui_stage1_listening(link,cap,held)==(bool)(link && (cap==2 || (cap==1 && held))));
+    CHECK(!vr_ui_stage1_listening(true,3,true));
+    char ascii[32]; vr_ui_ascii(ascii,sizeof ascii,"Caf\xc3\xa9 \xf0\x9f\x92\xbb"); CHECK(!strcmp(ascii,"Caf? ?"));
+    vr_ui_ascii(ascii,4,"Desktop"); CHECK(!strcmp(ascii,"Des"));
 }
 int main(void)
 {

@@ -16,3 +16,5 @@ Start with the C6 build command in [FW/README](../../README.md).
 The BLE service compiles, but enrollment and display-barrier writes are disabled.
 Version/info reports screen dimensions zero because screen capability is absent;
 240 × 280 is layout metadata only. No [REQ-49–53] compliance claim.
+
+Reports `virtual_sliders=false`: the shared UI uses the 240×280 orb/pips/target layout without a capture ring; this does not add physical slider drivers.

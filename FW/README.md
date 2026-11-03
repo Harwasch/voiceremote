@@ -15,6 +15,7 @@ flowchart LR
 | [app/](app/) | Shared control firmware; Audio exists but never notifies | 🟡 Hardware unverified |
 | [boards/](boards/) | StopWatch driver and compiling C6 stub | 🟡 Hardware unverified |
 | [tests/](tests/) | Pure C logic and Python wire tests; no board/adapter | ✅ Host verified |
+| [tools/ui_preview/](tools/ui_preview/) | Real UI, native LVGL renderer, twelve masked PNG fixtures | ✅ Host verified |
 | [tools/ble_client/](tools/ble_client/) | uv/Bleak Linux client with Numeric Comparison agent | 🟡 Adapter unverified |
 | [licences/](licences/) | Reused MIT notices and dependency licences | ✅ Included; coordinator relocates |
 | `dependencies.lock.*` | Separate pinned dependency graph per board | ✅ Offline resolved |
@@ -23,7 +24,7 @@ flowchart LR
 Start with [the contract](../SYS/protocol/remote-ble.md), then [handoff](handoff.md).
 Traces to [REQ-8], [REQ-18], [REQ-49–53]; no claim of hardware compliance.
 Required Opus capability conflicts with stage 1: bit 0 is **clear**, maximum
-packet field reserves 512; screen explicitly identifies this as stage 1.
+packet field reserves 512. The Orb screen intentionally has no stage/status text.
 A strict full-v1 phone must refuse capture. No microphone, codec or Opus initialization.
 
 Host tests, from the repository root (CMake, C compiler, Python ≥3.12):
@@ -31,6 +32,17 @@ Host tests, from the repository root (CMake, C compiler, Python ≥3.12):
 ```sh
 heavy bash FW/tests/run.sh
 ```
+
+Render all twelve UI states from the repository root:
+
+```sh
+heavy bash FW/tools/ui_preview/run.sh
+```
+
+![Orb UI](build-preview/ptt-armed.png)
+
+The preview includes synthetic touch/display-barrier checks. See
+[app](app/README.md) for stage-1 listening semantics and font fallback.
 
 Build from the repository root, using ESP-IDF **5.5.6**:
 

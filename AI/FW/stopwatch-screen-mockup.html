@@ -1,0 +1,203 @@
+<title>Stopwatch Screen</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lexend:wght@400;600&display=swap">
+<style>
+/* Layout: one real-scale device in the middle of a quiet page; colour on the device means state and nothing else. */
+:root {
+  --page: #15181c; --panel: #23272d; --ink: #eef1f4; --dim: #9aa2ac; --line: #3a4048;
+  --type: Lexend, system-ui, sans-serif;
+  color-scheme: dark;
+}
+body { background: var(--page); color: var(--ink); font-family: var(--type); font-size: 16px; line-height: 1.45; }
+.wrap { max-width: 860px; margin: 0 auto; padding-block: 28px 48px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: grid; gap: 22px; }
+h1 { font-size: 26px; font-weight: 600; margin: 0; text-wrap: balance; }
+p { margin: 0; color: var(--dim); max-width: 62ch; }
+.seg { display: inline-flex; background: var(--panel); border-radius: 999px; padding: 4px; gap: 4px; }
+button { font: inherit; color: inherit; border: 0; background: none; cursor: pointer; }
+.seg button { padding: 8px 18px; border-radius: 999px; color: var(--dim); }
+.seg button[aria-pressed="true"] { background: var(--ink); color: #000; }
+button:focus-visible { outline: 3px solid #6fe3ff; outline-offset: 2px; }
+.stage { display: flex; flex-wrap: wrap; gap: 32px; align-items: center; justify-content: center; }
+.col { display: grid; gap: 16px; justify-items: center; min-width: 0; }
+.bezel { width: min(100%, 466px); aspect-ratio: 1; max-width: 100%; border-radius: 50%; padding: 12px; background: #2d3137; box-sizing: border-box; transition: width .2s; touch-action: none; }
+.bezel.real { width: 192px; padding: 12px; }
+.bezel svg { display: block; width: 100%; height: 100%; border-radius: 50%; background: #000; user-select: none; -webkit-user-select: none; }
+.side { width: 150px; }
+.rect { width: 150px; aspect-ratio: 240/280; border-radius: 22px; padding: 8px; background: #2d3137; box-sizing: content-box; }
+.rect svg { display: block; width: 100%; height: 100%; border-radius: 16px; background: #000; }
+.cap { font-size: 14px; color: var(--dim); text-align: center; }
+.keys { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; }
+.key { display: inline-flex; align-items: center; gap: 10px; padding: 8px 18px 8px 8px; border-radius: 999px; background: var(--panel); touch-action: none; }
+.key i { width: 32px; height: 32px; border-radius: 50%; display: block; }
+.key.y i { background: #ffd60a; } .key.b i { background: #2f8bff; }
+.key.down { outline: 2px solid var(--ink); }
+.tools { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+.tool { padding: 7px 14px; border-radius: 999px; border: 1px solid var(--line); color: var(--dim); font-size: 14px; }
+.tool[aria-pressed="true"] { color: var(--ink); border-color: var(--ink); }
+.pulse { transform-box: fill-box; transform-origin: center; animation: pulse 1.4s ease-out infinite; }
+.pulse.b2 { animation-delay: .7s; }
+@keyframes pulse { from { transform: scale(1); opacity: .7; } to { transform: scale(1.3); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .pulse { animation: none; opacity: .35; } .bezel { transition: none; } }
+[data-a] { cursor: pointer; }
+</style>
+
+<div class="wrap">
+  <header style="display:grid;gap:8px">
+    <h1>Two ideas for the Stopwatch screen</h1>
+    <p>Both work by touch, so try them. The yellow and blue buttons below act like the real ones, and holding yellow means you're talking.</p>
+  </header>
+  <div class="seg" role="group" aria-label="Design" style="justify-self:center">
+    <button id="pickA" aria-pressed="true">Orb (my pick)</button>
+    <button id="pickB" aria-pressed="false">Two sliders</button>
+  </div>
+  <div class="stage">
+    <div class="col">
+      <div class="bezel" id="bezel"><svg id="s" viewBox="0 0 466 466" role="img" aria-label="Stopwatch screen mockup"></svg></div>
+      <div class="keys">
+        <button class="key y" id="ptt"><i></i>Hold to talk</button>
+        <button class="key b" id="next"><i></i>Next target</button>
+      </div>
+      <div class="tools">
+        <button class="tool" id="real" aria-pressed="false">Roughly real size</button>
+        <button class="tool" id="linkT" aria-pressed="false">Phone disconnected</button>
+        <button class="tool" id="pairT" aria-pressed="false">Pairing</button>
+      </div>
+    </div>
+    <div class="col side" id="protoCol">
+      <div class="rect"><svg id="p" viewBox="0 0 240 280" role="img" aria-label="Proto 1 screen mockup"></svg></div>
+      <div class="cap">Proto 1 has real sliders, so its screen only needs the orb and target.</div>
+    </div>
+  </div>
+  <p id="note" style="justify-self:center;text-align:center"></p>
+</div>
+
+<script>
+const C = { off:'#8a9099', ptt:'#ffd60a', rec:'#ff453a', idle:'#1d2024', text:'#6fe3ff', ai:'#ff6ad5', ink:'#000', white:'#fff', dim:'#8a9099' };
+const TARGETS = [{n:'Desktop',auto:true},{n:'Desktop'},{n:'Laptop'},{n:'iPhone'}];
+const st = { design:'A', capture:1, mode:0, target:0, held:false, linked:true, pairing:false };
+const s = document.getElementById('s'), p = document.getElementById('p');
+const NOTES = {
+  A:'The ring is the three-way switch, tap the middle to swap between typing and AI, and the word at the bottom is where it goes. Colour and fill show the state from across a desk.',
+  B:'A direct copy of the real remote’s two sliders, tapped or dragged. It’s familiar, but it takes the whole screen and doesn’t carry over to Proto 1.'
+};
+const pol = (r,deg,c=233) => { const a=(deg-90)*Math.PI/180; return [c+r*Math.cos(a), c+r*Math.sin(a)]; };
+function arc(r,a,b){ const [x1,y1]=pol(r,a),[x2,y2]=pol(r,b); return `M${x1.toFixed(1)} ${y1.toFixed(1)}A${r} ${r} 0 ${b-a>180?1:0} 1 ${x2.toFixed(1)} ${y2.toFixed(1)}`; }
+
+function icon(name,x,y,k,col){
+  const g = inner => `<g transform="translate(${x} ${y}) scale(${k})" fill="none" stroke="${col}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">${inner}</g>`;
+  switch(name){
+    case 'mic-off': return g(`<rect x="-5" y="-13" width="10" height="17" rx="5"/><path d="M-10 -2a10 10 0 0 0 20 0M0 8v6"/><path d="M-13 -13L13 13" stroke-width="3.4"/>`);
+    case 'hold': return g(`<circle r="12"/><circle r="4.5" fill="${col}"/>`);
+    case 'rec': return g(`<circle r="11" fill="${col}"/>`);
+    case 'type': return g(`<path d="M-14 -9H14M-14 0H6M-14 9H0"/><path d="M12 2V14" stroke-width="3.4"/>`);
+    case 'ai': return `<g transform="translate(${x} ${y}) scale(${k})" fill="${col}"><path d="M0 -16C1.6 -5.6 5.6 -1.6 16 0C5.6 1.6 1.6 5.6 0 16C-1.6 5.6 -5.6 1.6 -16 0C-5.6 -1.6 -1.6 -5.6 0 -16Z"/></g>`;
+    case 'bt-off': return g(`<path d="M-6 -7L7 6L0 13V-13L7 -6L3 -2"/><path d="M-11 -11L11 11"/>`);
+    case 'bt': return g(`<path d="M-7 -7L7 7L0 14V-14L7 -7L-7 7"/>`);
+    case 'check': return g(`<path d="M-11 1L-3 9L12 -8" stroke-width="4"/>`);
+    case 'x': return g(`<path d="M-9 -9L9 9M9 -9L-9 9" stroke-width="4"/>`);
+  }
+}
+const listening = () => st.linked && ((st.capture===1 && st.held) || st.capture===2);
+
+function orb(cx,cy,r,withTap){
+  const col = st.mode===0 ? C.text : C.ai, off = st.capture===0 || !st.linked;
+  const tap = withTap ? 'data-a="mode"' : '';
+  const k = r/34, ic = st.mode===0?'type':'ai';
+  if (off) return `<g ${tap}><circle cx="${cx}" cy="${cy}" r="${r-3}" fill="#000" stroke="#3a3f45" stroke-width="6"/>${icon(ic,cx,cy,k,'#5b616a')}</g>`;
+  if (listening()) return `<circle class="pulse" cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${col}" stroke-width="5"/><circle class="pulse b2" cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${col}" stroke-width="5"/><g ${tap}><circle cx="${cx}" cy="${cy}" r="${r}" fill="${col}"/>${icon(ic,cx,cy,k,C.ink)}</g>`;
+  return `<g ${tap}><circle cx="${cx}" cy="${cy}" r="${r-4}" fill="#000" stroke="${col}" stroke-width="8"/>${icon(ic,cx,cy,k,col)}</g>`;
+}
+function targetLabel(cx,y,size,tap){
+  if (!st.linked) return `<g ${tap?'data-a="pair"':''}><rect x="${cx-90}" y="${y-size-4}" width="180" height="${size+26}" fill="#000"/>${icon('bt-off',cx,y-size*.32,size/26,C.dim)}</g>`;
+  const t = TARGETS[st.target];
+  const badgeW = t.auto ? size*1.05 : 0;
+  const w = t.n.length*size*.58, x0 = cx - (w+badgeW)/2;
+  const badge = t.auto ? `<circle cx="${x0+size*.38}" cy="${y-size*.34}" r="${size*.38}" fill="none" stroke="${C.white}" stroke-width="${size*.06}"/><text x="${x0+size*.38}" y="${y-size*.34}" dy=".36em" text-anchor="middle" font-size="${size*.48}" font-weight="600" fill="${C.white}">A</text>` : '';
+  return `${badge}<text x="${x0+badgeW}" y="${y}" font-size="${size}" font-weight="600" fill="${C.white}" font-family="Lexend, system-ui, sans-serif">${t.n}</text>`;
+}
+function pips(cx,y,gap,r){
+  const n=TARGETS.length, x0=cx-gap*(n-1)/2; if(!st.linked) return '';
+  return TARGETS.map((_,i)=>`<circle cx="${x0+i*gap}" cy="${y}" r="${r}" fill="${i===st.target?C.white:'#3a3f45'}"/>`).join('');
+}
+
+function drawA(){
+  const secs=[{v:0,a:-116,b:-50,i:'mic-off',c:C.off},{v:1,a:-29,b:29,i:'hold',c:C.ptt},{v:2,a:50,b:116,i:'rec',c:C.rec}];
+  let out='';
+  secs.forEach(q=>{
+    const on=st.capture===q.v, m=(q.a+q.b)/2, [ix,iy]=pol(193,m);
+    out+=`<path d="${arc(193,q.a,q.b)}" fill="none" stroke="${on?q.c:C.idle}" stroke-width="60" stroke-linecap="round" data-a="cap${q.v}"/>`;
+    out+=`<g pointer-events="none">${icon(q.i,ix,iy,1.8,on?C.ink:(q.v===2?'#a8524d':q.v===1?'#a8922e':C.off))}</g>`;
+  });
+  out+=orb(233,233,112,true)+pips(233,368,20,5)+targetLabel(233,424,42,true);
+  return out;
+}
+function drawB(){
+  const yT=136,yB=330,rT=46;
+  const track=(y,x1,x2)=>`<rect x="${x1}" y="${y-rT}" width="${x2-x1}" height="${rT*2}" rx="${rT}" fill="${C.idle}"/>`;
+  const x1=56,x2=410, cx=[x1+rT,233,x2-rT], cCol=[C.off,C.ptt,C.rec], cIc=['mic-off','hold','rec'];
+  let o=`<g data-a="capSlide">${track(yT,x1,x2)}</g>`;
+  cx.forEach((x,i)=>{ if(i!==st.capture) o+=`<g pointer-events="none">${icon(cIc[i],x,yT,1.3,'#6c727b')}</g>`; });
+  o+=`<g pointer-events="none"><circle cx="${cx[st.capture]}" cy="${yT}" r="${rT-4}" fill="${cCol[st.capture]}"/>${icon(cIc[st.capture],cx[st.capture],yT,1.4,C.ink)}</g>`;
+  const mx=[x1+rT+30,x2-rT-30], mCol=[C.text,C.ai], mIc=['type','ai'];
+  o+=`<g data-a="modeSlide">${track(yB,x1,x2)}</g>`;
+  mx.forEach((x,i)=>{ if(i!==st.mode) o+=`<g pointer-events="none">${icon(mIc[i],x,yB,1.3,'#6c727b')}</g>`; });
+  o+=`<g pointer-events="none"><circle cx="${mx[st.mode]}" cy="${yB}" r="${rT-4}" fill="${mCol[st.mode]}"/>${icon(mIc[st.mode],mx[st.mode],yB,1.4,C.ink)}</g>`;
+  o+=targetLabel(233,250,48,true)+pips(233,282,20,5);
+  if (listening()) o=`<circle cx="233" cy="233" r="226" fill="none" stroke="${st.capture===2?C.rec:mCol[st.mode]}" stroke-width="14"/>`+o;
+  return o;
+}
+function drawPair(){
+  const f='font-family="Lexend, system-ui, sans-serif"';
+  return `${icon('bt',233,74,1.5,'#2f8bff')}
+  <text x="233" y="178" text-anchor="middle" font-size="84" font-weight="600" fill="#fff" ${f} letter-spacing="6">090</text>
+  <text x="233" y="264" text-anchor="middle" font-size="84" font-weight="600" fill="#fff" ${f} letter-spacing="6">417</text>
+  <g data-a="pairNo"><path d="M233 300H34A233 233 0 0 0 233 466Z" fill="#2a2d32"/>${icon('x',152,364,2,'#fff')}</g>
+  <g data-a="pairYes"><path d="M233 300H432A233 233 0 0 1 233 466Z" fill="#30d158"/>${icon('check',314,364,2,'#000')}</g>`;
+}
+function draw(){
+  s.innerHTML = st.pairing ? drawPair() : st.design==='A' ? drawA() : drawB();
+  p.innerHTML = orb(120,112,84,false)+pips(120,222,16,4)+targetLabel(120,264,30,false);
+  s.setAttribute('font-family','Lexend, system-ui, sans-serif'); p.setAttribute('font-family','Lexend, system-ui, sans-serif');
+  document.getElementById('pickA').setAttribute('aria-pressed',st.design==='A');
+  document.getElementById('pickB').setAttribute('aria-pressed',st.design==='B');
+  document.getElementById('note').textContent = NOTES[st.design];
+  document.getElementById('protoCol').hidden = st.design==='B';
+  document.getElementById('linkT').setAttribute('aria-pressed',!st.linked);
+  document.getElementById('pairT').setAttribute('aria-pressed',st.pairing);
+  document.getElementById('ptt').classList.toggle('down',st.held);
+}
+function svgX(e){ const r=s.getBoundingClientRect(); return (e.clientX-r.left)/r.width*466; }
+function slide(a,e){
+  const x=svgX(e);
+  if(a==='capSlide') st.capture = x<170?0:x<296?1:2;
+  if(a==='modeSlide') st.mode = x<233?0:1;
+}
+let dragging=null;
+s.addEventListener('pointerdown',e=>{
+  const el=e.target.closest('[data-a]'); if(!el) return;
+  const a=el.dataset.a;
+  if(a.startsWith('cap')&&a!=='capSlide') st.capture=+a[3];
+  else if(a==='mode') st.mode=1-st.mode;
+  else if(a==='capSlide'||a==='modeSlide'){ dragging=a; s.setPointerCapture(e.pointerId); slide(a,e); }
+  else if(a==='pair') st.pairing=true;
+  else if(a==='pairNo') st.pairing=false;
+  else if(a==='pairYes'){ st.pairing=false; st.linked=true; }
+  draw();
+});
+s.addEventListener('pointermove',e=>{ if(dragging){ slide(dragging,e); draw(); } });
+s.addEventListener('pointerup',()=>{ dragging=null; });
+const pttB=document.getElementById('ptt');
+pttB.addEventListener('pointerdown',e=>{ e.preventDefault(); st.held=true; pttB.setPointerCapture(e.pointerId); draw(); });
+pttB.addEventListener('pointerup',()=>{ st.held=false; draw(); });
+pttB.addEventListener('pointercancel',()=>{ st.held=false; draw(); });
+pttB.addEventListener('keydown',e=>{ if((e.key===' '||e.key==='Enter')&&!e.repeat){ e.preventDefault(); st.held=true; draw(); } });
+pttB.addEventListener('keyup',()=>{ st.held=false; draw(); });
+document.getElementById('next').onclick=()=>{ st.target=(st.target+1)%TARGETS.length; draw(); };
+document.getElementById('pickA').onclick=()=>{ st.design='A'; draw(); };
+document.getElementById('pickB').onclick=()=>{ st.design='B'; draw(); };
+document.getElementById('linkT').onclick=()=>{ st.linked=!st.linked; draw(); };
+document.getElementById('pairT').onclick=()=>{ st.pairing=!st.pairing; draw(); };
+document.getElementById('real').onclick=e=>{ const on=document.getElementById('bezel').classList.toggle('real'); e.currentTarget.setAttribute('aria-pressed',on); };
+draw();
+</script>
