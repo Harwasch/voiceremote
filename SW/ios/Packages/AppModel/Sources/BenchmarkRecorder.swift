@@ -92,7 +92,7 @@ public struct RecorderPrompt: Decodable, Identifiable, Sendable {
               var engines = object["engines"] as? [[String: Any]], let speechEngines = speech["engines"] as? [[String: Any]] else { throw SttFailure.invalidResponse }
         if let battery, batteryEngineID == engineID { engines[0]["battery"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(battery)) }
         object["engines"] = speechEngines + engines; object["stt_cases"] = speech["stt_cases"]; object["vocabulary"] = speech["vocabulary"]
-        try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]).write(to: url, options: .atomic)
+        try exportData(JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])).write(to: url, options: .atomic)
         exportURL = url; return url
     }
     private func batterySample() throws -> BenchRun.Battery? {
@@ -109,6 +109,8 @@ public struct RecorderPrompt: Decodable, Identifiable, Sendable {
     private var sessionID = UUID().uuidString
     private let phrasePrompts: [RecorderPrompt]
     private var runs: [BenchRun] = []
+    private var cohortSource: String?
+    private var sourceMeasurements: [SourceQuality] = []
     private var audioURLs: [URL] = []
     private var worker: Task<Void, Never>?
     private var capture: (any CaptureSession)?
@@ -135,9 +137,15 @@ public struct RecorderPrompt: Decodable, Identifiable, Sendable {
     public func start(source: any CaptureSession, first: any SttEngine, second: any SttEngine,
                       vocabulary: Vocabulary, device: String, captureKind: ABRunner.Capture,
                       cloudConsent: Bool, synthetic: Bool = false,
+                      namedSource: String? = nil,
+                      captureMetrics: CaptureMetrics? = nil,
                       actualCaptureKind: (@MainActor () -> ABRunner.Capture)? = nil) {
         guard !recording, let prompt, worker == nil,
-              let category = BenchRun.Case.Category(rawValue: prompt.category) else { return }
+              let category = BenchRun.Case.Category(rawValue: prompt.category) else { source.interrupt(); return }
+        guard runs.isEmpty || cohortSource == namedSource else {
+            source.interrupt(); message = "Start a new cohort before changing the named capture source."; return
+        }
+        cohortSource = namedSource
         recording = true; message = nil; capture = source
         let recordingID = UUID().uuidString
         let url = directory.appendingPathComponent(recordingID).appendingPathExtension("pcm")
@@ -159,6 +167,7 @@ public struct RecorderPrompt: Decodable, Identifiable, Sendable {
                 }
                 clippingAnnotation = "TBD"
                 runs.append(run); audioURLs.append(url); completed = runs.count; index += 1
+                if let namedSource, let quality = captureMetrics?.quality(id: namedSource) { sourceMeasurements.append(quality) }
             } catch {
                 try? FileManager.default.removeItem(at: url)
                 message = "Recording failed or was interrupted. Please repeat this prompt."
@@ -170,6 +179,8 @@ public struct RecorderPrompt: Decodable, Identifiable, Sendable {
     public func startNewCohort() throws {
         guard canStartNewCohort else { throw SttFailure.unavailable }
         runs = []; commandCases = []; commandTranscripts = [:]; commandRecordings = [:]
+        cohortSource = nil
+        sourceMeasurements = []
         prompts = phrasePrompts; index = 0; completed = 0; exportURL = nil; message = nil
         sessionID = UUID().uuidString; clippingAnnotation = "TBD"
         batteryEngineID = ""; batteryCohortID = ""; batteryDurationSeconds = ""
@@ -202,7 +213,22 @@ public struct RecorderPrompt: Decodable, Identifiable, Sendable {
             run.engines[engine].battery = battery
         }
         let url = directory.appendingPathComponent("bench-" + sessionID).appendingPathExtension("json")
-        try run.write(to: url); exportURL = url; return url
+        try exportData(run.json()).write(to: url, options: .atomic)
+        exportURL = url; return url
+    }
+    private func exportData(_ data: Data) throws -> Data {
+        if let cohortSource {
+            // The shared bench schema currently admits phone/AirPods only. Keep
+            // remote exports explicitly separate, with no false phone-mic label.
+            guard var comparison = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw SttFailure.invalidResponse }
+            comparison.removeValue(forKey: "capture_source")
+            return try JSONSerialization.data(withJSONObject: ["format": "voiceremote-named-source-benchmark-v1",
+                "source": cohortSource, "source_type": "remote", "comparison": comparison,
+                "quality_estimates": sourceMeasurements.map { ["envelope_snr_db": $0.snrDB, "clipping_fraction": $0.clipping,
+                    "interruptions": $0.dropouts] as [String: Any] },
+                "quality_method": "PCM envelope estimate; proximity unknown; coefficients TBC"], options: [.sortedKeys, .prettyPrinted])
+        }
+        return data
     }
     /// Called by share-sheet completion, only after a successful export.
     public func exportCompleted(success: Bool) throws {

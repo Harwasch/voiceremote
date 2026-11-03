@@ -79,7 +79,14 @@ struct DevicesView: View {
                         Button("Discard recording", role: .destructive) { discardID = issue.id }
                     }
                 }
-                Toggle("Use remote microphone", isOn: $remote.useRemote)
+                Picker("Microphone source", selection: $host.captureChoice) {
+                    Text("Phone / connected headset").tag(CaptureChoice.phone)
+                    Text("Remote").tag(CaptureChoice.remote)
+                    Text("Automatic (measured sources)").tag(CaptureChoice.automatic)
+                }
+                Text(host.remote.sourceName)
+                if !host.sourceMetricsText.isEmpty { Text(host.sourceMetricsText).font(.caption) }
+                Text("Automatic compares recent captured PCM envelope estimates, clipping and interruptions. Proximity is unknown. Scores and thresholds are unverified; a live utterance never switches sources.").font(.footnote)
                 Button("Find remote") { host.remote.scan() }
                 ForEach(host.remote.discovered, id: \.identifier) { peripheral in
                     Button(peripheral.name ?? "Voice remote") { host.remote.connect(peripheral) }

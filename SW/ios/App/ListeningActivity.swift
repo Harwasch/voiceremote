@@ -1,5 +1,6 @@
 import ActivityKit
 import AppIntents
+import AppModel
 
 @MainActor final class ListeningActivity {
     // Activity is not Sendable in the SDK. Only its ID crosses actor boundaries;
@@ -8,11 +9,9 @@ import AppIntents
     private var pendingUpdate: Task<Void, Never>?
     func setListening(_ listening: Bool, destination: String) {
         if listening {
-            do {
-                if let id = activityID {
-                    enqueue { await ListeningActivityOperations.update(id: id, destination: destination) }
-                } else { activityID = try ListeningActivityOperations.request(destination: destination) }
-            } catch { AppRuntime.shared?.model.interrupt() }
+            if let id = activityID {
+                enqueue { await ListeningActivityOperations.update(id: id, destination: destination) }
+            } else { activityID = ListeningPresentation.request { try ListeningActivityOperations.request(destination: destination) } }
         } else if let id = activityID {
             activityID = nil
             enqueue { await ListeningActivityOperations.end(id: id) }

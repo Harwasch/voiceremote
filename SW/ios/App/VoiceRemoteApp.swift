@@ -8,18 +8,60 @@ import KeyboardBridge
 import VoiceRemoteProtocol
 
 @main struct VoiceRemoteApp: App {
+    @UIApplicationDelegateAdaptor(PhoneWakeDelegate.self) private var pushDelegate
+    @Environment(\.scenePhase) private var scenePhase
     @State private var runtime: AppRuntime?
     @State private var startupError: String?
+    @State private var recovery = AuditRecoveryController()
+    @State private var lifecycle = PhoneSceneLifecycle()
     var body: some Scene {
         WindowGroup {
             Group {
                 if let runtime { ContentView(host: runtime) }
-                else { ContentUnavailableView("Voice Remote", systemImage: "mic.slash", description: Text(startupError ?? "Starting…")) }
+                else if startupError != nil {
+                    VStack(spacing: 16) {
+                        Text("Private storage / audit recovery").font(.title2)
+                        Text(recovery.message)
+                        if recovery.rooms.count > 1 {
+                            Picker("Recovery archive", selection: $recovery.selectedRoom) {
+                                ForEach(recovery.rooms, id: \.self) { room in Text(String(room.prefix(8))).tag(room) }
+                            }
+                        }
+                        Button("Authenticate and restore verified audit copy") {
+                            Task { if await recovery.recover() { await openRuntime() } }
+                        }.disabled(recovery.busy)
+                        Text("Missing keys, missing checkpoints or an unreplicated suffix cannot be silently reset. No old execution authority is renewed.").font(.footnote)
+                    }.padding()
+                } else { ContentUnavailableView("Voice Remote", systemImage: "mic.slash", description: Text("Starting…")) }
             }.task {
                 guard runtime == nil else { return }
-                do { let host = try AppRuntime.getOrCreate(); try await host.prepare(); runtime = host }
-                catch { startupError = "Private storage could not be opened. Recording and approvals are unavailable." }
+                await openRuntime()
+            }.onChange(of: scenePhase) { _, phase in
+                guard let runtime else { return }
+                runtime.acceptingRemoteControl = phase == .active
+                let resumed = lifecycle.transition(to: phase == .background ? .background : phase == .active ? .active : .inactive)
+                if resumed {
+                    Task {
+                        do { try await runtime.reconcileWake(); await runtime.refreshWakeRegistration() }
+                        catch { runtime.error = "Wake reconciliation incomplete. Pending tasks remain held or unconfirmed." }
+                    }
+                } else if phase == .background {
+                    try? runtime.agentControl.prepareForWake()
+                    PhoneWakeDelegate.scheduleVerification()
+                }
             }
+        }
+        .backgroundTask(.appRefresh(PhoneWakeDelegate.refreshID)) {
+            await PhoneWakeDelegate.verifyArchiveInBackground()
+        }
+    }
+    @MainActor private func openRuntime() async {
+        do {
+            let host = try AppRuntime.getOrCreate(); try await host.prepare(); runtime = host
+            PhoneWakeDelegate.scheduleVerification()
+        } catch {
+            startupError = "Private storage could not be opened. Recording and approvals are unavailable."
+            recovery.loadRooms()
         }
     }
 }
@@ -73,6 +115,7 @@ private struct HomeView: View {
                 Label(model.isRecording ? "Recording" : model.listening.rawValue.capitalized,
                     systemImage: model.isRecording ? "record.circle.fill" : "mic.slash")
                     .foregroundStyle(model.isRecording ? Color.red : Color.secondary)
+                LabeledContent("Microphone", value: host.activeSourceDisplay)
                     .accessibilityAddTraits(.updatesFrequently)
                 if model.cloudInUse || host.brainCloudInUse { Label("Cloud in use", systemImage: "cloud.fill") }
                 Button {} label: {

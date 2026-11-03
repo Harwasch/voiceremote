@@ -6,12 +6,17 @@ flowchart LR
   Runtime --> Remote[Protected GATT + confirmed peripheral pin]
   Remote --> Sync[Append-only audio / per-record Retry + Discard]
   Sync --> History[Offline text only]
+  Push[APNs: fixed hint] --> Runtime --> Reconcile[Fresh XX + durable task queries]
+  Runtime --> Archive[Phone AEAD → signed archive → verified read-back]
+  Archive --> Recovery[Protected anchors + biometric restore]
 ```
 
 | Path | What | Status |
 |---|---|---|
 | [VoiceRemoteApp.swift](VoiceRemoteApp.swift) | Controls, cloud indicator, history Send/Copy/Share, approval | 🟡 Apple/device **unverified** |
 | [AppRuntime.swift](AppRuntime.swift) | Protected storage, signed cloud transports, deferred STT | 🟡 Apple/device **unverified** |
+| [PhoneWakeDelegate.swift](PhoneWakeDelegate.swift), [Push.entitlements](Push.entitlements) | Signing-gated APNs registration, fixed-hint background handler, bounded/coalesced reconciliation and best-effort daily archive scheduler | 🟡 Apple/APNs **unverified** |
+| [AuditArchiveRuntime.swift](AuditArchiveRuntime.swift) | Atomic protected key/anchor/pending state; loss health, biometric recovery into pinned new slots, preserved originals | 🟡 Keychain/Apple **unverified**; portable crypto/recovery tests |
 | [ComputerLink.swift](ComputerLink.swift) | Relay pairing/resume, revocation, HTTP suspension, insertion failure correlation | ✅ Shared protocol checks; Apple adapter **unverified** |
 | [RemoteBLELink.swift](RemoteBLELink.swift) | Numeric Comparison confirmation, persisted pin, protected reconnect, draft 1.1 sync and live preemption | 🟡 SDK/bonding/hardware **unverified** |
 | [DevicesView.swift](DevicesView.swift), [QRScanner.swift](QRScanner.swift) | Pairing, enrollment, status, per-record Retry/Discard | 🟡 Apple/device **unverified** |
@@ -56,3 +61,19 @@ Privacy (REQ-56): one installation account is pinned in ThisDeviceOnly Keychain 
 AI Control is wired through AppRuntime → AgentControl → Router → ComputerLink/PhoneConnection. Devices has explicit agent-access enrollment; Suggestions has exact session selection, status/cancel, restored-task review and scoped target-selection permission/revoke controls. Ambiguous wake never creates identity or tier 2 authority. Apple SDK/device verification remains **unverified**.
 
 Rebase integration: AI Control shares the account-pinned `RetainedTaskStore`, original history expiry/review rules and audit/checkpoints; it does not open a separate raw task store.
+
+Sleep/wake and archive (REQ-29/32/34–35/54–55/61): wake invalidates queued permits before fresh sessions query durable command identities. No wake payload becomes work; unknown/old sessions cannot execute. Archive uses AES-256-GCM with fresh nonces and authenticated v2 context, member-signed exact HTTP bytes, scheduled chain/tag read-back, and visible lost-copy/writer-refusal state. Recovery requires fresh Face ID/passcode, retains originals, retires the source slot, and resumes the same staged destination after a crash. Missing checkpoints/keys never silently create trust. Loss acceptance with a new authority remains unavailable because an executor fence is required.
+
+Signed APNs opt-in: set `VOICE_REMOTE_APP_ENTITLEMENTS=App/Push.entitlements` and `VOICE_REMOTE_PUSH_ENVIRONMENT=development` (sandbox) or `production`, with the matching owner profile/APNs topic. Defaults keep the existing app-group entitlement and skip push registration. Tokens remain in memory and are re-requested each launch; registration is refreshed after pairing/reconnect. [Apple background notification rules](https://developer.apple.com/documentation/usernotifications/pushing-background-updates-to-your-app) govern delivery. BG refresh is best effort; foreground/reconnect also verify. Relay direct APNs transport and locked-device continuation remain **unverified**; see [relay limitations](../../relay/README.md).
+
+Remote controls (REQ-4/8/18/49–53): both named boards use `RemoteBLECaptureSource`; authenticated PTT/mode/target edges drive the phone. Snapshot/reconnect never starts capture. HOLD qualifies by remote ticks (300 ms), with no tap-lock or remote approval; provisional PCM stays in a bounded buffer until qualified release. The 120 s defensive bound interrupts overflow. Status-only snapshots cannot invalidate an arming write; a changed physical control can. Source choice is explicit or uses recent PCM envelope/clipping/interruption estimates; proximity remains unknown and scoring is **TBC**. No mid-utterance fallback. Named board benchmark exports use a separate format because the shared bench schema excludes remotes; hardware throughput/first-word quality remain **unverified**.
+
+| Cross-review boundary | Current behavior / evidence |
+|---|---|
+| Push socket | Registration uses the existing authenticated relay socket. No extra `/connect`; no paired-socket replacement or discarded queue drain. Reconnect submits retained routing metadata. |
+| Scene / presentation | Reconcile after background only; Face ID and Control Center inactivity preserve sessions/approvals. Live Activity request failures do not interrupt BLE capture; local UI gesture cancellation does not stop remote HOLD. |
+| Remote trigger / privacy | Automatic honors a fresh remote trigger without quality history. Source and remote generation pin before async setup; Home displays the active microphone. Mode flips restart REC only while already recording; target-cycle preserves release state. Unenrolled peripherals receive a constant handshake without destination labels; incompatible majors display incompatibility. |
+| Acknowledgement | Arm acknowledgement lies between latest control event and latest Input, modulo u32. Status snapshots during held PTT do not invalidate arming. |
+| Audit upgrades / membership | Empty unmarked legacy journals migrate without a prior checkpoint. Nonempty or marked missing-anchor history stays blocked for recovery/loss handling. No relay rooms means no verified-copy claim. |
+
+Evidence: [cross-review tests](../Packages/AppModel/Tests/CrossReviewTests.swift) and [replacement-enforcing socket tests](../Packages/AppModel/Tests/SignedPhoneTransportTests.swift). Apple SDK/Keychain/physical BLE execution remains **unverified**.

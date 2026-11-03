@@ -4,11 +4,19 @@ flowchart LR
   AppModel --> PairingFlow & RemoteContract & HeldDictation
   RemoteOfflineSync --> AppHistoryStore
   BenchmarkRecorder --> BenchRun[Stt BenchRun]
+  PhoneWake --> AgentControl
+  PhoneArchive --> Policy[Archive / biometric recovery]
+  RemoteControls --> AppModel
+  CaptureMetrics --> BenchmarkRecorder
 ```
 
 | File | What | Status |
 |---|---|---|
 | [AgentControl.swift](AgentControl.swift) | Paired inventory/identity, live Router targets, retained preview dispatch, status/query/cancel and revocation | ✅ Synthetic tests; Apple UI unverified |
+| [PhoneWake.swift](PhoneWake.swift) | Fixed-hint validation; APNs token registration on the existing authenticated relay socket; retained intent for reconnect | ✅ Synthetic signed-byte checks; APNs **unverified** |
+| [PhoneArchive.swift](PhoneArchive.swift), [ArchiveHTTP.swift](ArchiveHTTP.swift) | Real AES-GCM, exact member-signed HTTP, typed refusal mapping, bounded/no-redirect reads, biometric restore adapter | ✅ Portable crypto/transport/recovery; Apple HTTP **unverified** |
+| [RemoteControls.swift](RemoteControls.swift) | Snapshot-safe PTT/mode/target edges, remote-tick short-press rejection, bounded provisional audio; no approval or lock | ✅ Synthetic transitions; BLE **unverified** |
+| [CaptureMetrics.swift](CaptureMetrics.swift) | PCM envelope/clipping/interruption telemetry, recent-source selection, interruption-preserving capture wrapper | ✅ Portable tests; scoring **TBC**, proximity unknown |
 | [AppLifecycle.swift](AppLifecycle.swift) | Portable route policy and shared cold-start runtime bootstrap | ✅ Linux regressions |
 | [RegisteredRouting.swift](RegisteredRouting.swift) | Real paired-registry destinations, durable Router holds; no fabricated provider sessions | ✅ Real Router integration tests |
 | [PeerStore.swift](PeerStore.swift) | Private enrollment/tombstone and synchronous settings persistence; restore into Core | ✅ Linux reopen tests; iOS Data Protection **unverified** |
@@ -43,3 +51,7 @@ AgentControl uses a temporary immutable preview lookup per routing pass; task pa
 RetainedTaskStore also filters live Router snapshots; an expired task cannot be selected from a stale queue to restore its text through a new approval.
 
 Delegate review requires the user's selected provider/project/session. Approval aborts if Brain reports a dismissed/expired/stale card (including an open sheet after spoken cancel); cancellation reads current queue state. Provider replies stay in RetainedTaskStore with the original task expiry.
+
+Wake invalidates old queued permits before inventory can release them; durable dispatched identities are queried without blind replay. Named-source recorder exports use a separate envelope because `BenchRun` currently excludes remote sources. Pending archive intents, read-back loss and fresh biometric recovery use the unchanged Policy v2 contract (REQ-29/32/34–35/54–55/61).
+
+Cross-review: scene resume requires a prior background transition; Live Activity failures are presentation-only. Capture factories pin at the trigger (including HOLD press) before suspension; remote triggers never borrow local PTT authority. BLE arming accepts the modulo interval from latest control event through latest Input; status snapshots need no new acknowledgement. Empty legacy audit journals can initialize a missing checkpoint; marked or nonempty missing-anchor history fails closed.

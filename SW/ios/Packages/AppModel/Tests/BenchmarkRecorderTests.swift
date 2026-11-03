@@ -6,6 +6,26 @@ import Stt
 import Brain
 @testable import AppModel
 
+@Test @MainActor func namedBoardBenchmarkExportsNeverClaimThePhoneMicrophone() async throws {
+    for name in ["M5Stack StopWatch", "Waveshare ESP32-C6-Touch-LCD-1.69"] {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let recorder = try BenchmarkRecorder(prompts: [.init(id: "fixture", category: "normal", expectedText: "Synthetic")], directory: directory)
+        let source = Capture()
+        recorder.start(source: source, first: FakeEngine(id: "a", script: [.final("Synthetic")]),
+            second: FakeEngine(id: "b", script: [.final("Synthetic")]), vocabulary: .init(userID: "fixture", terms: []),
+            device: "Linux synthetic decoder boundary", captureKind: .synthetic, cloudConsent: false, synthetic: true, namedSource: name)
+        for _ in 0..<2000 { if source.starts > 0 { break }; try await Task.sleep(for: .milliseconds(1)) }
+        source.channel.continuation.yield(.frame(try AudioFrame(samples: [1], timestamp: 0))); recorder.finish()
+        for _ in 0..<2000 { if !recorder.busy { break }; try await Task.sleep(for: .milliseconds(1)) }
+        let value = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: recorder.prepareExport())) as? [String: Any])
+        #expect(value["source"] as? String == name)
+        #expect(value["source_type"] as? String == "remote")
+        #expect(value["format"] as? String == "voiceremote-named-source-benchmark-v1")
+        #expect((value["comparison"] as? [String: Any])?["capture_source"] == nil)
+    }
+}
+
 @Test @MainActor func recorderCarriesAnnotationsAndControlledBatteryWithoutInventingFieldConfirmation() async throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: directory) }

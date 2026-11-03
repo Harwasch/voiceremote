@@ -62,6 +62,28 @@ private struct AgentPreviews: Sendable {
     private var connections: [String: Connection] = [:]
     private var inventory: [SessionIdentity: AgentSession] = [:]
     private var cancellationPermits: [String: ExecutionPermit] = [:]
+    private struct Query {
+        let token: UUID
+        let device: String
+        let epoch: UUID
+        let continuation: CheckedContinuation<Void, Error>
+    }
+    private var queries: [String: Query] = [:]
+    /// Sleep ends the opportunity to execute queued work. A fresh connection can
+    /// query existing identities, but only a new phone approval can release a hold.
+    public func prepareForWake() throws {
+        let pending = queries; queries.removeAll()
+        for query in pending.values { query.continuation.resume(throwing: RouterError.invalidStatus) }
+        connections.removeAll(); inventory.removeAll(); cancellationPermits.removeAll()
+        for i in destinations.indices { destinations[i].available = false }
+        for task in router.snapshot() where task.state == .queued {
+            if let id = UUID(uuidString: task.command.candidate_id) {
+                _ = policy.transition(requestID: id, to: .cancelled)
+            }
+        }
+        try router.reconnect(targets: [])
+        onChange?()
+    }
     public let router: TaskRouter
     private let policy: PolicyGate
     private let input: PhoneInput
@@ -77,6 +99,7 @@ private struct AgentPreviews: Sendable {
                           send: @escaping @Sendable (InnerMessage) async throws -> Void) async throws {
         guard device.account_id == account, device.capabilities.contains(.delegate_task),
               device.role == .agent || device.role == .both else { return }
+        if connections[device.device_id]?.epoch == epoch { return }
         let request = UUID().uuidString
         connections[device.device_id] = Connection(epoch: epoch, device: device, request: request, send: send)
         try await send(.agentInventoryRequest(AgentInventoryRequest(account_id: account, request_id: request)))
@@ -108,6 +131,9 @@ private struct AgentPreviews: Sendable {
     }
     public func disconnected(_ device: String, epoch: UUID) {
         guard connections[device]?.epoch == epoch else { return }
+        for (id, query) in queries where query.device == device && query.epoch == epoch {
+            finishQuery(id, token: query.token, error: RouterError.invalidStatus)
+        }
         connections.removeValue(forKey: device)
         for i in destinations.indices where destinations[i].id == device { destinations[i].available = false }
         try? reconnect(); onChange?()
@@ -188,7 +214,41 @@ private struct AgentPreviews: Sendable {
               let task = router.snapshot().first(where: { $0.command.command_id == status.command_id }),
               task.command.destination_id == device, let session = task.route?.destination.session else { return }
         try router.receive(status, from: session)
+        if let query = queries[status.command_id], query.device == device, query.epoch == epoch {
+            finishQuery(status.command_id, token: query.token, error: nil)
+        }
         try router.reconnect(targets: targets()); onChange?()
+    }
+    /// Background completion waits for authenticated executor observations,
+    /// rather than treating a socket write as reconciliation. Queries carry IDs
+    /// only; timeout/cancellation preserves durable unconfirmed task state.
+    public func reconcileTasks(on device: String, epoch: UUID, timeout: Duration = .seconds(3)) async throws {
+        let account = account
+        let pending = router.snapshot().filter { $0.command.destination_id == device && ($0.state == .dispatched || $0.state == .running) }
+        for task in pending {
+            guard let connection = connections[device], connection.epoch == epoch else { throw RouterError.invalidStatus }
+            let id = task.command.command_id, token = UUID()
+            try await withTaskCancellationHandler {
+                try Task.checkCancellation()
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                    guard queries[id] == nil else { continuation.resume(throwing: RouterError.invalidStatus); return }
+                    queries[id] = Query(token: token, device: device, epoch: epoch, continuation: continuation)
+                    Task { [weak self] in
+                        do { try await connection.send(.agentTaskQuery(AgentTaskQuery(account_id: account, command_id: id))) }
+                        catch { self?.finishQuery(id, token: token, error: error) }
+                    }
+                    Task { [weak self] in
+                        do { try await Task.sleep(for: timeout) } catch { return }
+                        self?.finishQuery(id, token: token, error: RouterError.invalidStatus)
+                    }
+                }
+            } onCancel: { Task { @MainActor [weak self] in self?.finishQuery(id, token: token, error: CancellationError()) } }
+        }
+    }
+    private func finishQuery(_ id: String, token: UUID, error: (any Error)?) {
+        guard let query = queries[id], query.token == token else { return }
+        queries.removeValue(forKey: id)
+        if let error { query.continuation.resume(throwing: error) } else { query.continuation.resume() }
     }
     public func revoked(_ device: String) {
         if let connection = connections[device] { disconnected(device, epoch: connection.epoch) }
