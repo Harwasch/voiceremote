@@ -366,7 +366,7 @@ import VoiceRemoteProtocol
         guard permissionGranted else { error = "Continue with microphone permission first."; return }
         let factory: CaptureFactory
         do { factory = try pinnedCapture(forBenchmark: true) }
-        catch { error = "Selected microphone is unavailable."; return }
+        catch { self.error = "Selected microphone is unavailable."; return }
         let engines = await availableEngines()
         guard let first = engines.first(where: { $0.descriptor.id == model.settings.speechEngine }) ?? engines.first,
               let second = engines.first(where: { $0.descriptor.id == model.settings.comparisonEngine && $0.descriptor.id != first.descriptor.id }) else {
@@ -374,7 +374,7 @@ import VoiceRemoteProtocol
         }
         let source: any CaptureSession
         do { source = try await factory() }
-        catch { error = "Selected capture source unavailable. Reconnect and use a fresh remote trigger."; return }
+        catch { self.error = "Selected capture source unavailable. Reconnect and use a fresh remote trigger."; return }
         let airpods = AVAudioSession.sharedInstance().currentRoute.inputs.contains { $0.portType == .bluetoothHFP }
         recorder.start(source: source, first: first, second: second,
             vocabulary: Vocabulary(userID: model.accountID, terms: model.settings.vocabulary),
