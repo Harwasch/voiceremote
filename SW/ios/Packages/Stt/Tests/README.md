@@ -8,8 +8,8 @@ flowchart LR
 | File | What | Status |
 |---|---|---|
 | [RouterTests.swift](RouterTests.swift) | Consent/selection, stable text after failure, offline silence, cleanup composition | ✅ Synthetic |
-| [CleanupTests.swift](CleanupTests.swift) | Meaning edits, Send, newline/controls, raw/error/timeout fallback | ✅ Synthetic |
-| [ABRunnerTests.swift](ABRunnerTests.swift) | Identical PCM, 200-case aggregation, measured timing, offline schema validation | ✅ Synthetic |
+| [CleanupTests.swift](CleanupTests.swift) | Meaning edits, Send, CRLF/control clusters, vocabulary, raw/error/timeout fallback | ✅ Synthetic |
+| [ABRunnerTests.swift](ABRunnerTests.swift) | Identical PCM, 200-case aggregation, measured timing, scalar ID and offline schema validation | ✅ Synthetic |
 | [CloudTests.swift](CloudTests.swift) | Both vendor protocols, valid chunks, warning/EOS retention, cancellation, idle timeout/errors | ✅ Loopback |
 | [BenchSchemaValidator.swift](BenchSchemaValidator.swift) | Foundation/CoreFoundation validator for the STT schema keywords; invalid fixtures too | ✅ Offline |
 | [FakeWebSocket.py](FakeWebSocket.py) | Stdlib masked WebSocket server/bridge; invented text/PCM only | ✅ Loopback |

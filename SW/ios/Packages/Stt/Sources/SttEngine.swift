@@ -62,10 +62,12 @@ public struct Vocabulary: Sendable, Equatable {
         self.userID = userID
         var seen = Set<String>()
         self.terms = terms.compactMap {
-            let term = $0.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !term.isEmpty, !term.unicodeScalars.contains(where: {
+            // Inspect original scalars before trimming; boundary CRLF must not disappear from validation.
+            guard !$0.unicodeScalars.contains(where: {
                 CharacterSet.controlCharacters.contains($0) || CharacterSet.newlines.contains($0)
-            }), seen.insert(term.lowercased()).inserted else { return nil }
+            }) else { return nil }
+            let term = $0.trimmingCharacters(in: .whitespaces)
+            guard !term.isEmpty, seen.insert(term.lowercased()).inserted else { return nil }
             return term
         }
     }

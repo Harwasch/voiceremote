@@ -8,7 +8,7 @@ import subprocess
 import sys
 import unittest
 
-from generate import ROOT, bundle, check_dialect, render, schema_children
+from generate import ROOT, PORTABLE_PATTERNS, bundle, check_dialect, render, schema_children
 
 # Product §4.1–4.4 and §7: input evidence, policy decisions, approval bindings
 # and execution results are trusted; proposed risk/payload and UI state are hints.
@@ -120,6 +120,16 @@ class ContractTests(unittest.TestCase):
             changed[record]['properties'][field] = {'type': 'string'}
             with self.assertRaises(AssertionError):
                 check(changed)
+
+    def test_swift_patterns_use_scalars_and_cover_the_reviewed_dialect(self):
+        runtime = (ROOT / 'SYS/codegen/templates/runtime.swift').read_text()
+        matcher = runtime.split('static func patternMatches', 1)[1].split('static func bounds', 1)[0]
+        self.assertIn('text.unicodeScalars', matcher)
+        self.assertNotIn('regularExpression', runtime)
+        self.assertNotIn('NSRegularExpression', runtime)
+        cases = {line.strip()[len('case #"'):-len('"#:')]
+                 for line in matcher.splitlines() if line.strip().startswith('case #"')}
+        self.assertEqual(cases, PORTABLE_PATTERNS)
 
     def test_generator_is_deterministic(self):
         self.assertEqual(render(), render())

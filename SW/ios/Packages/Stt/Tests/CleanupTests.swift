@@ -83,3 +83,18 @@ private struct SlowPass: CleanupPass {
         XCTAssertNotEqual(words.userID, vocabulary.userID)
     }
 }
+
+extension CleanupTests {
+    func testControlClustersRejectCleanupOutputPreserveRawAndNeverEnterVocabulary() async throws {
+        for cluster in ["\r\n", "a\r\nb", "\n\u{0301}", "a\u{0000}\u{0301}b"] {
+            let raw = "synthetic"
+            let cleaned = try await FailSafeCleanup(ReplacementPass(replacement: cluster)).clean(raw, vocabulary: vocabulary)
+            XCTAssertEqual(cleaned, raw)
+            let preserved = try await FailSafeCleanup().clean(cluster, vocabulary: vocabulary)
+            XCTAssertEqual(Array(preserved.unicodeScalars), Array(cluster.unicodeScalars))
+            XCTAssertEqual(Array(RuleCleanupPass.apply(cluster, vocabulary: vocabulary).unicodeScalars), Array(cluster.unicodeScalars))
+            // Controls must be rejected even when trimming would hide them at the term's boundary.
+            XCTAssertEqual(Vocabulary(userID: "synthetic", terms: ["safe", "word" + cluster, cluster + "word"]).terms, ["safe"])
+        }
+    }
+}

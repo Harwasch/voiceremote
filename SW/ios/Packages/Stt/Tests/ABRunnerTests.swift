@@ -137,3 +137,22 @@ private struct RecordingEngine: SttEngine {
     }
 
 }
+
+extension ABRunnerTests {
+    func testBenchIdentifiersAndSchemaValidationRejectControlClusters() async throws {
+        let schema = try BenchSchemaValidator.repositorySchema()
+        for cluster in ["\r\n", "a\r\nb", "\n\u{0301}", "\u{0000}\u{0301}"] {
+            let id = "synthetic" + cluster
+            XCTAssertFalse(BenchRun.validID(id))
+            XCTAssertThrowsError(try BenchRun(synthetic: true, device: "synthetic", captureSource: "synthetic", sessionID: id,
+                vocabulary: [], sttCases: [.init(id: "case", category: .normal, expectedText: "synthetic", recordingID: "fake")],
+                engines: [.init(id: "engine", version: "test", results: [.init(caseID: "case", text: "synthetic")])]))
+            let valid = try BenchRun(synthetic: true, device: "synthetic", captureSource: "synthetic", sessionID: "session",
+                vocabulary: [], sttCases: [.init(id: "case", category: .normal, expectedText: "synthetic", recordingID: "fake")],
+                engines: [.init(id: "engine", version: "test", results: [.init(caseID: "case", text: "synthetic")])])
+            var object = try XCTUnwrap(JSONSerialization.jsonObject(with: valid.json()) as? [String: Any])
+            object["session_id"] = id
+            XCTAssertThrowsError(try schema.validate(JSONSerialization.data(withJSONObject: object)))
+        }
+    }
+}

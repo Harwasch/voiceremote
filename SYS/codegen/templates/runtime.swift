@@ -94,10 +94,42 @@ enum Schema {
         }
         if let text = v.string {
             if !bounds(s, Double(text.unicodeScalars.count), "minLength", "maxLength") { return false }
-            if let pattern = s["pattern"].string, text.range(of: pattern, options: .regularExpression) == nil { return false }
+            if let pattern = s["pattern"].string, !patternMatches(pattern, text) { return false }
         }
         if let n = v.number, !bounds(s, n, "minimum", "maximum") { return false }
         return true
+    }
+    // The generator accepts only these reviewed patterns. Match scalars directly:
+    // CRLF is one Swift Character, and Foundation regex ranges can split graphemes
+    // or give platform-dependent end-anchor behavior. No regex participates here.
+    static func patternMatches(_ pattern: String, _ text: String) -> Bool {
+        let points = text.unicodeScalars.map(\.value)
+        func base64(_ point: UInt32) -> Bool {
+            (0x41...0x5a).contains(point) || (0x61...0x7a).contains(point)
+                || (0x30...0x39).contains(point) || point == 0x2b || point == 0x2f
+        }
+        func hex(_ point: UInt32) -> Bool {
+            (0x30...0x39).contains(point) || (0x61...0x66).contains(point)
+        }
+        switch pattern {
+        case #"[\u0000-\u001F\u007F-\u009F\u2028\u2029]"#:
+            return points.contains { $0 <= 0x1f || (0x7f...0x9f).contains($0) || $0 == 0x2028 || $0 == 0x2029 }
+        case #"[^A-Za-z0-9+/=]"#:
+            return points.contains { !base64($0) && $0 != 0x3d }
+        case #"^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"#:
+            guard points.count % 4 == 0 else { return false }
+            var end = points.count
+            while end > 0 && points[end - 1] == 0x3d { end -= 1 }
+            return points.count - end <= 2 && points[..<end].allSatisfy(base64)
+        case #"^[A-Za-z0-9+/]{43}=$"#:
+            return points.count == 44 && points.last == 0x3d && points.dropLast().allSatisfy(base64)
+        case #"^[0-9a-f]+$"#:
+            return !points.isEmpty && points.allSatisfy(hex)
+        case #"[^0-9a-f]"#:
+            return points.contains { !hex($0) }
+        default:
+            return false // A new pattern needs generator dialect review and scalar implementation.
+        }
     }
     static func bounds(_ s: JSONValue, _ n: Double, _ min: String, _ max: String) -> Bool {
         (s[min].number.map { n >= $0 } ?? true) && (s[max].number.map { n <= $0 } ?? true)

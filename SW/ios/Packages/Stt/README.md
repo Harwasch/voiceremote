@@ -76,3 +76,10 @@ Contracts and assumptions:
   Both live integrations remain **unverified**.
 - Linux requires an injected socket factory. Tests use a stdlib Python bridge over a real local
   WebSocket server; Apple's default URLSession transport awaits CI/device verification.
+
+Scalar-safety audit: benchmark IDs and the offline schema helper now inspect the entire scalar
+sequence instead of regex anchors. Vocabulary checks original scalars before whitespace trimming,
+so boundary CRLF cannot evade rejection. Cleanup already checked scalars and retains raw input
+on failure; regression tests cover CRLF, embedded CRLF and control + combining marks. Raw cleanup
+fallback is not insertion permission: Core sanitizes and Protocol/KeyboardBridge validate the
+final boundary. Apple execution remains **unverified** pending coordinator CI.
