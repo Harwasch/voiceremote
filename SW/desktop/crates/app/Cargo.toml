@@ -1,0 +1,28 @@
+[package]
+name = "voiceremote-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "voiceremote"
+path = "src/main.rs"
+
+[features]
+default = []
+os-keychain = ["voiceremote-core/os-keychain"]
+# Reserved for the later tray implementation; no Tauri dependency.
+tray = []
+
+[dependencies]
+anyhow = "1.0"
+base64 = "0.22"
+clap = { version = "4", features = ["derive", "env"] }
+qrcode = { version = "0.14", default-features = false }
+serde_json = "1.0"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "process", "io-util"] }
+voiceremote-core = { path = "../core" }
+voiceremote-protocol = { path = "../protocol" }
+
+[dev-dependencies]
+tempfile = "3"
