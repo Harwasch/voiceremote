@@ -20,3 +20,9 @@ workers plus a control connection, escaped child sessions, unknown cleanup witho
 a bus or after control failure, retry after restart/expiry, restricted Claude
 profiles, role/capability denial, flag-leading IDs and recovered Codex errors.
 Real systemd/cgroup enforcement and live providers remain **unverified**.
+
+The failure-matrix fixture delays its fake launcher by 300 ms to reproduce loaded
+CI startup. Non-timeout cases get a 5-second budget; the hung case still gets
+200 ms. Exit 7 and timeout SIGKILL assertions remain exact. A separate process
+regression proves an already observed exit 7 survives a later pipe deadline and
+cleanup without a user bus. Real CI logs lacked that timing detail.

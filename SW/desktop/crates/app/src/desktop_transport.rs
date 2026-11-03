@@ -1,4 +1,4 @@
-//! Windows session polling needs cancellation-safe raw packet reception.
+//! Desktop session polling needs cancellation-safe raw packet reception.
 //! Core's LAN read_exact receiver cannot be cancelled between header/body reads.
 //! This adapter retains framing progress in the transport across focus polls.
 use anyhow::{Result, ensure};

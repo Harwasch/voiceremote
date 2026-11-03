@@ -21,3 +21,4 @@ windows = { version = "0.61", features = [
 [[example]]
 name = "desktop-smoke"
 path = "examples/desktop-smoke.rs"
+test = true

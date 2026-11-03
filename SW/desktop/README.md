@@ -8,8 +8,9 @@ flowchart LR
     CLI[app: voiceremote] --> Core
     CLI --> Supervisor[bounded LAN / relay retry]
     CLI --> Auth[Ed25519 relay provisioning + challenges]
-    Core --> Injector[TextInjector: Windows paste / Unicode]
+    Core --> Injector[TextInjector: Windows + Linux paste / Unicode]
     Windows[Windows UI Automation] -->|metadata only| CLI
+    Linux[Linux AT-SPI] -->|metadata only| CLI
 ```
 
 | Path | What it is | Status |
@@ -17,10 +18,11 @@ flowchart LR
 | [crates/protocol/](crates/protocol/) | Generated strict JSON wire types/codecs | ✅ |
 | [Cargo.lock](Cargo.lock) | Binary workspace dependency lockfile; retained for the coordinator to commit | ✅ |
 | [crates/core/](crates/core/) | Checked-DH XX, dual confirmation, signed relay auth, bounded receiver, fragments, storage and injection boundary | ✅ synthetic tests; deployed interoperability unverified |
-| [crates/app/](crates/app/) | CLI `voiceremote`, headless receiver, QR renderer, Windows injection/focus wiring | ✅ synthetic tests; Windows runtime and tray pending |
+| [crates/app/](crates/app/) | CLI `voiceremote`, headless receiver, QR renderer, Windows/Linux injection and shared focus wiring | ✅ synthetic tests; Windows runtime and tray pending |
+| [crates/inject-linux/](crates/inject-linux/) | X11 XTest / persistent Wayland portal/EIS; bounded clipboard restore and conservative focus | 🟡 synthetic tests; Xvfb CI and GNOME runtime unverified |
 | [crates/inject-windows/](crates/inject-windows/) | Windows clipboard/Unicode injection, UIA focus and owner checklist | 🟡 Linux policy tests; Windows runtime and Notepad/Chrome/Teams unverified |
 | [../../SYS/protocol/noise.md](../../SYS/protocol/noise.md) | Exact suite, prologues, confirmations, words and transport profile | ✅ published synthetic vectors |
-| [../../.github/workflows/desktop.yml](../../.github/workflows/desktop.yml) | Daily Ubuntu/Windows tests, `desktop-v*` tags, manual dispatch | 🟡 remote CI unverified |
+| [../../.github/workflows/desktop.yml](../../.github/workflows/desktop.yml) | Daily Ubuntu/Windows tests, `desktop-v*` / `desktop-ci-*` tags, manual dispatch | 🟡 remote CI unverified |
 
 Start with `core/tests/security.rs` and the [Noise profile](../../SYS/protocol/noise.md).
 Trace: REQ-16, REQ-22–25, REQ-27, REQ-34, REQ-60/61. Tests prove synthetic
@@ -71,8 +73,8 @@ No trusted prior phone-key exchange is required. [Exact flow and limitations](..
 | Receiver lifetime | Four concurrent LAN connections; admission 10 seconds; per-connection failures and filtered peers are non-fatal. TCP keepalive 10 s / 5 s interval; WS ping 10 s / missing traffic/pong 30 s; authenticated application idle timeout 90 s. Shutdown/revocation cancels pending handshakes and offline retries. Relay waits indefinitely for a phone on a healthy socket and reconnects with 500 ms–30 s bounded backoff. |
 | Concurrency | One receiver lease per state directory; reuse the same state directory for every instance using the same keychain service. Embedders take `ReceiverLease` too. File journal claims are atomic across handles; keychain claims serialize within the leased process. Revocation/devices remain available from a second process. |
 | Idempotency | Durable, separate command and committed-segment namespaces. Reserve before dispatch/injection, never evict. Certified pre-input failure releases the segment claim for retry. Uncertain/partial delivery or a crash retains its claim for reconciliation; replay reports uncertainty, never false success. Failure TaskStatus uses segment_id as command_id; unavailable means retryable, error means uncertain. Journal disk growth is unbounded; quota/retention policy **TBD**. |
-| Dictation | Large JSON is split into independently encrypted packets ≤11,000 bytes; strict ordered reassembly precedes validation/injection. Maximum legal Unicode dictation fits the worker’s 16,384-byte frame cap. Malformed/interleaved fragments fail closed. Only validated committed text addressed to this desktop reaches `TextInjector`. C0/C1 controls and line/paragraph separators rejected; partial/stale/duplicate segments do not insert. Windows uses private clipboard paste (unconfirmed and retained after a queued chord), pre-chord restoration, Unicode fallback, UIA password/read-only denial and UIPI checks. Linux remains unavailable until its platform worker attaches it. No text logged. |
-| Windows focus | Windows app session adapter sends encrypted focus boolean + last input time on change with a 30-second heartbeat (sampled each second); no field values or titles. Its transport keeps partial LAN frames and relay heartbeat timers across focus polls. The relay adapter shares core’s VRR1 codec and persistent keepalive; the LAN adapter retains partial framing. Native behavior and phone UI remain **unverified**; see [manual checks](crates/inject-windows/manual-test.md). |
+| Dictation | Large JSON is split into independently encrypted packets ≤11,000 bytes; strict ordered reassembly precedes validation/injection. Maximum legal Unicode dictation fits the worker’s 16,384-byte frame cap. Malformed/interleaved fragments fail closed. Only validated committed text addressed to this desktop reaches `TextInjector`. C0/C1 controls and line/paragraph separators rejected; partial/stale/duplicate segments do not insert. Windows uses private clipboard paste (unconfirmed and retained after a queued chord), pre-chord restoration, Unicode fallback, UIA password/read-only denial and UIPI checks. Linux desktop mode uses inject-linux; headless mode needs no injector on either OS. Linux paste waits up to 30 seconds and restores the previous clipboard if still owned; delivery is reported unconfirmed, with no automatic retry. No text logged. |
+| Desktop focus | Shared Windows/Linux app session adapter sends encrypted focus boolean + last input time on change with a 30-second heartbeat (sampled each second); no field values or titles. Its transport keeps partial LAN frames and relay heartbeat timers across focus polls. Both platforms share the core VRR1 relay codec, freshness filters and persistent keepalive; LAN framing retains partial reads. One driver samples platform metadata; unknown focus reports false. Native behavior and phone UI remain **unverified**; see [manual checks](crates/inject-windows/manual-test.md). |
 | Commands | Default receiver reserves commands without execution. Opt-in headless `--agents-config` attaches exact-session CLI adapters through paired Noise; see [agent nodes](#agent-nodes) for authority, lifetime and cancellation limits. Core `AgentAdapter` remains a marker extension trait. |
 | Relay gaps | The 2,105,344-byte offline queue is bounded; whole-room deletion and end-to-end fragment acknowledgement are absent. First pairing uses QR redemption with the phone’s own signing key. Failed Noise pairing best-effort revokes the invited phone membership so a fresh invitation can be issued. |
 | Timing / deployment | Compute pairing under one minute tested over loopback TCP and fake relay. Human time, home/external network, physical iPhone, mDNS on actual LAN, live TLS and Windows runtime **unverified**. |
