@@ -77,6 +77,10 @@ esp_err_t board_init(void)
     ESP_ERROR_CHECK(write_reg(ioe,0x1c,0)); /* motor PWM disabled */
     ESP_ERROR_CHECK(write_reg(ioe,0x1e,0)); /* rail-enable pin must not retain PWM */
     ESP_ERROR_CHECK(ioe_output(9,false));
+    /* Hold the speaker amp off on both vendor enable lines; undriven, it can whine. */
+    ESP_ERROR_CHECK(ioe_output(10,false));
+    gpio_config_t amp={.pin_bit_mask=1ULL<<14,.mode=GPIO_MODE_OUTPUT};
+    ESP_ERROR_CHECK(gpio_config(&amp)); ESP_ERROR_CHECK(gpio_set_level(14,0));
     ESP_ERROR_CHECK(write_reg(ioe,0x25,0x88)); /* PWM 5000 Hz */
     ESP_ERROR_CHECK(write_reg(ioe,0x26,0x13));
     gpio_config_t cs={.pin_bit_mask=1ULL<<39,.mode=GPIO_MODE_OUTPUT};

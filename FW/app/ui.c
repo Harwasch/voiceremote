@@ -114,7 +114,11 @@ static void text(const char *s,float x,float baseline,const lv_font_t *font,uint
 static void target_label(void)
 {
     float cx=layout.cx,y=layout.baseline;
-    if(!linked()) { icon(IC_BT_OFF,cx,y-(layout.ring?42:30)*.32f,(layout.ring?42:30)/26.f,0x8a9099); return; }
+    /* Crossed out only when nothing is connected; plain blue means connected, waiting for the phone's state. */
+    if(!linked()) {
+        bool up=remote_state.secure;
+        icon(up?IC_BT:IC_BT_OFF,cx,y-(layout.ring?42:30)*.32f,(layout.ring?42:30)/26.f,up?0x2f8bff:0x8a9099); return;
+    }
     bool error=error_visible && shown.error[0];
     char name[96]; vr_ui_ascii(name,sizeof name,error?shown.error:shown.resolved);
     bool automatic=!error && shown.active==0;

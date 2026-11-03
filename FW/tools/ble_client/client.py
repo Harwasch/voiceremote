@@ -104,11 +104,16 @@ async def run(args):
                 print("Control-only stage: required Opus capability absent; full v1 capture unavailable.")
             await client.start_notify(INPUT, on_input)
             await client.start_notify(AUDIO, on_audio)
-            await asyncio.wait_for(snapshot.wait(), 10)
+            # A bonded reconnect can send its snapshot before these subscriptions land.
+            # Don't wait on it: the state write below requests a fresh one.
+            try:
+                await asyncio.wait_for(snapshot.wait(), 1)
+            except TimeoutError:
+                print("No snapshot yet; requesting one with the state write.")
             # BlueZ's public Bleak MTU may still report 23. Using its lower value is safe.
             # The OS response-write limit is 512 bytes; also clamp to the actual public MTU.
             budget = min(512, client.mtu_size - 3, args.budget)
-            data = phone_state(latest, target=args.target, link="BLE bench", error=args.error,
+            data = phone_state(latest or 0, target=args.target, link="BLE bench", error=args.error,
                                capture=args.capture, recording=args.recording, mode=args.mode,
                                arm=args.arm)
             for value in fragments(data, 0, budget):
