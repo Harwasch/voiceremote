@@ -47,18 +47,20 @@ import Core
          kSecAttrAccount as String: key, kSecAttrSynchronizable as String: false]
     }
 }
-@MainActor final class KeychainCheckpoint: AuditCheckpointStore {
+@MainActor final class KeychainCheckpoint: AuditRecoveryCheckpointStore {
+    let recoverySlotID: String
+    init(slot: String = "audit") { recoverySlotID = slot }
     func load() throws -> AuditCheckpoint {
-        guard let data = try SecureStore.load("audit-checkpoint") else { return .empty }
+        guard let data = try SecureStore.load(recoverySlotID + "-checkpoint") else { throw PolicyError.auditUnavailable }
         return try JSONDecoder().decode(AuditCheckpoint.self, from: data)
     }
-    func save(_ value: AuditCheckpoint) throws { try SecureStore.save(JSONEncoder().encode(value), key: "audit-checkpoint") }
+    func save(_ value: AuditCheckpoint) throws { try SecureStore.save(JSONEncoder().encode(value), key: recoverySlotID + "-checkpoint") }
     func loadPending() throws -> AuditPending? {
-        guard let data = try SecureStore.load("audit-pending") else { return nil }
+        guard let data = try SecureStore.load(recoverySlotID + "-pending") else { return nil }
         return try JSONDecoder().decode(AuditPending.self, from: data)
     }
     func savePending(_ value: AuditPending?) throws {
-        if let value { try SecureStore.save(JSONEncoder().encode(value), key: "audit-pending") }
-        else { try SecureStore.delete("audit-pending") }
+        if let value { try SecureStore.save(JSONEncoder().encode(value), key: recoverySlotID + "-pending") }
+        else { try SecureStore.delete(recoverySlotID + "-pending") }
     }
 }

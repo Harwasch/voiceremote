@@ -2,11 +2,13 @@
 flowchart LR
   SettingsView --> AppSettings[AppModel settings] --> Engines[STT / Brain]
   SettingsView --> Recorder[BenchmarkRecorder] --> Share[Explicit run JSON share]
+  SettingsView --> Audit[Push status / verified or lost archive copy]
 ```
 
 | File | What | Status |
 |---|---|---|
 | [SettingsView.swift](SettingsView.swift) | Native engine/brain/vocabulary settings, relay origin and deployment model/API version; model preparation; recorder and share completion | 🟡 Apple compile/device **unverified** |
+| Sleep / audit section | Registration, archive loss/writer status and explicit read-back verification; recovery is available at blocked startup | 🟡 Apple/device **unverified**; portable integrity tests |
 | [EnginePickerView.swift](EnginePickerView.swift) | Previous standalone task 7 debug picker; retained for upstream package link compatibility | 🟡 Superseded by SettingsView in app navigation |
 
 Start with SettingsView. Purpose: task 6 settings/benchmark UI; inputs: Stt/Brain contracts and
@@ -25,3 +27,5 @@ Recorder additions ([REQ-13], [REQ-15], [REQ-39]): listen to the last private ca
 After a successful share, start a new cohort for another microphone or command set; source/engine/vocabulary changes never mix into the prior export.
 
 Privacy/consent: Settings shows the fixed installation account, participant/cloud policy and full expired held text with explicit Keep for seven days / Delete choices (REQ-56/58). Cloud consent remains off by default and is saved synchronously. Owner review of provider wording and Apple UI behavior remains **unverified**.
+
+Named BLE sources export `voiceremote-named-source-benchmark-v1` with the board name and quality estimates; the comparison omits the shared schema's phone-only source label. Choose Remote in Devices and use REC or a fresh qualified HOLD before starting the recorder. Mixed named sources require a new cohort. Source scoring, first-word loss and board performance remain **unverified** (REQ-13/15/51/53).

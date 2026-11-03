@@ -17,6 +17,40 @@ private actor AgentMessages {
         throw RouterError.invalidStatus
     }
 }
+
+@Test @MainActor func sleepingPhoneReconcilesWithoutExecutingPreviouslyQueuedWork() async throws {
+    let rig = try AgentRig(); try await rig.install()
+    rig.control.disconnected("pc", epoch: rig.epoch)
+    let permit = try await rig.permit()
+    _ = try rig.control.enqueue(permit)
+    // Wake must invalidate the old execution opportunity before fresh inventory.
+    try rig.control.prepareForWake()
+    try await rig.connect()
+    try rig.control.receive(await rig.inventory(), from: "pc", epoch: rig.epoch)
+    #expect(rig.router.snapshot()[0].state == .queued)
+    #expect(rig.router.snapshot()[0].hold == .reapprovalRequired)
+}
+
+@Test @MainActor func wakeReconciliationWaitsForCurrentExecutorOutcomeAndTimeoutKeepsUnconfirmedState() async throws {
+    let rig = try AgentRig(); try await rig.install()
+    let permit = try await rig.permit()
+    _ = try rig.control.enqueue(permit)
+    do {
+        try await rig.control.reconcileTasks(on: "pc", epoch: rig.epoch, timeout: .milliseconds(1))
+        Issue.record("A socket write was mistaken for an executor outcome")
+    } catch { #expect(rig.router.snapshot()[0].state == .dispatched) }
+    let query = Task { try await rig.control.reconcileTasks(on: "pc", epoch: rig.epoch) }
+    for _ in 0..<30 { await Task.yield() }
+    let status = TaskStatus(account_id: "fixture", command_id: permit.command.command_id, execution_state: .succeeded,
+        updated_at: 1_000_001, outcome: .ok)
+    try rig.control.receive(status, from: "pc", epoch: UUID())
+    #expect(rig.router.snapshot()[0].state == .dispatched)
+    try rig.control.receive(status, from: "pc", epoch: rig.epoch)
+    try await query.value
+    #expect(rig.router.snapshot()[0].state == .succeeded)
+    for _ in 0..<20 { await Task.yield() }
+    #expect(await rig.messages.values.filter { if case .agentDispatch = $0 { true } else { false } }.count == 1)
+}
 private final class AgentQueue: TaskQueueStore, @unchecked Sendable {
     private let lock = NSLock()
     var tasks: [QueuedTask] = []

@@ -3,7 +3,15 @@ import Core
 import VoiceRemoteProtocol
 
 public enum RemoteContractError: Error { case incompatible, malformed, loss, off, notReady }
+public enum RemoteFailurePresentation {
+    public static func message(for error: any Error) -> String {
+        if case .incompatible = error as? RemoteContractError { return "Incompatible remote contract — expected major 1" }
+        return "Interrupted — reconnect and use a fresh trigger"
+    }
+}
 public struct RemoteInfo: Sendable {
+    public let boardID: Int
+    public var sourceName: String { boardID == 1 ? "M5Stack StopWatch" : boardID == 2 ? "Waveshare ESP32-C6-Touch-LCD-1.69" : "Synthetic BLE remote" }
     public let minor: UInt8
     public let capabilities: UInt16
     public var supportsOfflineSync: Bool { capabilities & 0x80 != 0 }
@@ -17,6 +25,7 @@ public struct RemoteInfo: Sendable {
               (Int(b[12]) | Int(b[13]) << 8) > 0, (Int(b[14]) | Int(b[15]) << 8) > 0 else { throw RemoteContractError.incompatible }
         let board = Int(b[2]) | Int(b[3]) << 8
         guard [1, 2, 65535].contains(board) else { throw RemoteContractError.incompatible }
+        boardID = board
         maxPacket = Int(b[16]) | Int(b[17]) << 8
         guard (1...4096).contains(maxPacket) else { throw RemoteContractError.incompatible }
         minor = b[1]; capabilities = UInt16(b[8]) | UInt16(b[9]) << 8
@@ -47,6 +56,10 @@ public struct RemoteInput: Sendable {
 public struct RemoteInputTracker: Sendable {
     public private(set) var last: RemoteInput?
     public private(set) var synchronized = false
+    /// Audio-start/stop snapshots advance sequence, but do not invalidate a
+    /// display write already accepted for these same physical controls.
+    public private(set) var controlRevision: UInt64 = 0
+    public private(set) var latestControlSequence: UInt32?
     private var hasWrittenState = false
     public init() {}
     public mutating func accept(_ input: RemoteInput) throws -> Bool {
@@ -62,12 +75,23 @@ public struct RemoteInputTracker: Sendable {
                 synchronized = false; self.last = input; throw RemoteContractError.loss
             }
         }
+        if input.event != 0 || last?.capture != input.capture || last?.mode != input.mode || last?.pressed != input.pressed ||
+            last.map({ $0.status & 2 }) != input.status & 2 {
+            controlRevision &+= 1
+            latestControlSequence = input.sequence
+        }
         last = input
         if input.event == 0 { synchronized = true; return false }
         guard synchronized else { return false }
         return true
     }
-    public mutating func reset() { last = nil; synchronized = false; hasWrittenState = false }
+    public mutating func reset() { last = nil; synchronized = false; hasWrittenState = false; controlRevision = 0; latestControlSequence = nil }
+    /// Modulo-u32 interval [latest control, latest Input]; snapshots alone never
+    /// revoke an acknowledgement. Future and pre-control values fail closed.
+    public func canArm(acknowledging sequence: UInt32) -> Bool {
+        guard synchronized, let control = latestControlSequence, let last else { return false }
+        return sequence &- control < 0x80000000 && last.sequence &- sequence < 0x80000000
+    }
 
     /// Call at the first actual write, after Input subscription, not when enqueuing.
     /// Reconnect's unsolicited snapshot can precede subscription; never wait for it.
@@ -153,6 +177,11 @@ public struct SourceQuality: Sendable {
 }
 
 public struct RemotePhoneState: Sendable, Equatable {
+    public static var enrollmentState: Self {
+        var value = Self(); value.names = ["Auto"]; value.resolved = "Not enrolled"
+        value.error = "Enrollment required"; value.requestSnapshot = true
+        return value
+    }
     public var capture: UInt8 = 0
     public var recording: UInt8 = 0
     public var mode: UInt8 = 0
@@ -204,12 +233,7 @@ public extension RemotePhoneState {
             }
             return result.isEmpty ? "Device" : result
         }
-        let eligible = devices.filter { $0.device_id != phoneID && $0.capabilities.contains(.receive_text) }.sorted { $0.device_id < $1.device_id }
-        var shown = Array(eligible.prefix(6))
-        if case .device(let id) = controls.target, id != phoneID, !shown.contains(where: { $0.device_id == id }),
-           let selected = eligible.first(where: { $0.device_id == id }) {
-            if shown.count == 6 { shown.removeLast() }; shown.append(selected)
-        }
+        let shown = visibleTargets(devices: devices, phoneID: phoneID, selection: controls.target)
         var value = RemotePhoneState()
         value.names = ["Auto", "iPhone"] + shown.map { label($0.display_name) }
         switch controls.target {
@@ -228,5 +252,14 @@ public extension RemotePhoneState {
         value.arm = arm && recording && controls.capture != .off
         value.acknowledgedSequence = acknowledgedSequence
         return value
+    }
+    public static func visibleTargets(devices: [DeviceInfo], phoneID: String, selection: TargetSelection) -> [DeviceInfo] {
+        let eligible = devices.filter { $0.device_id != phoneID && $0.capabilities.contains(.receive_text) }.sorted { $0.device_id < $1.device_id }
+        var shown = Array(eligible.prefix(6))
+        if case .device(let id) = selection, id != phoneID, !shown.contains(where: { $0.device_id == id }),
+           let selected = eligible.first(where: { $0.device_id == id }) {
+            if shown.count == 6 { shown.removeLast() }; shown.append(selected)
+        }
+        return shown
     }
 }

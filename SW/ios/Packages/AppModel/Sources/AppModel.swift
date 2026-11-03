@@ -18,6 +18,7 @@ import VoiceRemoteProtocol
     func finish()
     func interrupt()
 }
+public typealias CaptureFactory = @MainActor () async throws -> any CaptureSession
 public enum ListeningState: String, Sendable { case idle, preparing, listening, finishing, interrupted, failed }
 
 public struct AppSettings: Codable, Equatable, Sendable {
@@ -114,6 +115,8 @@ public struct ApprovalCard: Identifiable, Sendable {
     /// Portable observation hook, also available without the Apple Observation macro.
     public var onStateChange: (@MainActor () -> Void)?
     public var stateDidChange: (@MainActor (Bool, String) -> Void)?
+    /// Called synchronously at the trigger, before target/model setup can suspend.
+    public var pinCapture: (@MainActor () throws -> CaptureFactory)?
     public var isRecording: Bool { listening == .listening }
     public var canRetryQueue: Bool { approval.map { pendingPermits[$0.id] != nil } ?? false }
     public let accountID: String
@@ -122,6 +125,7 @@ public struct ApprovalCard: Identifiable, Sendable {
     public private(set) var grants: [GrantEvidence] = []
     public var wakeArmed = false
     private var localPTT = false
+    private var pressedCapture: CaptureFactory?
     private var suggestionActivations: [UUID: InputActivation] = [:]
     private var authorizedSuggestions: [UUID: String] = [:]
     private var taskSuggestions: [String: UUID] = [:]
@@ -142,6 +146,7 @@ public struct ApprovalCard: Identifiable, Sendable {
     private var capture: (any CaptureSession)?
     private var worker: Task<Void, Never>?
     private var epoch = UUID()
+    public var captureGeneration: UUID { epoch }
     private var trigger = CaptureTrigger()
     private var suggestionEngine: SuggestionEngine?
     private var pendingPermits: [UUID: ExecutionPermit] = [:]
@@ -187,27 +192,41 @@ public struct ApprovalCard: Identifiable, Sendable {
         stop(); controls.setCapture(value)
         if value == .continuous { begin() }
     }
+    /// Remote positions update presentation only. Capture starts exclusively on
+    /// a fresh accepted edge; this API never creates phone PTT/approval evidence.
+    public func remotePositions(capture: CaptureState, mode: Mode) {
+        controls.setCapture(capture); controls.setMode(mode)
+    }
+    public func awaitRemoteBoundary() async {
+        let finishing = worker
+        await finishing?.value
+    }
     public func press(at milliseconds: Int64) {
         guard controls.capture != .off else { return }
+        if worker == nil {
+            do { pressedCapture = try pinCapture?() ?? makeCapture }
+            catch { message = "Selected microphone is unavailable. Use a fresh trigger."; return }
+        }
         localPTT = true
         trigger.press(at: milliseconds)
     }
     public func advanceTrigger(to milliseconds: Int64) {
         trigger.advance(to: milliseconds)
-        if trigger.capture == .hold && listening != .listening && listening != .preparing { begin() }
+        if trigger.capture == .hold && listening != .listening && listening != .preparing { begin(capture: pressedCapture) }
     }
     public func release(at milliseconds: Int64) {
-        guard controls.capture != .off else { return }
+        guard controls.capture != .off, localPTT else { return }
+        defer { pressedCapture = nil; localPTT = false }
         trigger.release(at: milliseconds)
         if trigger.capture == .continuous {
             controls.setCapture(.continuous)
-            if listening != .listening && listening != .preparing { begin() }
+            if listening != .listening && listening != .preparing { begin(capture: pressedCapture) }
         } else if controls.capture != .continuous { finishUtterance() }
     }
     /// Immediate hardware stop, including while permission/target/engine setup awaits.
     /// Cancelled utterances cannot commit late text or late proposals.
     public func stop() {
-        localPTT = false
+        localPTT = false; pressedCapture = nil
         epoch = UUID(); trigger.stop(); controls.setCapture(.off)
         capture?.interrupt(); capture = nil; worker?.cancel(); worker = nil
         partial = ""; cloudInUse = false; listening = .idle
@@ -220,7 +239,7 @@ public struct ApprovalCard: Identifiable, Sendable {
         if selection == .hold { controls.setCapture(.hold) }
     }
     public func leaveForeground() {
-        if controls.capture == .hold { cancelGesture() }
+        if controls.capture == .hold && localPTT { cancelGesture() }
     }
     public func interrupt() {
         stop(); listening = .interrupted; message = "Recording interrupted. Start again when ready."
@@ -234,8 +253,19 @@ public struct ApprovalCard: Identifiable, Sendable {
         listening = .finishing; capture?.finish()
         stateDidChange?(false, destination?.display_name ?? "iPhone")
     }
-    public func begin() {
+    public func beginRemote(capture factory: @escaping CaptureFactory, generation: UUID? = nil) {
+        guard generation == nil || generation == epoch else { return }
+        localPTT = false; pressedCapture = nil; trigger.stop()
+        begin(capture: factory)
+    }
+    public func begin(capture factory: CaptureFactory? = nil) {
         guard controls.capture != .off, worker == nil else { return }
+        let pinnedCapture: CaptureFactory
+        do {
+            if let factory { pinnedCapture = factory }
+            else if let pinCapture { pinnedCapture = try pinCapture() }
+            else { pinnedCapture = makeCapture }
+        } catch { listening = .failed; message = "Selected microphone is unavailable. Use a fresh trigger."; return }
         let token = UUID(); epoch = token
         let segmentID = UUID().uuidString, state = controls, snapshot = settings
         let activation: InputActivation = localPTT ? .ptt : .inferred
@@ -252,7 +282,7 @@ public struct ApprovalCard: Identifiable, Sendable {
                 await Task.yield() // Allow destination observers to present before capture starts.
                 var available = await engines()
                 guard epoch == token, !Task.isCancelled else { await pipeline.cancel(segmentID: segmentID); return }
-                let source = try await makeCapture()
+                let source = try await pinnedCapture()
                 guard epoch == token, !Task.isCancelled else { source.interrupt(); await pipeline.cancel(segmentID: segmentID); return }
                 capture = source
                 var conditions = EngineRouter.Conditions(online: online(), hot: power().hot, lowBattery: power().lowBattery,

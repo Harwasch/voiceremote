@@ -13,6 +13,7 @@ import VoiceRemoteProtocol
     let phoneID: String
     weak var runtime: AppRuntime?
     private let peerRegistry = PeerRegistry(store: KeychainStore(service: "VoiceRemote.Pairing"))
+    private let wakeSockets = WakeSocketConnector(base: URLSessionWebSocketConnector())
     private var pendingRelay: RelayClient?
     private var pendingOrigin: String?
     private var reconnectors: [String: Task<Void, Never>] = [:]
@@ -78,11 +79,57 @@ import VoiceRemoteProtocol
             try SecureStore.save(bytes, key: name)
         }
         return try RelayClient(origin: url, route: route,
-            signingKey: Curve25519.Signing.PrivateKey(rawRepresentation: bytes), http: URLSessionRelayHTTP(), connector: URLSessionWebSocketConnector())
+            signingKey: Curve25519.Signing.PrivateKey(rawRepresentation: bytes), http: URLSessionRelayHTTP(), connector: wakeSockets)
     }
     func cloudClient() throws -> RelayClient {
         guard let record = store.active.first(where: { $0.relayOrigin != nil && $0.suspended != true }), let origin = record.relayOrigin else { throw PairingError.invalidState }
         return try relay(room: record.roomID, origin: origin)
+    }
+    func archiveClient(room: String) throws -> PhoneArchiveClient {
+        guard let record = store.active.first(where: { $0.roomID == room && $0.relayOrigin != nil && $0.suspended != true }),
+              let origin = record.relayOrigin, let url = URL(string: origin) else { throw PairingError.invalidState }
+        return try PhoneArchiveClient(member: relay(room: room, origin: origin), origin: url, http: URLSessionArchiveHTTP())
+    }
+    var archiveRooms: [String] { Array(Set(store.active.filter { $0.relayOrigin != nil && $0.suspended != true }.map(\.roomID))).sorted() }
+    func registerWake(token: Data, environment: RelayWakeRegistrationEnvironment) async throws -> Bool {
+        var submitted = false
+        for room in archiveRooms {
+            try Task.checkCancellation()
+            guard let record = store.active.first(where: { $0.roomID == room }), let origin = record.relayOrigin,
+                  let url = URL(string: origin) else { continue }
+            let sent = try await PhoneWake.register(token: token, environment: environment,
+                route: RelayRoute(account: accountID, room: room, device: phoneID), origin: url, sockets: wakeSockets)
+            submitted = submitted || sent
+        }
+        return submitted
+    }
+    /// Invalidate all old readers before any suspension, then establish fresh XX.
+    /// No stored ciphertext or wake payload supplies an execution instruction.
+    func reconcileWake() async throws {
+        try runtime?.agentControl.prepareForWake()
+        for task in readers.values { task.cancel() }; readers.removeAll()
+        for task in reconnectors.values { task.cancel() }; reconnectors.removeAll()
+        for task in connecting.values { task.cancel() }; connecting.removeAll()
+        let old = peers; peers.removeAll(); connectedIDs.removeAll(); preparedEpochs.removeAll()
+        for (id, (peer, _)) in old {
+            runtime?.model.clearFocus(id); runtime?.model.forgetCaptureConnection(peer.epoch)
+            await peer.connection.close()
+        }
+        var incomplete = false
+        for record in store.active where record.suspended != true {
+            try Task.checkCancellation()
+            do {
+                let id = record.device.device_id
+                try await ensureConnected(id)
+                guard let (peer, _) = peers[id] else { throw PairingError.closedTransport }
+                try await runtime?.agentControl.connected(peer.device, epoch: peer.epoch) { message in
+                    try await peer.connection.send(message)
+                }
+                try await runtime?.agentControl.reconcileTasks(on: id, epoch: peer.epoch)
+            }
+            catch { try Task.checkCancellation(); incomplete = true; scheduleReconnect(record.device.device_id) }
+        }
+        if incomplete { throw PairingError.closedTransport }
     }
     private func scheduleReconnect(_ id: String) {
         guard reconnectors[id] == nil, !suspendedIDs.contains(id) else { return }
@@ -240,7 +287,7 @@ import VoiceRemoteProtocol
                         await runtime?.model.dictationOutcome(outcome, from: id)
                     case .captureControl(let request):
                         let received = ContinuousClock.now
-                        guard let runtime else { continue }
+                        guard let runtime, runtime.acceptingRemoteControl else { continue }
                         let result = await runtime.model.captureControl(request, connectionID: peer.epoch, receivedAt: received)
                         guard peers[id]?.0.session === peer.session else { return }
                         try await peer.connection.send(.captureControlResult(result))
@@ -271,12 +318,16 @@ import VoiceRemoteProtocol
         }
         synchronizeState()
         Task { [weak self] in
-            try? await self?.runtime?.agentControl.connected(peer.device, epoch: peer.epoch) { message in
+            guard let self, peers[id]?.0.epoch == peer.epoch else { return }
+            try? await runtime?.agentControl.connected(peer.device, epoch: peer.epoch) { message in
                 try await peer.connection.send(message)
             }
-            await self?.runtime?.model.reconcileDictation(on: id) { segment in
+            guard peers[id]?.0.epoch == peer.epoch else { return }
+            await runtime?.model.reconcileDictation(on: id) { segment in
                 try await peer.connection.reconcile(segmentID: segment)
             }
+            await runtime?.refreshWakeRegistration()
+            await runtime?.maintainArchive()
         }
     }
     func synchronizeState(heartbeatFor deviceID: String? = nil) {
@@ -317,8 +368,12 @@ import VoiceRemoteProtocol
             install(ConnectedPeer(device: record.device, publicKey: publicKey, roomID: record.roomID, session: session, connection: PhoneConnection(session: session, transport: transport)), transport: transport)
         }
         connecting[id] = task
-        defer { connecting.removeValue(forKey: id) }
+        defer { if !task.isCancelled { connecting.removeValue(forKey: id) } }
         try await task.value
+    }
+    func cancelPendingWake() {
+        for task in connecting.values { task.cancel() }
+        connecting.removeAll()
     }
     func deleteKey(deviceID: String) async throws {
         revoking.insert(deviceID); defer { revoking.remove(deviceID) }
@@ -359,6 +414,9 @@ import VoiceRemoteProtocol
     }
     func dropRoom(deviceID: String) async throws {
         guard let record = store.records.first(where: { $0.device.device_id == deviceID }), let origin = record.relayOrigin else { return }
+        if let url = URL(string: origin), let route = try? RelayRoute(account: accountID, room: record.roomID, device: phoneID) {
+            await wakeSockets.forget(origin: url, route: route)
+        }
         if remoteRevocations.contains(deviceID) {
             try SecureStore.delete(relayKeyName(room: record.roomID)); return
         }

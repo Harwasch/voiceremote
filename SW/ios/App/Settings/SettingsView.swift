@@ -59,6 +59,12 @@ struct SettingsView: View {
                 LabeledContent("Account", value: model.accountID)
                 Text("This installation uses one account. Account switching is unavailable. Set the relay before pairing; saved computers retain their paired relay address.").font(.footnote)
             }
+            Section("Sleep, wake and audit copy") {
+                Text(host.pushStatus)
+                Text(host.archiveStatus)
+                Button("Verify audit copy now") { Task { await host.maintainArchive(force: true) } }.disabled(host.archiveBusy)
+                Text("Wake is a content-free hint. Fresh sessions query durable task identities; expired approvals and ambiguous deliveries stay held. Audit recovery requires fresh Face ID or phone passcode. Missing history is shown as lost, never silently reset.").font(.footnote)
+            }
             Section("Privacy and recording consent") {
                 Text("Get permission from participants before recording. Ordinary live audio is not saved. Offline remote recordings stay on the remote and phone until transcribed, then audio is deleted; late text goes to history only. Text expires after seven days. Held or uncertain dictation is shown for a Keep or Delete choice before expiry can remove it. Benchmark audio requires a separate explicit recording action.")
                 Text("Cloud processing is optional and off by default. When enabled, speech sends audio and Brain sends text to the configured providers through the relay. The listening screen indicates cloud use. Provider retention and encryption policies require review before release.").font(.footnote)

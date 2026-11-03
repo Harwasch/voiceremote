@@ -38,7 +38,19 @@ import VoiceRemoteProtocol
     private var syncEpoch = UUID()
     private var refreshingProgress = false
     private(set) var offlineStatus = ""
-    var useRemote = false
+    func selectionChanged() {
+        controls.reset()
+        if let input = tracker.last { _ = controls.accept(input, edge: false) }
+        if let model = AppRuntime.shared?.model { synchronize(model: model) }
+    }
+    var sourceName: String { info?.sourceName ?? "Remote unavailable" }
+    var sourceIdentity: String? { enrolledRemoteIdentity }
+    var hasCapture: Bool { source != nil }
+    func prepareRecorderControls(model: VoiceAppModel) throws {
+        guard tracker.synchronized, let input = tracker.last, input.capture == 2 || input.pressed else { throw RemoteContractError.notReady }
+        model.remotePositions(capture: input.capture == 2 ? .continuous : .hold, mode: input.mode == 0 ? .dictation : .ai_control)
+    }
+    private var controls = RemoteControls()
     private(set) var status = "Disconnected"
     private(set) var discovered: [CBPeripheral] = []
     private var central: CBCentralManager!
@@ -46,6 +58,7 @@ import VoiceRemoteProtocol
     private var peripheral: CBPeripheral?
     private var info: RemoteInfo?
     private var tracker = RemoteInputTracker()
+    private var activeWriteControlRevision: UInt64?
     private var stateCharacteristic: CBCharacteristic?
     private var inputSubscribed = false
     private var audioSubscribed = false
@@ -62,6 +75,7 @@ import VoiceRemoteProtocol
     private var displayReady = false
     private var captureArmed = false
     private var source: RemoteBLECaptureSource?
+    private var captureID: UUID?
     private var watchdog: Task<Void, Never>?
     private var lastAudio = ContinuousClock.now
     private var highestSegment: UInt32 = 0
@@ -103,21 +117,26 @@ import VoiceRemoteProtocol
         source?.interrupt(); source = nil; watchdog?.cancel(); watchdog = nil
         if let peripheral { central.cancelPeripheralConnection(peripheral) }
         peripheral = nil; info = nil; stateCharacteristic = nil; highestSegment = 0; tracker.reset()
+        controls.reset()
         failWrites(); lastPresentation = nil; displayReady = false; captureArmed = false
         authenticatedEnrollment = false; enrolledRemoteIdentity = nil; inputSubscribed = false; audioSubscribed = false
         status = "Disconnected"
     }
     func makeCapture(model: VoiceAppModel) async throws -> any CaptureSession {
         guard authenticatedEnrollment, inputSubscribed, audioSubscribed,
-              let info, tracker.synchronized, let input = tracker.last, input.capture != 0 else { throw RemoteContractError.notReady }
+              let info, tracker.synchronized, let input = tracker.last, input.capture != 0,
+              input.status & 2 == 0, input.capture == 2 || input.pressed else { throw RemoteContractError.notReady }
         pauseSync(forLiveCapture: true)
-        let capture = try RemoteBLECaptureSource(maximum: info.maxPacket, afterSegment: highestSegment, stop: { [weak self] in self?.disarm() })
+        let expectedControls = tracker.controlRevision
+        let id = UUID(); captureID = id
+        let capture = try RemoteBLECaptureSource(maximum: info.maxPacket, afterSegment: highestSegment,
+            provisional: input.capture == 1 && input.pressed, stop: { [weak self] in self?.disarm(captureID: id) })
         source = capture
         do {
             let state = try RemotePhoneState.presentation(controls: model.controls, devices: model.devices, phoneID: model.phoneID,
                 destination: model.destination, recording: true, acknowledgedSequence: input.sequence, arm: true)
             try await writeAndWait(state)
-            guard authenticatedEnrollment, tracker.last?.sequence == input.sequence, tracker.last?.capture != 0 else { throw RemoteContractError.notReady }
+            guard authenticatedEnrollment, tracker.controlRevision == expectedControls, tracker.last?.capture != 0 else { throw RemoteContractError.notReady }
         } catch { capture.interrupt(); source = nil; throw error }
         lastAudio = .now
         watchdog = Task { [weak self] in
@@ -130,10 +149,19 @@ import VoiceRemoteProtocol
         }
         return capture
     }
+    func pinnedCapture(model: VoiceAppModel, forBenchmark: Bool) -> CaptureFactory {
+        let epoch = connectionEpoch, revision = tracker.controlRevision
+        return { [weak self, weak model] in
+            guard let self, let model, connectionEpoch == epoch, tracker.controlRevision == revision else { throw RemoteContractError.notReady }
+            if forBenchmark { try prepareRecorderControls(model: model) }
+            return try await makeCapture(model: model)
+        }
+    }
     func synchronize(model: VoiceAppModel) {
         if model.isRecording { pauseSync(forLiveCapture: true) }
         else { resumeWhenIdle() }
         guard peripheral != nil else { return }
+        guard authenticatedEnrollment else { enqueue(RemotePhoneState.enrollmentState, completion: nil); return }
         do {
             let state = try RemotePhoneState.presentation(controls: model.controls, devices: model.devices, phoneID: model.phoneID,
                 destination: model.destination, recording: model.isRecording, acknowledgedSequence: tracker.last?.sequence ?? 0,
@@ -142,7 +170,7 @@ import VoiceRemoteProtocol
         } catch { status = "Remote destination cannot be displayed" }
     }
     func present(model: VoiceAppModel, destination: DeviceInfo) async throws {
-        guard peripheral != nil else { return }
+        guard peripheral != nil, authenticatedEnrollment else { return }
         let state = try RemotePhoneState.presentation(controls: model.controls, devices: model.devices, phoneID: model.phoneID,
             destination: destination, recording: model.isRecording, acknowledgedSequence: tracker.last?.sequence ?? 0,
             arm: source != nil && authenticatedEnrollment && tracker.last?.capture != 0)
@@ -155,6 +183,7 @@ import VoiceRemoteProtocol
     }
     private func enqueue(_ state: RemotePhoneState, completion: CheckedContinuation<Void, Error>?) {
         guard peripheral != nil else { completion?.resume(throwing: RemoteContractError.notReady); return }
+        let state = authenticatedEnrollment ? state : RemotePhoneState.enrollmentState
         if completion == nil, lastPresentation == state { return }
         lastPresentation = state
         if !state.arm { captureArmed = false }
@@ -178,22 +207,28 @@ import VoiceRemoteProtocol
               let peripheral, let characteristic = stateCharacteristic else { return }
         let request = queue.removeFirst()
         do {
+            if request.state.arm, !tracker.canArm(acknowledging: request.state.acknowledgedSequence) {
+                throw RemoteContractError.notReady
+            }
             transaction &+= 1
             let budget = RemotePhoneState.writeBudget(osMaximum: peripheral.maximumWriteValueLength(for: .withResponse))
             var nextTracker = tracker
             writes = try nextTracker.stateForWrite(request.state).fragments(transaction: transaction, budget: budget)
             tracker = nextTracker
             activeWrite = request; displayReady = false
+            activeWriteControlRevision = tracker.controlRevision
             peripheral.writeValue(writes.removeFirst(), for: characteristic, type: .withResponse)
         } catch { request.completion?.resume(throwing: error); pump() }
     }
     private func failWrites() {
         activeWrite?.completion?.resume(throwing: RemoteContractError.notReady)
         for request in queue { request.completion?.resume(throwing: RemoteContractError.notReady) }
-        activeWrite = nil; queue = []; writes = []
+        activeWrite = nil; activeWriteControlRevision = nil; queue = []; writes = []
     }
-    private func disarm() {
+    private func disarm(captureID expectedID: UUID? = nil) {
+        guard expectedID == nil || expectedID == captureID else { return }
         source = nil
+        captureID = nil
         captureArmed = false
         watchdog?.cancel(); watchdog = nil
         guard var state = lastPresentation else { return }
@@ -263,7 +298,10 @@ import VoiceRemoteProtocol
     }
     private func activateEnrollment(_ identity: String) {
         authenticatedEnrollment = true; enrolledRemoteIdentity = identity; enrollmentReady = false
+        controls.reset()
+        if let input = tracker.last { _ = controls.accept(input, edge: false) }
         status = "Enrolled remote connected"; startOfflineSync()
+        if let model = AppRuntime.shared?.model { synchronize(model: model) }
     }
     func confirmEnrollment(systemCode: String, remoteCode: String) async {
         guard enrollmentReady, !enrollmentBusy, protectedInfoRead, let peripheral else { status = "Connect and complete the system pairing prompt first"; return }
@@ -453,7 +491,9 @@ import VoiceRemoteProtocol
                 case Self.inputID:
                     guard let info else { return }
                     let input = try RemoteInput(value, minor: info.minor)
+                    let previousSequence = tracker.last?.sequence
                     let edge = try tracker.accept(input)
+                    guard previousSequence != tracker.last?.sequence else { return }
                     if input.pressed || input.status & 3 != 0 || (input.event == 4 && input.capture == 2) { pauseSync(forLiveCapture: true) }
                     if input.capture == 0 { pauseSync() }
                     resumeWhenIdle()
@@ -462,8 +502,46 @@ import VoiceRemoteProtocol
                     else if input.status & 4 != 0 { offlineStatus = "Remote storage full" }
                     else if input.status & 8 != 0 { offlineStatus = "Recordings waiting to sync" }
                     startOfflineSync()
-                    // Snapshots never start capture, cycle targets or mint authority.
-                    if edge, authenticatedEnrollment { status = "Remote control received" }
+                    let host = AppRuntime.shared
+                    let actions = controls.accept(input, edge: edge,
+                        recording: source != nil && (host?.model.isRecording == true || host?.recorder.recording == true))
+                    if authenticatedEnrollment, let host, host.captureChoice != .phone,
+                       edge || source != nil || host.captureChoice == .remote {
+                        let recordingBenchmark = host.recorder.busy
+                        for action in actions {
+                            switch action {
+                            case .stop: source?.interrupt(); host.model.stop(); host.recorder.cancel()
+                            case .boundary:
+                                if host.recorder.busy { source?.finish(); host.recorder.finish() }
+                                else { host.model.finishUtterance() }
+                            case .positions(let capture, let mode): host.model.remotePositions(capture: capture, mode: mode)
+                            case .startHold:
+                                if !host.recorder.busy {
+                                    let factory = try host.pinnedCapture(choice: .remote)
+                                    if source == nil, host.model.listening != .idle {
+                                        host.model.stop()
+                                        host.model.remotePositions(capture: .hold, mode: input.mode == 0 ? .dictation : .ai_control)
+                                    }
+                                    host.model.beginRemote(capture: factory)
+                                }
+                            case .startContinuous:
+                                guard !recordingBenchmark else { continue }
+                                let epoch = connectionEpoch, revision = tracker.controlRevision
+                                let generation = host.model.captureGeneration
+                                let factory = try host.pinnedCapture(choice: .remote)
+                                Task { [weak self, weak host] in
+                                    guard let self, let host, connectionEpoch == epoch, tracker.controlRevision == revision else { return }
+                                    await host.model.awaitRemoteBoundary()
+                                    guard connectionEpoch == epoch, tracker.controlRevision == revision, !host.recorder.busy else { return }
+                                    host.model.beginRemote(capture: factory, generation: generation)
+                                }
+                            case .releaseHold(let accepted):
+                                if accepted, let source { source.qualifyHold() }
+                                else { source?.interrupt(); host.model.interrupt() }
+                            case .cycleTarget: host.model.cycleRemoteTarget()
+                            }
+                        }
+                    }
                     if let model = AppRuntime.shared?.model { synchronize(model: model) }
                 case Self.offlineResultID:
                     guard info?.supportsOfflineSync == true, let pending = syncPending else { return }
@@ -480,14 +558,21 @@ import VoiceRemoteProtocol
                         resumeWhenIdle(); startOfflineSync()
                     }
                 case Self.audioID:
-                    guard authenticatedEnrollment, captureArmed, tracker.last?.capture != 0 else { return }
+                    // Audio may follow the last ATT write before its callback.
+                    // Buffer through the source; AppModel cannot consume it until
+                    // makeCapture's display barrier succeeds. Failed writes discard.
+                    let arming = activeWrite?.state.arm == true && activeWriteControlRevision == tracker.controlRevision
+                    guard authenticatedEnrollment, captureArmed || arming, tracker.last?.capture != 0 else { return }
                     if let source {
                         defer { highestSegment = max(highestSegment, source.highestSegment) }
                         if try source.receive(value) { lastAudio = .now }
                     }
                 default: break
                 }
-            } catch { loss() }
+            } catch {
+                let message = RemoteFailurePresentation.message(for: error)
+                disconnect(); status = message
+            }
         }
     }
     nonisolated func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
@@ -501,8 +586,10 @@ import VoiceRemoteProtocol
             guard let request = activeWrite else { return }
             if writes.isEmpty {
                 activeWrite = nil; displayReady = true
-                captureArmed = request.state.arm && authenticatedEnrollment && source != nil && request.state.acknowledgedSequence == tracker.last?.sequence
-                if request.state.arm && request.state.acknowledgedSequence != tracker.last?.sequence {
+                let current = activeWriteControlRevision == tracker.controlRevision
+                activeWriteControlRevision = nil
+                captureArmed = request.state.arm && authenticatedEnrollment && source != nil && current
+                if request.state.arm && !current {
                     request.completion?.resume(throwing: RemoteContractError.notReady); disarm()
                 } else { request.completion?.resume() }
                 pump()
@@ -512,13 +599,16 @@ import VoiceRemoteProtocol
 }
 
 @MainActor final class RemoteBLECaptureSource: CaptureSession {
-    private let stream = AsyncStream<CaptureEvent>.makeStream(bufferingPolicy: .bufferingNewest(64))
+    private let stream = AsyncStream<CaptureEvent>.makeStream(bufferingPolicy: .bufferingNewest(6400))
+    private var hold: RemoteHoldBuffer
+    private var ended = false
     private var assembler: RemoteAudioAssembler
     private var decoder: OpaquePointer?
     private var samples = 0
     private let stop: @MainActor () -> Void
     var highestSegment: UInt32 { assembler.highestSegment }
-    init(maximum: Int, afterSegment: UInt32, stop: @escaping @MainActor () -> Void) throws {
+    init(maximum: Int, afterSegment: UInt32, provisional: Bool, stop: @escaping @MainActor () -> Void) throws {
+        hold = RemoteHoldBuffer(provisional: provisional)
         assembler = RemoteAudioAssembler(maximum: maximum, afterSegment: afterSegment); self.stop = stop
         var error: Int32 = 0
         decoder = opus_decoder_create(16_000, 1, &error)
@@ -537,11 +627,22 @@ import VoiceRemoteProtocol
             }
             guard count == 320 else { interrupt(); throw SttFailure.invalidAudio }
             let frame = try AudioFrame(samples: pcm, timestamp: Double(samples) / 16_000); samples += 320
-            if case .dropped = stream.continuation.yield(.frame(frame)) { interrupt(); throw SttFailure.interrupted }
+            for event in try hold.frame(frame) {
+                if case .dropped = stream.continuation.yield(event) { interrupt(); throw SttFailure.interrupted }
+            }
             return true
-        case .end: finish(); return true
+        case .end:
+            ended = true
+            if !hold.provisional { finish() }
+            return true
         case .ignored: return false
         }
+    }
+    func qualifyHold() {
+        for event in hold.qualify() {
+            if case .dropped = stream.continuation.yield(event) { interrupt(); return }
+        }
+        if ended { finish() }
     }
     func finish() { stream.continuation.finish(); clean(); stop() }
     func interrupt() { stream.continuation.yield(.interrupted); stream.continuation.finish(); clean(); stop() }

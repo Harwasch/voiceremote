@@ -4,10 +4,15 @@ flowchart LR
   HeldDictationTests --> Restart[Reopen held text / tap-only send]
   OfflineSyncTests --> Sync[Resume / integrity / success-only delete / no AI or insert]
   Schema[SW/bench run.schema.json] --> BenchSchemaValidator --> AppModelTests
+  SignedPhoneTransportTests --> Proof[Exact member signatures / real AEAD]
+  PhoneAdaptersTests --> Boundaries[Wake holds / loss / biometric / BLE controls]
 ```
 
 | File | What | Status |
 |---|---|---|
+| [CrossReviewTests.swift](CrossReviewTests.swift) | Background-only reconciliation, REC restart gating, target/PTT ordering, held-PTT snapshot acknowledgement/wrap, trigger source pinning, presentation failure, empty-journal migration and Apple source wiring | ✅ Portable behavior/source checks; Apple SDK **unverified** |
+| [PhoneAdaptersTests.swift](PhoneAdaptersTests.swift) | AEAD nonce/AAD/key mutation, durable read-back loss, denied/accepted/crash-resumed biometric recovery, content-free wakes, BLE tick wrap/snapshots/source loss and remote tier 3 refusal | ✅ Portable synthetic boundaries |
+| [SignedPhoneTransportTests.swift](SignedPhoneTransportTests.swift) | Real Ed25519 proofs over exact production adapter bytes, uncertain append retry with identical ciphertext, read-back/typed writer refusal and APNs registration metadata | ✅ In-memory transport; service **unverified** |
 | [IntegrationReviewTests.swift](IntegrationReviewTests.swift) | Remote pin/reopen/revoke, segment status mapping, suspension retaining keys, stable chunk IDs | ✅ Linux |
 | [HeldDictationTests.swift](HeldDictationTests.swift) | Restart/long retention, changed connection generation, unreachable target, tap-only send, failed/unconfirmed insertion, oversized Unicode split | ✅ Linux |
 | [OfflineSyncTests.swift](OfflineSyncTests.swift) | Interrupted fetch resume, lost delete ACK, CRC/structure, STT/history failure, explicit retry after ambiguous STT, short discard, version/capability/enrollment gates, offline text/clock provenance, per-record failure/discard, live-yield resume and linear 1 MiB writes | ✅ Linux synthetic |
@@ -36,3 +41,5 @@ OfflineSyncTests additionally checks pending transcript expiry, removal of the d
 AgentControl retention regression uses the real RetainedTaskStore, expires an offline task, reconnects, and verifies that neither disk payload restoration nor agent dispatch occurs.
 
 Review regressions cover model-selected sessions without user choice, a dismissed/open review, spoken cancellation of an open linked review, stale held-task cancellation and dispatched app replies holding successors.
+
+The socket fake enforces same-device replacement and destructive queue drain, matching `SW/relay/src/room.ts`. Repeated wake registration stays on the existing socket; reconnect automatically submits retained registration. Nonempty or previously marked journals without checkpoints remain recovery/loss cases.

@@ -39,6 +39,44 @@ import VoiceRemoteProtocol
     private let network = NetworkStatus()
     private let taskStore: RetainedTaskStore
     let agentControl: AgentControl
+    private let root: URL
+    private let auditLog: AuditLog
+    private var archiveSlots: [String: KeychainArchiveSlot] = [:]
+    private var archiveMessage = "Audit copy unverified — pair a relay-backed computer to enable it."
+    var archiveStatus: String {
+        get { link.archiveRooms.isEmpty ? PhoneArchiveMaintenance.status(roomCount: 0, messages: []) : archiveMessage }
+        set { archiveMessage = newValue }
+    }
+    var archiveBusy = false
+    var pushStatus = "Push requires an owner-signed APNs profile."
+    private var wakeToken: Data?
+    private var wakeEnvironment: RelayWakeRegistrationEnvironment?
+    private var wakeReconciliation: Task<Void, Error>?
+    var acceptingRemoteControl = true
+    private var sourceSelectionEpoch = UUID()
+    var activeCaptureSource = "None"
+    var activeSourceDisplay: String {
+        model.isRecording || model.listening == .preparing || recorder.recording ? activeCaptureSource : "None"
+    }
+    private var preparingRecorder = false
+    var captureChoice: CaptureChoice = .phone {
+        didSet {
+            guard oldValue != captureChoice else { return }
+            sourceSelectionEpoch = UUID()
+            model.stop(); recorder.cancel(); remote.selectionChanged()
+        }
+    }
+    private var phoneMetrics = CaptureMetrics()
+    private var remoteMetrics = CaptureMetrics()
+    private var phoneMetricRoute: String?
+    private var remoteMetricIdentity: String?
+    private var remoteMetricName = "Remote"
+    private var phoneRoute: String? { AVAudioSession.sharedInstance().currentRoute.inputs.first?.uid }
+    var sourceMetricsText: String {
+        [phoneMetrics.quality(id: "Phone / measured route"), remoteMetrics.quality(id: remoteMetricName)].compactMap { value in
+            value.map { "\($0.id): estimated envelope SNR \(Int($0.snrDB)) dB, clipping \(Int($0.clipping * 100))%, interruptions \($0.dropouts)" }
+        }.joined(separator: "\n")
+    }
     private let router: TaskRouter
     private var maintenance: Task<Void, Never>?
     private var preparation: Task<Void, Error>?
@@ -54,6 +92,7 @@ import VoiceRemoteProtocol
         let account = try SecureStore.fixedAccount(defaults: defaults)
         let root = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
             appropriateFor: nil, create: true).appendingPathComponent("VoiceRemote", isDirectory: true)
+        self.root = root
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         var protected = root
         var resource = URLResourceValues(); resource.isExcludedFromBackup = true
@@ -70,8 +109,11 @@ import VoiceRemoteProtocol
         pairing = PairingFlow(backend: link)
         let history = try AppHistoryStore(url: root.appendingPathComponent("history.json"), now: Int64(Date().timeIntervalSince1970 * 1000))
         historyStore = history
-        let audit = try AuditLog(journal: FileAuditJournal(url: root.appendingPathComponent("audit.jsonl")),
-            checkpoints: KeychainCheckpoint(), retention: AuditRetention())
+        let auditSlot = try AuditRecoveryController.activeSlot()
+        let auditCheckpoints = try AuditRecoveryController.checkpoints(root: root, slot: auditSlot)
+        let audit = try AuditLog(journal: FileAuditJournal(url: AuditRecoveryController.journalURL(root: root, slot: auditSlot)),
+            checkpoints: auditCheckpoints, retention: AuditRetention())
+        auditLog = audit
         let policy = try PolicyGate(audit: audit, biometric: LocalAuthenticationBiometric())
         taskStore = try RetainedTaskStore(url: root.appendingPathComponent("tasks.json"), accountID: account)
         router = try TaskRouter(store: taskStore, policy: policy)
@@ -83,8 +125,7 @@ import VoiceRemoteProtocol
             history: history, target: link, policy: policy,
             makeCapture: { @MainActor in
                 guard let host = AppRuntime.shared, host.permissionGranted else { throw SttFailure.unavailable }
-                if host.remote.useRemote { return try await host.remote.makeCapture(model: host.model) }
-                return PhoneCapture { [weak host] in host?.model.interrupt() }
+                return try await host.makeRuntimeCapture()
             }, engines: { @MainActor in await AppRuntime.shared?.availableEngines() ?? [] },
             brain: { settings in
                 let local = FoundationModelsBrain()
@@ -109,6 +150,10 @@ import VoiceRemoteProtocol
             model.settings = settings; try settingsStore.save(settings)
         }
         savedSettings = model.settings; link.runtime = self
+        model.pinCapture = { [weak self] in
+            guard let self else { throw SttFailure.unavailable }
+            return try pinnedCapture()
+        }
         agentControl.onChange = { [weak self] in Task { await self?.model.refreshTasks() } }
         model.settingsDidChange = { [weak self] settings in self?.saveSettings(settings) }
         model.onStateChange = { [weak self] in
@@ -139,10 +184,102 @@ import VoiceRemoteProtocol
             while !Task.isCancelled {
                 await self?.model.refresh()
                 await self?.reconcileKeyboard()
-                if let self { do { try await offlineSync.maintain(); try taskStore.maintain(); try recorder.maintain(); try keyboard.maintain(listening: model.isRecording) } catch { self.error = "Private storage maintenance failed." } }
+                if let self {
+                    do { try await offlineSync.maintain(); try taskStore.maintain(); try recorder.maintain(); try keyboard.maintain(listening: model.isRecording) } catch { self.error = "Private storage maintenance failed." }
+                    await maintainArchive()
+                }
                 try? await Task.sleep(for: .seconds(60))
             }
         }
+    }
+    func makeRuntimeCapture(forBenchmark: Bool = false) async throws -> any CaptureSession {
+        let factory = try pinnedCapture(forBenchmark: forBenchmark)
+        return try await factory()
+    }
+    func pinnedCapture(choice: CaptureChoice? = nil, forBenchmark: Bool = false) throws -> CaptureFactory {
+        let selected = try CaptureMetrics.select(choice: choice ?? captureChoice, remoteReady: remote.isEnrolled,
+            phone: CaptureMetrics.current(phoneMetrics.quality(id: "phone"), recordedIdentity: phoneMetricRoute, currentIdentity: phoneRoute),
+            remote: CaptureMetrics.current(remoteMetrics.quality(id: "remote"), recordedIdentity: remoteMetricIdentity, currentIdentity: remote.sourceIdentity))
+        let epoch = sourceSelectionEpoch, identity = remote.sourceIdentity, name = remote.sourceName
+        let remoteFactory = selected == .remote ? remote.pinnedCapture(model: model, forBenchmark: forBenchmark) : nil
+        activeCaptureSource = selected == .remote ? name : "Phone / connected headset"
+        return { [weak self] in
+            guard let self, permissionGranted, sourceSelectionEpoch == epoch else { throw SttFailure.unavailable }
+            let meter = CaptureMetrics()
+            if let remoteFactory {
+                let source = try await remoteFactory()
+                remoteMetricIdentity = identity; remoteMetricName = name; remoteMetrics = meter
+                activeCaptureSource = name
+                return MeasuredCaptureSession(source: source, metrics: meter)
+            }
+            phoneMetrics = meter; activeCaptureSource = "Phone / connected headset"
+            return MeasuredCaptureSession(source: PhoneCapture { [weak self] in
+                if forBenchmark { self?.recorder.cancel() } else { self?.model.interrupt() }
+            }, metrics: meter, didStart: { [weak self] in
+                guard let self else { return }; phoneMetricRoute = phoneRoute
+                activeCaptureSource = AVAudioSession.sharedInstance().currentRoute.inputs.first?.portType == .bluetoothHFP ? "AirPods / Bluetooth headset" : "iPhone microphone"
+            })
+        }
+    }
+    func maintainArchive(force: Bool = false) async {
+        guard !archiveBusy else { return }; archiveBusy = true; defer { archiveBusy = false }
+        let rooms = link.archiveRooms
+        guard !rooms.isEmpty else { archiveStatus = PhoneArchiveMaintenance.status(roomCount: 0, messages: []); return }
+        var labels: [String] = []
+        for room in rooms {
+            do {
+                try Task.checkCancellation()
+                let slot: KeychainArchiveSlot
+                if let existing = archiveSlots[room] { slot = existing }
+                else { slot = try KeychainArchiveSlot(root: root, account: model.accountID, room: room, create: true); archiveSlots[room] = slot }
+                let client = try link.archiveClient(room: room)
+                // Bounded catch-up; each exact sealed intent is durable before HTTP.
+                for _ in 0..<128 {
+                    let anchor = try await PhoneArchiveMaintenance.replicate(log: auditLog, client: client, cipher: slot.cipher, store: slot)
+                    if anchor.journal == (try auditLog.exportCheckpoint()) { break }
+                    try Task.checkCancellation()
+                }
+                if force { try await AuditArchive.verifyScheduled(client: client, cipher: slot.cipher, store: slot,
+                    now: Int64(Date().timeIntervalSince1970 * 1000), force: true) }
+                let state = try slot.loadArchive()
+                let current = state.anchor.journal == (try auditLog.exportCheckpoint()) && state.pending == nil
+                labels.append(state.health == .verified && current ? "Audit copy verified by read-back." : "Audit copy unverified or catching up.")
+            } catch {
+                let health = try? archiveSlots[room]?.loadArchive().health
+                labels.append(health == .lostCopy ? "Audit read-back failed: the copy may be missing, damaged or unreachable. Local history is preserved; recovery cannot claim missing history." :
+                    health == .writerMismatch ? "Audit writer refused. Fresh pairing or old-writer-signed handoff is required." :
+                    "Audit copy unavailable or keys/anchors missing — retention unverified.")
+            }
+        }
+        archiveStatus = PhoneArchiveMaintenance.status(roomCount: link.archiveRooms.count,
+            messages: rooms == link.archiveRooms ? labels : ["Audit membership changed; copy unverified."])
+    }
+    func registeredForWake(token: Data, environment: RelayWakeRegistrationEnvironment) async {
+        wakeToken = token; wakeEnvironment = environment
+        await refreshWakeRegistration()
+    }
+    func refreshWakeRegistration() async {
+        guard let wakeToken, let wakeEnvironment else { return }
+        do {
+            let submitted = try await link.registerWake(token: wakeToken, environment: wakeEnvironment)
+            pushStatus = submitted ? "Push registration submitted on live relay connection; APNs delivery unverified." :
+                "Push token received; registration waits for a live relay connection."
+        }
+        catch { pushStatus = "Push registration unavailable. Foreground reconciliation remains available." }
+    }
+    func reconcileWake() async throws {
+        if let wakeReconciliation { return try await wakeReconciliation.value }
+        let task = Task { [self] in
+            model.stop()
+            try await link.reconcileWake(); try Task.checkCancellation()
+            await model.refreshTasks(); await reconcileKeyboard(); await maintainArchive()
+        }
+        wakeReconciliation = task
+        defer { wakeReconciliation = nil }
+        try await task.value
+    }
+    func cancelWakeReconciliation() {
+        wakeReconciliation?.cancel(); link.cancelPendingWake()
     }
     func continuePermissions() async {
         permissionExplained = true; UserDefaults.standard.set(true, forKey: "permissionExplained")
@@ -213,19 +350,28 @@ import VoiceRemoteProtocol
         try keyboard.enqueue(CommittedSegment(id: id, createdAt: Date(), text: text.text), listening: model.isRecording)
     }
     func startRecorder() async {
+        guard !recorder.busy, !preparingRecorder, recorder.prompt != nil else { return }
+        preparingRecorder = true; defer { preparingRecorder = false }
         model.stop()
         guard permissionGranted else { error = "Continue with microphone permission first."; return }
+        let factory: CaptureFactory
+        do { factory = try pinnedCapture(forBenchmark: true) }
+        catch { error = "Selected microphone is unavailable."; return }
         let engines = await availableEngines()
         guard let first = engines.first(where: { $0.descriptor.id == model.settings.speechEngine }) ?? engines.first,
               let second = engines.first(where: { $0.descriptor.id == model.settings.comparisonEngine && $0.descriptor.id != first.descriptor.id }) else {
             error = "Prepare and select two different speech engines first."; return
         }
-        let source = PhoneCapture { [weak self] in self?.recorder.cancel() }
+        let source: any CaptureSession
+        do { source = try await factory() }
+        catch { error = "Selected capture source unavailable. Reconnect and use a fresh remote trigger."; return }
         let airpods = AVAudioSession.sharedInstance().currentRoute.inputs.contains { $0.portType == .bluetoothHFP }
         recorder.start(source: source, first: first, second: second,
             vocabulary: Vocabulary(userID: model.accountID, terms: model.settings.vocabulary),
             device: UIDevice.current.model + " / iOS " + UIDevice.current.systemVersion,
             captureKind: airpods ? .airpods : .iphone_mic, cloudConsent: model.settings.cloudConsent,
+            namedSource: remote.hasCapture ? remote.sourceName : nil,
+            captureMetrics: remote.hasCapture ? remoteMetrics : phoneMetrics,
             actualCaptureKind: {
                 AVAudioSession.sharedInstance().currentRoute.inputs.contains { $0.portType == .bluetoothHFP } ? .airpods : .iphone_mic
             })
