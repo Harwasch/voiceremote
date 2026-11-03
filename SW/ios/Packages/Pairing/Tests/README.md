@@ -18,7 +18,7 @@ flowchart LR
 | [RelayCleanupTests.swift](RelayCleanupTests.swift) | Peer 403 still attempts self-revoke and surfaces self-removal failure | ✅ Linux |
 | [NoiseRelayTests.swift](NoiseRelayTests.swift) | Signed join/challenge/connect/revoke, clock skew, lost-response recovery, permanent refusals retain enrollment, exact proxy body/canonical-query hashes, complete-code parsing, wrong-route rejection, hostile responses, dropped count, retry cap/cancel, frame routing, ping deadline | ✅ Linux independent fake |
 | [NoiseLANTests.swift](NoiseLANTests.swift) | Split/coalesced TCP frames, max packet, EOF/invalid lengths, private IP policy | ✅ Linux |
-| [NoiseURLSessionTests.swift](NoiseURLSessionTests.swift) | Real loopback HTTP, streaming/declared response caps, redirect refusal, timeout and cancellation | ✅ Linux; Python 3 helper in test |
+| [NoiseURLSessionTests.swift](NoiseURLSessionTests.swift) | Real loopback HTTP: exact 4096-byte boundary, declared/chunked caps without EOF (typed + MIME sniffing), five redirect statuses, stalled response and cancellation; delegate length/terminal-result regressions; native socket cancellation on macOS | ✅ Linux; Apple **unverified** |
 | [PairingTests.swift](PairingTests.swift) | QR/clock/profile; trusted confirmation gate, cancellation and actual Noise impostor followed by the valid pinned peer | ✅ Linux |
 | [Fixtures/](Fixtures/README.md) | Published synthetic Cacophony and desktop snow vectors | ✅ Bundled |
 
@@ -34,6 +34,6 @@ All inputs are public test secrets or synthetic values generated in memory.
 
 | [TestDeadline.swift](TestDeadline.swift) | All async test bodies bounded (20 s; Rust interop 120 s); cancellation-ignoring wait and blocked-SIGTERM child cleanup regressions; cargo group killed/reaped within 90 s | ✅ Linux |
 
-The HTTP helper has its own 15 s lifetime cap. These are test bounds, not product latency targets. Six pre-change bounded runs passed; the original historical orphan cause is **unverified**. Existing production reconnect refusal/backoff/cancellation behavior remains covered without a speculative reconnect change.
+The HTTP helper has a 30 s lifetime cap, a 5 s poll/read readiness deadline, no reverse-DNS lookup and forced kill/reap cleanup. Startup failures report captured stdout/stderr and exit status; request failures report path, elapsed time, error type/domain/code and OS. Each HTTP call has a separate 5 s test watchdog so timeout cannot masquerade as cap/redirect success. These are test bounds, not product latency targets. Six historical bounded runs passed; the original historical orphan cause is **unverified**. Existing production reconnect refusal/backoff/cancellation behavior remains covered without a speculative reconnect change.
 
 `testPeerEOFAfterRevokeDeliveryCannotUndoLocalRevocation` deterministically closes the session during the transport write, reproducing peer EOF after delivered revoke; local enrollment must remain retired.

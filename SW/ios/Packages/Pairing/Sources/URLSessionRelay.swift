@@ -14,16 +14,16 @@ public struct URLSessionRelayHTTP: RelayHTTP {
         } onCancel: { call.cancel() }
     }
 }
-private final class HTTPCall: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+final class HTTPCall: NSObject, URLSessionDataDelegate, @unchecked Sendable {
     private let lock = NSLock()
     private var continuation: CheckedContinuation<RelayResponse, any Error>?
     private var session: URLSession?
     private var bytes = Data()
     private var status: Int?
-    private var finished = false
+    private var result: Result<RelayResponse, any Error>?
     func start(_ request: RelayRequest, continuation: CheckedContinuation<RelayResponse, any Error>) {
         lock.lock()
-        if finished { lock.unlock(); continuation.resume(throwing: CancellationError()); return }
+        if let result { lock.unlock(); continuation.resume(with: result); return }
         self.continuation = continuation
         let config = URLSessionConfiguration.ephemeral
         config.httpShouldSetCookies = false; config.urlCache = nil
@@ -35,43 +35,63 @@ private final class HTTPCall: NSObject, URLSessionDataDelegate, @unchecked Senda
         let task = session.dataTask(with: wire)
         lock.unlock(); task.resume()
     }
-    private func finish(_ result: Result<RelayResponse, any Error>) {
+    private func finish(_ result: Result<RelayResponse, any Error>, beforeCleanup: () -> Void = {}) {
         lock.lock()
-        guard !finished else { lock.unlock(); return }
-        finished = true
+        finishLocked(result, beforeCleanup: beforeCleanup)
+    }
+    /// Enter with the lock held; latch the decision before cancellation can
+    /// deliver another callback. Always unlock before touching URLSession.
+    private func finishLocked(_ result: Result<RelayResponse, any Error>, beforeCleanup: () -> Void = {}) {
+        guard self.result == nil else { lock.unlock(); beforeCleanup(); return }
+        self.result = result
         let continuation = self.continuation; self.continuation = nil
         let session = self.session; self.session = nil; bytes.removeAll()
         lock.unlock()
+        // FoundationNetworking must consume a pending redirect/disposition
+        // decision before invalidation changes its task state.
+        beforeCleanup()
         session?.invalidateAndCancel(); continuation?.resume(with: result)
     }
     func cancel() { finish(.failure(CancellationError())) }
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                     newRequest request: URLRequest, completionHandler: @escaping @Sendable (URLRequest?) -> Void) {
-        completionHandler(nil); finish(.failure(PairingError.invalidMessage))
+        finish(.failure(PairingError.invalidMessage)) { completionHandler(nil) }
     }
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse,
                     completionHandler: @escaping @Sendable (URLSession.ResponseDisposition) -> Void) {
-        let valid = lock.withLock {
-            guard let response = response as? HTTPURLResponse, response.expectedContentLength <= 4096 else { return false }
-            status = response.statusCode; return !finished
+        lock.lock()
+        guard result == nil else { lock.unlock(); completionHandler(.cancel); return }
+        guard let response = response as? HTTPURLResponse,
+              !(300..<400).contains(response.statusCode) else {
+            finishLocked(.failure(PairingError.invalidMessage)) { completionHandler(.cancel) }; return
         }
-        completionHandler(valid ? .allow : .cancel)
-        if !valid { finish(.failure(PairingError.messageTooLarge)) }
+        // Apple Foundation may report an unknown expected length even when the
+        // raw header declares a size. Check both, then count every body chunk.
+        if let declared = response.value(forHTTPHeaderField: "Content-Length") {
+            guard let length = UInt64(declared.trimmingCharacters(in: .whitespacesAndNewlines)), length <= 4096 else {
+                finishLocked(.failure(PairingError.messageTooLarge)) { completionHandler(.cancel) }; return
+            }
+        }
+        guard response.expectedContentLength <= 4096 else {
+            finishLocked(.failure(PairingError.messageTooLarge)) { completionHandler(.cancel) }; return
+        }
+        status = response.statusCode
+        lock.unlock(); completionHandler(.allow)
     }
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
-        let valid = lock.withLock {
-            guard !finished, data.count <= 4096 - bytes.count else { return false }
-            bytes += data; return true
+        lock.lock()
+        guard result == nil else { lock.unlock(); return }
+        guard data.count <= 4096 - bytes.count else {
+            finishLocked(.failure(PairingError.messageTooLarge)); return
         }
-        if !valid { finish(.failure(PairingError.messageTooLarge)) }
+        bytes += data
+        lock.unlock()
     }
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: (any Error)?) {
-        let result: Result<RelayResponse, any Error> = lock.withLock {
-            if error != nil { return .failure(PairingError.closedTransport) }
-            guard let status else { return .failure(PairingError.invalidMessage) }
-            return .success(.init(status: status, body: bytes))
-        }
-        finish(result)
+        lock.lock()
+        if error != nil { finishLocked(.failure(PairingError.closedTransport)) }
+        else if let status { finishLocked(.success(.init(status: status, body: bytes))) }
+        else { finishLocked(.failure(PairingError.invalidMessage)) }
     }
 }
 
@@ -81,7 +101,7 @@ public struct URLSessionWebSocketConnector: WebSocketConnector {
         let opening = SocketOpening()
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { opening.start(request, continuation: $0) }
-        } onCancel: { opening.cancel() }
+        } onCancel: { opening.cancel(error: CancellationError()) }
     }
 }
 private final class NativeWebSocket: WebSocket, @unchecked Sendable {
@@ -113,15 +133,19 @@ private final class NativeWebSocket: WebSocket, @unchecked Sendable {
     }
     func close() async { task.cancel(with: .goingAway, reason: nil); session.invalidateAndCancel() }
 }
-private final class SocketOpening: NSObject, URLSessionWebSocketDelegate, @unchecked Sendable {
+final class SocketOpening: NSObject, URLSessionWebSocketDelegate, @unchecked Sendable {
     private let lock = NSLock()
     private var continuation: CheckedContinuation<WebSocketUpgrade, any Error>?
     private var session: URLSession?
     private var task: URLSessionWebSocketTask?
     private var finished = false
+    private var failure: (any Error)?
     func start(_ request: RelayRequest, continuation: CheckedContinuation<WebSocketUpgrade, any Error>) {
         lock.lock()
-        if finished { lock.unlock(); continuation.resume(throwing: CancellationError()); return }
+        if finished {
+            let error = failure ?? CancellationError()
+            lock.unlock(); continuation.resume(throwing: error); return
+        }
         self.continuation = continuation
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 10; config.httpShouldSetCookies = false; config.urlCache = nil
@@ -130,18 +154,21 @@ private final class SocketOpening: NSObject, URLSessionWebSocketDelegate, @unche
         let task = session.webSocketTask(with: wire); task.maximumMessageSize = 16_384; self.task = task
         lock.unlock(); task.resume()
     }
-    func cancel(error: any Error = PairingError.closedTransport) {
-        lock.lock(); finished = true
+    func cancel(error: any Error = PairingError.closedTransport, beforeCleanup: () -> Void = {}) {
+        lock.lock()
+        guard !finished else { lock.unlock(); beforeCleanup(); return }
+        finished = true; failure = error
         let continuation = self.continuation; self.continuation = nil
         let session = self.session; self.session = nil
         let task = self.task; self.task = nil
         lock.unlock()
+        beforeCleanup()
         task?.cancel(with: .goingAway, reason: nil); session?.invalidateAndCancel()
         continuation?.resume(throwing: error)
     }
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                     newRequest request: URLRequest, completionHandler: @escaping @Sendable (URLRequest?) -> Void) {
-        completionHandler(nil); cancel()
+        cancel { completionHandler(nil) }
     }
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didOpenWithProtocol protocol: String?) {
         guard let response = webSocketTask.response as? HTTPURLResponse else { cancel(); return }

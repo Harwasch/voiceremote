@@ -26,7 +26,7 @@ flowchart LR
 | [RelayProxy.swift](RelayProxy.swift) | Route-bound proxy signer; ordered form query normalization; exact Messages body | ✅ Independent proofs + real local Worker |
 | [RelayMembershipCleanup.swift](RelayMembershipCleanup.swift) | Explicit removal attempts peer and self independently, including after peer 403 | ✅ Linux |
 | [RelayClient.swift](RelayClient.swift) | Server-clock challenges, recoverable join, permanent refusals, reconnect/backoff, dropped reports and WS heartbeat | ✅ Independent signed fake |
-| [URLSessionRelay.swift](URLSessionRelay.swift) | Bounded HTTP, no redirects, cancellable native WebSocket upgrade/ping | ✅ Linux HTTP loopback; native WS unverified |
+| [URLSessionRelay.swift](URLSessionRelay.swift) | HTTP declared + incremental 4096-byte cap; rejects redirect callbacks and final 3xx; latches HTTP/socket opening results before delegate completion and cancellation; cancellable native WebSocket upgrade/ping | ✅ Linux HTTP + delegate regressions; Apple/native WS **unverified** |
 
 Start: `PairingConnection.swift`; [integration obligations and commands](../README.md).
 REQ-22–25/60/61. No action execution or model-controlled authorization fields.
