@@ -89,6 +89,9 @@ enum Command {
     Run {
         #[arg(long)]
         headless: bool,
+        /// Owner-edited agent project/session allowlist (headless only).
+        #[arg(long, requires = "headless")]
+        agents_config: Option<PathBuf>,
         #[arg(long, env = "VOICEREMOTE_ACCOUNT")]
         account: String,
         /// Optional assertion; receiver uses the identity persisted at pairing.
@@ -467,6 +470,7 @@ async fn main() -> Result<()> {
         }
         Command::Run {
             headless: _,
+            agents_config,
             account,
             device,
             listen,
@@ -493,6 +497,49 @@ async fn main() -> Result<()> {
                 None if peers.len() == 1 => peers.into_iter().next().unwrap(),
                 _ => bail!("select --peer from devices"),
             };
+            let agents = agents_config
+                .map(|path| -> Result<_> {
+                    voiceremote_agents::AgentNode::new(
+                        voiceremote_agents::Allowlist::load(&path)?,
+                        voiceremote_agents::CliAdapter::default(),
+                        keys.clone(),
+                    )
+                })
+                .transpose()?;
+            if let Some(node) = agents {
+                if let Some(origin) = relay {
+                    voiceremote_agents::receiver::run_relay(
+                        node,
+                        relay_client(
+                            &origin,
+                            account,
+                            peer.room.clone(),
+                            device.clone(),
+                            keys.as_ref(),
+                        )?,
+                        identity,
+                        registry,
+                        peer,
+                        device,
+                        injectors,
+                        stop,
+                    )
+                    .await?;
+                } else {
+                    let mut listener = match listen {
+                        Some(address) => {
+                            voiceremote_agents::transport::Listener::bind(address).await?
+                        }
+                        None => voiceremote_agents::transport::Listener::bind_auto().await?,
+                    };
+                    listener.advertise(&peer.room)?;
+                    voiceremote_agents::receiver::run_lan(
+                        node, listener, identity, registry, peer, device, injectors, stop,
+                    )
+                    .await?;
+                }
+                return Ok(());
+            }
             if let Some(origin) = relay {
                 receiver::run_relay(
                     relay_client(
@@ -526,4 +573,35 @@ async fn main() -> Result<()> {
         Command::Dictate { .. } => unreachable!(),
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod agent_cli_tests {
+    use super::*;
+    #[test]
+    fn agent_config_requires_explicit_headless_opt_in() {
+        assert!(
+            Cli::try_parse_from([
+                "voiceremote",
+                "run",
+                "--account",
+                "test-account",
+                "--agents-config",
+                "/synthetic/config.toml"
+            ])
+            .is_err()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "voiceremote",
+                "run",
+                "--headless",
+                "--account",
+                "test-account",
+                "--agents-config",
+                "/synthetic/config.toml"
+            ])
+            .is_ok()
+        );
+    }
 }

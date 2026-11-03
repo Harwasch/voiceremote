@@ -73,6 +73,86 @@ exchange is required. [Exact flow and limitations](../../SYS/protocol/noise.md).
 | Dictation | Large JSON is split into independently encrypted packets ≤11,000 bytes; strict ordered reassembly precedes validation/injection. Maximum legal Unicode dictation fits the worker’s 16,384-byte frame cap. Malformed/interleaved fragments fail closed. Only validated committed text addressed to this desktop reaches `TextInjector`. C0/C1 controls and line/paragraph separators rejected; partial/stale/duplicate segments do not insert. Windows uses private clipboard paste (unconfirmed and retained after a queued chord), pre-chord restoration, Unicode fallback, UIA password/read-only denial and UIPI checks. Linux remains unavailable until its platform worker attaches it. No text logged. |
 | Windows focus | Windows app session adapter sends encrypted focus boolean + last input time on change with a 30-second heartbeat (sampled each second); no field values or titles. Its transport keeps partial LAN frames and relay heartbeat timers across focus polls. The core transport/supervisor APIs remain unchanged; adapters are Windows-only except synthetic Linux tests. Native behavior and phone UI remain **unverified**; see [manual checks](crates/inject-windows/manual-test.md). |
 | Commands | Schema approval invariants enforced and idempotency reserved; no execution queue or provider invocation exists. Trusted policy/preview/scope validation is P1, not inferred from model fields. `Target` and `AgentAdapter` are empty extension traits. |
+| Idempotency | Durable, separate command and committed-segment namespaces. Reserve before dispatch/injection, never evict. A crash or injection failure after reservation is at-most-once: delivery may be lost and needs explicit reconciliation. Journal disk growth is unbounded; quota/retention policy **TBD**. |
+| Dictation | Large JSON is split into independently encrypted packets ≤11,000 bytes; strict ordered reassembly precedes validation/injection. Maximum legal Unicode dictation fits the worker’s 16,384-byte frame cap. Malformed/interleaved fragments fail closed. Only validated committed text addressed to this desktop reaches `TextInjector`. C0/C1 controls and line/paragraph separators rejected; partial/stale/duplicate segments do not insert. CLI adapter deliberately reports unavailable until injection crates are attached. No text logged. |
+| Commands | Default receiver reserves commands without execution. Opt-in headless `--agents-config` attaches exact-session CLI adapters through paired Noise; see [agent nodes](#agent-nodes) for authority, lifetime and cancellation limits. Core `AgentAdapter` remains a marker extension trait. |
 | Relay gaps | The 32,768-byte offline queue cannot buffer the entire largest Unicode dictation; online fragmentation is tested, offline delivery of that size is not guaranteed. No anonymous first-pair key discovery, whole-room deletion or end-to-end fragment delivery acknowledgement is defined. Failed Noise pairing best-effort revokes the invited phone membership so a fresh invitation can be issued. |
 | Timing / deployment | Compute pairing under one minute tested over loopback TCP and fake relay. Human time, home/external network, physical iPhone, mDNS on actual LAN, live TLS and Windows runtime **unverified**. |
 | UI | `dictate toggle` explicitly reports a stub. `tray` feature reserved; no Tauri dependency. |
+
+## Agent nodes
+
+```mermaid
+flowchart LR
+    Phone[Paired iPhone / authorized_command] --> Noise[Encrypted LAN or relay]
+    Noise --> Node[run --headless --agents-config]
+    Owner[Owner allowlist: project + exact session] --> Node
+    Node --> Claude[claude -p --resume]
+    Node --> Codex[codex exec resume / explicit sandbox]
+    Claude & Codex --> Status[task_status]
+```
+
+| Path | What | Status |
+|---|---|---|
+| [crates/agents/](crates/agents/README.md) | REQ-34/41/44: exact-session adapters + private durable replay claims | ✅ synthetic Linux Noise/fake CLI tests; live providers unverified |
+| [User unit](crates/agents/systemd/voiceremote-agent.service) | Optional systemd template | 🟡 not installed |
+
+Pair the host with the phone first using the existing `pair` command. Authenticate
+installed Claude Code and Codex CLIs as that same Unix user through their own
+supported login flow. The adapter reads no auth files and forwards no API keys.
+Keep the allowlist outside the repository, owner-controlled (no group/other write).
+`host` must equal the paired receiver's device ID, and `phone_device` its paired
+iOS device ID. Use exact provider IDs from the owner's known sessions:
+
+```toml
+account = "ACCOUNT"
+host = "hwgeekom"
+phone_device = "PHONE_DEVICE_ID"
+actor = "OWNER_ACTOR_ID"
+max_command_age_ms = 30000
+# Owner-selected resource limits, not benchmark measurements.
+timeout_ms = 120000
+max_output_bytes = 1048576
+
+[[projects]]
+project = "arm-design"
+workspace = "/absolute/owner/project"
+provider = "claude" # claude | codex | cloud (not configured)
+account = "ACCOUNT"
+host = "hwgeekom"
+capability_profile = "read-only" # safest default if omitted; workspace-write enables edits
+sessions = ["EXACT_PROVIDER_SESSION_ID"]
+# Optional owner-exported metadata file, outside all agent workspaces:
+# discovery_file = "/absolute/owner/config/arm-sessions.toml"
+```
+
+Each discovery entry has `[[sessions]]`, `provider_session_id`, and an absolute
+`workspace` equal to this project's allowed directory. Unknown projects/sessions,
+missing session IDs and cross-workspace entries reject. There is no latest-session
+selection, provider fallback or home-directory transcript crawl.
+
+```sh
+cargo run -p voiceremote-app -- run --headless --account ACCOUNT --peer PEER_FINGERPRINT --agents-config /absolute/owner/agents.toml
+HEAVY_CPUS=4 heavy cargo test -p voiceremote-agents --manifest-path SW/desktop/Cargo.toml -j4
+```
+
+Delegation requires phone-authenticated sensitive approval. Lifetime is bounded
+from `created_at` because the current wire schema lacks exact expiry/preview bytes.
+Cancel/revoke is read concurrently on the same paired LAN or relay connection.
+Three execution slots reserve LAN capacity for controls. Per-task systemd user
+scopes confirm tree cleanup; without a bus or confirmed cleanup, status remains
+`running/unavailable` (unconfirmed), never cancelled. Retries return durable running
+or terminal receipts. Live cgroups/providers and exact phone expiry remain
+**unverified**; Windows execution refuses before spawning. See the complete
+[operational boundaries](crates/agents/README.md).
+
+Optional user-service setup (instructions only; none performed): place the built
+binary at `~/.local/bin/voiceremote`, copy the unit to
+`~/.config/systemd/user/voiceremote-agent.service`, and create private
+`~/.config/voiceremote/agents.toml` plus `agent.env` containing only
+`VOICEREMOTE_ACCOUNT=...` and `VOICEREMOTE_PHONE=...` (peer fingerprint).
+Review the unit's PATH for installed CLIs, then run `systemctl --user daemon-reload`
+and `systemctl --user enable --now voiceremote-agent`. The service and task scopes
+default to `MemoryMax=2G`, `CPUQuota=100%` (**TBC**). Logs contain no transcripts;
+provider CLI storage follows the provider's own retention policy. Service deployment
+and permission-setting behavior on the owner machine are **unverified**.
