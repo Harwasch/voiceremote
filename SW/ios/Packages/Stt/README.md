@@ -88,3 +88,11 @@ so boundary CRLF cannot evade rejection. Cleanup already checked scalars and ret
 on failure; regression tests cover CRLF, embedded CRLF and control + combining marks. Raw cleanup
 fallback is not insertion permission: Core sanitizes and Protocol/KeyboardBridge validate the
 final boundary. Apple execution remains **unverified** pending coordinator CI.
+
+Task 6 capture interruption addition ([REQ-5], [REQ-50], [REQ-56]): `CaptureSource.events()`
+carries frames or terminal `.interrupted`; finite legacy sources default to frame wrapping.
+Live sources must implement interruption events. EngineRouter discards all uncommitted text
+on loss (including offline), and A/B refuses to export an interrupted run. Consumers use
+events rather than stripping the loss signal via `frames()`. Existing engine PCM interfaces
+remain unchanged. [InterruptedCaptureTests](Tests/InterruptedCaptureTests.swift) cover
+loss/late-frame rejection and A/B failure; Apple/BLE behavior is **unverified**.

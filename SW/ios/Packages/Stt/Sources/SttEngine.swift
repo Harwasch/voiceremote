@@ -21,7 +21,7 @@ public struct AudioFrame: Sendable, Equatable {
 }
 
 public enum SttFailure: String, Error, Sendable, Equatable {
-    case invalidAudio, unavailable, transport, invalidResponse, timedOut, cancelled
+    case invalidAudio, unavailable, transport, invalidResponse, timedOut, cancelled, interrupted
 }
 
 /// Each partial replaces the current uncommitted segment; each final appends one stable segment.
@@ -50,8 +50,27 @@ public protocol SttEngine: Sendable {
     func transcribe(_ audio: AsyncStream<AudioFrame>, vocabulary: Vocabulary) -> AsyncStream<SttEvent>
 }
 
+/// Interruption is terminal for this utterance, never a successful EOS. Consumers
+/// discard all uncommitted text; a fresh trigger creates a fresh capture source.
+public enum CaptureEvent: Sendable, Equatable {
+    case frame(AudioFrame)
+    case interrupted
+}
 public protocol CaptureSource: Sendable {
     func frames() -> AsyncStream<AudioFrame>
+    func events() -> AsyncStream<CaptureEvent>
+}
+public extension CaptureSource {
+    /// Compatibility for finite/replayed sources which cannot lose transport.
+    func events() -> AsyncStream<CaptureEvent> {
+        AsyncStream { output in
+            let task = Task {
+                for await frame in frames() { output.yield(.frame(frame)) }
+                output.finish()
+            }
+            output.onTermination = { _ in task.cancel() }
+        }
+    }
 }
 
 /// In-memory only; the caller owns private persistence and selects the authenticated user's list.

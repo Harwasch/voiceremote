@@ -24,6 +24,22 @@ packages:
     path: Packages/KeyboardBridge
   BrainApple:
     path: Packages/BrainApple
+  Protocol:
+    path: Packages/Protocol
+  AppModel:
+    path: Packages/AppModel
+  Policy:
+    path: Packages/Policy
+  Router:
+    path: Packages/Router
+  Pairing:
+    path: Packages/Pairing
+  SwiftCrypto:
+    url: https://github.com/apple/swift-crypto.git
+    exactVersion: 4.0.0
+  SwiftOpus:
+    url: https://github.com/alta/swift-opus.git
+    exactVersion: 0.0.2
 targets:
   VoiceRemote:
     type: application
@@ -31,6 +47,9 @@ targets:
     sources:
       - path: App
         excludes: [README.md]
+      - path: LiveActivity/ListeningAttributes.swift
+      - path: ../bench/sets/phrases.json
+        buildPhase: resources
       - path: Configuration/Assets.xcassets
     settings:
       base:
@@ -43,8 +62,27 @@ targets:
         CFBundleDisplayName: Voice Remote
         UILaunchScreen: {}
         NSSupportsLiveActivities: true
+        UIBackgroundModes: [audio, bluetooth-central]
+        NSMicrophoneUsageDescription: Turn speech into text for the destination you choose. Audio is only saved in the benchmark recorder.
+        NSSpeechRecognitionUsageDescription: Transcribe your speech for dictation and reviewed commands.
+        NSCameraUsageDescription: Scan a computer's pairing QR code. You can paste the code instead.
+        NSBluetoothAlwaysUsageDescription: Connect your voice remote microphone and show its recording state.
+        NSLocalNetworkUsageDescription: Find and pair your computers without entering an IP address.
+        NSBonjourServices: [_voiceremote._tcp]
+        NSFaceIDUsageDescription: Approve the exact sensitive action shown on your iPhone.
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
     dependencies:
+      - package: AppModel
+      - package: Protocol
+        product: VoiceRemoteProtocol
+      - package: Policy
+      - package: Router
+      - package: Pairing
+      - package: KeyboardBridge
+      - package: SwiftCrypto
+        product: Crypto
+      - package: SwiftOpus
+        product: Copus
       - package: Core
       - package: Stt
       - package: SttApple
