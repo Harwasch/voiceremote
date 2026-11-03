@@ -348,3 +348,19 @@ extension RouterTests {
         XCTAssertThrowsError(try TaskRouter(store: store, policy: a.gate))
     }
 }
+
+extension RouterTests {
+    func testSameIDProviderAndProfileVariantsRequireReapproval() async throws {
+        for providerChange in [false, true] {
+            let a = try Authority(), original = destination("laptop", online: false)
+            let identity = SessionIdentity(provider: providerChange ? "Codex" : original.session.provider, account: original.session.account, host: original.session.host, workspace: original.session.workspace, providerSessionID: original.session.providerSessionID, capabilityProfile: providerChange ? original.session.capabilityProfile : "other-profile")
+            let variant = Destination(id: original.id, session: identity, capabilities: original.capabilities, available: true)
+            let permit = try await a.issue(original, pinned: true)
+            var r = rules(original.id); r.selectedSession = original.session; r.localProviderOrder = [identity.provider]
+            let router = try TaskRouter(store: MemoryStore(), policy: a.gate), fake = FakeAgent(variant)
+            try router.enqueue(permit, rules: r, destinations: [original, variant]); try router.reconnect(targets: [fake])
+            XCTAssertTrue(fake.commands.isEmpty)
+            XCTAssertEqual(router.snapshot().first?.hold, .reapprovalRequired)
+        }
+    }
+}

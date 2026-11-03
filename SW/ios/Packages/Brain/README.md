@@ -34,3 +34,5 @@ Measurement update ([REQ-15], [REQ-39]): Claude HTTP reads reject oversized head
 Suggestion review has a separate `reviewing` state; Policy issuance marks authorized, and only authenticated executor completion releases linked successors. Explicit command context enables hybrid simple routing, including terminal speech punctuation. Ambient/ambiguous wake remains proposal-only.
 
 Open-capture hypotheses are explicitly distinct from complete commands. Cards stay non-executing; revisions invalidate reviews and authorized-but-undispatched cards, while independently dispatched work keeps its identity. Linked successors require trusted completion. Evidence: [SuggestionTests.swift](Tests/SuggestionTests.swift); native speech/Brain quality **unverified**.
+
+Identical final text skips inference only when its hypothesis actually produced cards. Failed/deferred hypotheses retry; review-only silence boundaries confer no execution authority.

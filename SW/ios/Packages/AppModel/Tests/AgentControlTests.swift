@@ -576,6 +576,7 @@ private final class AgentRetentionClock: @unchecked Sendable {
             #expect(agent.router.snapshot().first?.hold != nil)
         } else {
             #expect(rig.model.approval?.route?.session == expected)
+            if scenario == "cloud-allowed" { #expect(rig.model.approval?.routeDescription?.contains("Cloud fallback · new execution") == true) }
             #expect(rig.model.approval?.preview.risk == .sensitive)
             await rig.model.approve()
             #expect(agent.router.snapshot().count == 1)
@@ -671,4 +672,43 @@ private final class AgentRetentionClock: @unchecked Sendable {
     if let card = rig.model.suggestions.first { await rig.model.review(card) }
     #expect(rig.model.approval?.route?.session != other)
     #expect(agent.router.snapshot().isEmpty)
+}
+
+@Test @MainActor func sessionTimeoutIsContentButExplicitSessionGrammarConstrainsRouting() async throws {
+    let rig = try AgentRig(); try await rig.install()
+    let ordinary = try rig.control.routingRules(project: "arm", text: "fix the session timeout")
+    #expect(ordinary.explicitSession == nil)
+    let named = try rig.control.routingRules(project: "arm", text: "fix it in session named-session")
+    #expect(named.explicitSession?.providerSessionID == "named-session")
+    #expect(throws: (any Error).self) { try rig.control.routingRules(project: "arm", text: "fix it in session missing") }
+}
+@Test @MainActor func independentSpeechDoesNotCancelApprovedOfflineIntent() async throws {
+    let agent = try AgentRig(); try await agent.install()
+    try agent.control.choose(try #require(agent.control.destinations.first).session)
+    let rig = try Rig(script: [.final("Synthetic independent speech")], tool: .delegateTaskTool(.init(account_id: "fixture", device_id: "pc", project_id: "arm", provider_session_id: "named-session", instruction: "Synthetic held work")), agent: agent.control, policy: agent.gate)
+    try await rig.registry.register(agent.device); await rig.model.refresh()
+    agent.control.disconnected("pc", epoch: agent.epoch)
+    rig.model.setMode(.ai_control); rig.model.setCapture(.continuous)
+    try await rig.until { rig.model.isRecording }
+    func slice(_ t: Double) throws {
+        rig.capture.channel.continuation.yield(.frame(try AudioFrame(samples: [1000], timestamp: t)))
+        rig.capture.channel.continuation.yield(.frame(try AudioFrame(samples: Array(repeating: 0, count: 12_800), timestamp: t + 0.1)))
+    }
+    try slice(0); try await rig.until { !rig.model.suggestions.isEmpty }
+    await rig.model.review(try #require(rig.model.suggestions.first)); await rig.model.approve()
+    let task = try #require(agent.router.snapshot().first)
+    try slice(1)
+    for _ in 0..<2000 { if await rig.brain.calls >= 2 { break }; await Task.yield() }
+    #expect(agent.gate.state(requestID: try #require(UUID(uuidString: task.command.candidate_id))) == .queued)
+    #expect(rig.model.isRecording)
+    rig.model.stop()
+}
+
+@Test func providerOrderDraftPreservesCommaWhileEditing() {
+    var draft = ProviderOrderDraft(text: "codex")
+    draft.text.append(",")
+    #expect(draft.text == "codex,")
+    draft.text.append(" claude")
+    #expect(draft.providers == ["codex", "claude"])
+    #expect(draft.text == "codex, claude")
 }

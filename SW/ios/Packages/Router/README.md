@@ -55,3 +55,5 @@ On hwgeekom prefix commands with `HEAVY_CPUS=4 heavy`.
 Queue dependency IDs are bound by the trusted phone composition. Reconnect releases a successor only after a matching authenticated `ok` predecessor outcome. Restored successful predecessors need fresh receipt confirmation. Replacement approval retires the old queued item atomically with the new reservation. Fresh cancellation permits can mark an expired/restored original task without reviving its execution authority.
 
 Phone owner completion is a separate sealed Policy receipt, bound to the exact command/preview/full provider session and anchored in audit. Queue snapshots alone cannot restore that success. Selected/default session identities feed the resolver; changed destinations stay held until a new Policy approval. See [tests](Tests/README.md); live effects remain **unverified**.
+
+Queued tasks retain the full approved session, including provider, profile and execution workspace. A same-ID/session-string alternative cannot dispatch without reapproval; legacy ambiguous identities stay held.

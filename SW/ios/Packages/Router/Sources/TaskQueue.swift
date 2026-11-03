@@ -28,6 +28,7 @@ public struct QueuedTask: Codable, Equatable, Sendable {
     public let permitExpiresAt: Int64
     public let rules: RoutingRules
     public let permittedDestinations: [Destination]
+    public var approvedSession: SessionIdentity? = nil
     public var state: ExecutionState = .queued
     public var hold: HoldReason?
     public var route: RouteChoice?
@@ -146,8 +147,9 @@ public final class FileTaskQueueStore: TaskQueueStore, @unchecked Sendable {
     private func verify(_ task: QueuedTask) throws {
         _ = try policy.verifyExecution(command: task.command, immutablePreview: task.immutablePreview, expiresAt: task.permitExpiresAt)
         try Self.validate(task.command, task.rules, task.permittedDestinations)
+        let approved = try Self.approvedDestination(command: task.command, rules: task.rules, allowed: task.permittedDestinations, explicit: task.approvedSession)
         if let route = task.route {
-            guard route.destination.id == task.command.destination_id,
+            guard route.destination.session == approved.session, route.destination.id == task.command.destination_id,
                   task.command.provider_session_id == nil || task.command.provider_session_id == route.destination.session.providerSessionID else {
                 throw RouterError.invalidAuthorization
             }
@@ -185,8 +187,18 @@ public final class FileTaskQueueStore: TaskQueueStore, @unchecked Sendable {
         }
     }
 
+    private static func approvedDestination(command: AuthorizedCommand, rules: RoutingRules, allowed: [Destination], explicit: SessionIdentity?) throws -> Destination {
+        let matching = allowed.filter { $0.id == command.destination_id && (command.provider_session_id == nil || $0.session.providerSessionID == command.provider_session_id) }
+        for identity in [explicit, rules.explicitSession, rules.selectedSession].compactMap({ $0 }) {
+            if let destination = matching.first(where: { $0.session == identity }) { return destination }
+            if explicit != nil { throw RouterError.invalidAuthorization }
+        }
+        guard matching.count == 1 else { throw RouterError.invalidAuthorization }
+        return matching[0]
+    }
+
     @discardableResult
-    public func enqueue(_ permit: ExecutionPermit, rules: RoutingRules, destinations allowed: [Destination], replacingCommandID: String? = nil) throws -> QueuedTask {
+    public func enqueue(_ permit: ExecutionPermit, rules: RoutingRules, approvedDestination: Destination? = nil, destinations allowed: [Destination], replacingCommandID: String? = nil) throws -> QueuedTask {
         let c = permit.command
         _ = try policy.verifyExecution(command: c, immutablePreview: permit.immutablePreview, expiresAt: permit.expiresAt)
         try Self.validate(c, rules, allowed)
@@ -197,7 +209,9 @@ public final class FileTaskQueueStore: TaskQueueStore, @unchecked Sendable {
             }
             return task
         }
-        let task = QueuedTask(command: c, immutablePreview: permit.immutablePreview, permitExpiresAt: permit.expiresAt, rules: rules, permittedDestinations: allowed, updatedAt: c.updated_at)
+        let approved = try Self.approvedDestination(command: c, rules: rules, allowed: allowed, explicit: approvedDestination?.session)
+        var task = QueuedTask(command: c, immutablePreview: permit.immutablePreview, permitExpiresAt: permit.expiresAt, rules: rules, permittedDestinations: allowed, updatedAt: c.updated_at)
+        task.approvedSession = approved.session
         var next = tasks
         if let replacing = replacingCommandID {
             guard let index = next.firstIndex(where: { $0.command.command_id == replacing }),
@@ -279,7 +293,9 @@ public final class FileTaskQueueStore: TaskQueueStore, @unchecked Sendable {
                 try persist(next)
             case .dispatch(let choice):
                 // Routing chooses a candidate; it cannot change what was approved.
-                guard choice.destination.id == task.command.destination_id,
+                let approved = try Self.approvedDestination(command: task.command, rules: task.rules, allowed: task.permittedDestinations, explicit: task.approvedSession)
+                guard choice.destination.session == approved.session,
+                      choice.destination.id == task.command.destination_id,
                       task.command.provider_session_id == nil || task.command.provider_session_id == choice.destination.session.providerSessionID else {
                     next[index].hold = .reapprovalRequired
                     try persist(next); continue

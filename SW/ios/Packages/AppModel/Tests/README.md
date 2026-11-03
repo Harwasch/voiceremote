@@ -50,3 +50,5 @@ The socket fake enforces same-device replacement and destructive queue drain, ma
 | [AgentControlTests.swift](AgentControlTests.swift) | Two authenticated hosts/providers plus cloud: explicit/selected/recent/default, local/cloud fallback, held machine/named targets, actual replacement approval/dispatch; owner-observed file fixture, completion binding, stale/reconnect/cancellation negatives and linked phone workflow |
 
 These prove synthetic policy/routing behavior. The scoped result-file fixture is checked independently before the simulated owner tap; live provider effects and SwiftUI execution remain **unverified**.
+
+Review regressions reproduce independent-speech cancellation, cumulative-text capture failure, cross-target grant failure, mid-capture destination reset, ordinary “session timeout” rejection and editable provider commas. Intent tests cover committed-intent separation, unfinished correction/continuation identity and full-context negation. Production cloud approval asserts the new-execution label.

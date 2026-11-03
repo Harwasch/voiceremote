@@ -56,3 +56,5 @@ User-requested relay cleanup uses `RelayMembershipCleanup`: peer 403 never skips
 PhoneConnection is the shared app/e2e request and outcome seam; PreferredConnection chooses LAN before relay at connect/resume, without retrying text. The e2e executable also exercises the real Core Auto picker.
 
 Async tests use an outer deadline (20 s, 120 s for Rust build/interop), including waits on task values and process startup/exit. [TestDeadline](Tests/TestDeadline.swift) returns even when cancellation is ignored; interop helpers unblock inherited SIGTERM, kill/reap the cargo process group and enforce a 90 s process deadline. Regressions cover a blocked-signal child and a cancellation-ignoring wait. The original reported multi-hour orphan did not reproduce in six bounded baseline suite runs; its exact historical cause remains **unverified**.
+
+Outgoing revoke retires local enrollment even if notification fails. Peer EOF after delivery may close the session before the sender resumes; that close no longer prevents retirement. A deterministic peer-close regression covers the E2E LAN failure ordering.

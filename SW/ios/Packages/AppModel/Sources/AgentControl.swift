@@ -212,12 +212,18 @@ private struct AgentPreviews: Sendable {
         }
         let hosts = Set(destinations.filter { mentions($0.id) }.map(\.id))
         let providers = Set(destinations.filter { mentions($0.session.provider) }.map { $0.session.provider })
-        let sessions = Set(destinations.filter { mentions($0.session.providerSessionID) }.map(\.session))
+        // Session is an ordinary noun in task content. Only an explicit routing
+        // phrase names a session; a bare “session timeout” creates no constraint.
+        let sessionPattern = #"\bin session\s+([a-z0-9_-]+)"#
+        let sessionName: String? = normalized.range(of: sessionPattern, options: .regularExpression).flatMap {
+            normalized[$0].split(whereSeparator: \.isWhitespace).last.map(String.init)
+        }
+        let sessions = Set(destinations.filter { $0.session.providerSessionID.lowercased() == sessionName }.map(\.session))
         guard hosts.count <= 1, providers.count <= 1, sessions.count <= 1 else { throw AppRoutingError.unknownProviderSession }
         rules.explicitTarget = hosts.first; rules.explicitHost = hosts.first
         rules.explicitProvider = providers.first; rules.explicitSession = sessions.first
         // An unknown named session/provider/host must not fall through to a default.
-        for marker in ["on host", "using provider", "session"] {
+        for marker in ["on host", "using provider", "in session"] {
             if let range = normalized.range(of: "\\b" + marker + "\\s+([a-z0-9_-]+)", options: .regularExpression) {
                 let value = normalized[range].split(whereSeparator: \.isWhitespace).last.map(String.init) ?? ""
                 let known = destinations.contains { $0.id.lowercased() == value || $0.session.provider.lowercased() == value || $0.session.providerSessionID.lowercased() == value }
@@ -297,7 +303,7 @@ private struct AgentPreviews: Sendable {
         }
         if !rules.cloudCapable, rules.machineDependency == nil { rules.machineDependency = destination.session.host }
         rules.dependencies = dependencies
-        _ = try router.enqueue(permit, rules: rules, destinations: plannedRules == nil ? [destination] : destinations.filter { $0.session.workspace == project && $0.capabilities.contains(capability) }, replacingCommandID: replacingCommandID)
+        _ = try router.enqueue(permit, rules: rules, approvedDestination: destination, destinations: plannedRules == nil ? [destination] : destinations.filter { $0.session.workspace == project && $0.capabilities.contains(capability) }, replacingCommandID: replacingCommandID)
         routing.independentCloudTasks = false
         routing.recent.removeAll { $0.session == destination.session }
         routing.recent.insert(AgentSessionUse(session: destination.session, timestamp: now()), at: 0)
@@ -426,4 +432,12 @@ private struct AgentPreviews: Sendable {
             try await connection.send(.authorizedCommand(permit.command))
         }
     }
+}
+
+/// Keep the editable text separate from its normalized provider order. A trailing
+/// comma remains visible while the next provider is being typed.
+public struct ProviderOrderDraft: Equatable, Sendable {
+    public var text: String
+    public init(text: String = "") { self.text = text }
+    public var providers: [String] { text.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty } }
 }

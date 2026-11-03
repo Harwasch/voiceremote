@@ -358,16 +358,17 @@ actor BrainSpy: LlmBrain {
 }
 
 @Test @MainActor func commandCorrectionsAcrossSilenceSlicesReplaceHypothesesWithoutDispatch() async throws {
-    let rig = try Rig(script: [.final("synthetic correction")])
+    var words = "synthetic request"
+    let rig = try Rig(scriptProvider: { [.final(words)] })
     rig.model.setMode(.ai_control); rig.model.setCapture(.continuous)
     try await rig.until { rig.model.isRecording }
-    rig.capture.channel.continuation.yield(.frame(try AudioFrame(samples: [1000], timestamp: 0)))
-    rig.capture.channel.continuation.yield(.frame(try AudioFrame(samples: Array(repeating: 0, count: 12_800), timestamp: 0.1)))
+    rig.capture.channel.continuation.yield(.frame(try AudioFrame(samples: Array(repeating: 1000, count: 320_000), timestamp: 0)))
     try await rig.until { !rig.model.suggestions.isEmpty }
     #expect(await rig.brain.calls == 1)
     #expect(rig.model.suggestions.count == 1)
     let prior = try #require(rig.model.suggestions.first)
     await rig.model.review(prior)
+    words = "no, synthetic correction"
     rig.capture.channel.continuation.yield(.frame(try AudioFrame(samples: [1000], timestamp: 1)))
     rig.model.finishUtterance()
     try await rig.until { rig.model.listening == .idle }
@@ -375,6 +376,6 @@ actor BrainSpy: LlmBrain {
     await rig.model.approve()
     #expect(rig.model.controls.target == .auto)
     let transcript = await rig.brain.requests.last?.transcript
-    #expect(transcript == "Synthetic correction. Synthetic correction.")
+    #expect(transcript == "Synthetic request. No, synthetic correction.")
     #expect(rig.execution.permits.isEmpty)
 }

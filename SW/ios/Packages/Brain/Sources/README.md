@@ -33,3 +33,7 @@ SuggestionEngine separates review, authorization and successful completion. Comm
 `SuggestionEngine.authorized` returns acceptance; dismissed/expired/revised reviews return false. Exact approved-card retries are idempotent so uncertain queue persistence can be reconciled.
 
 `TranscriptSegment.hypothesis` permits bounded ambient inference before capture ends without setting `isComplete`. Equal-text EOS preserves the hypothesis instead of issuing duplicate inference. `executionCommitted` separates dispatch from approval; `releaseReview` creates a fresh review revision after an unavailable/changed route. Neither method grants execution authority.
+
+Segment revisions track whether inference produced cards. Identical EOS may reuse a successful hypothesis; failed/deferred inference remains eligible for final processing.
+
+An explicit “then” in a new committed intent retains a dependency on the preceding intent’s card. Missing/failed predecessors cannot become independent execution.

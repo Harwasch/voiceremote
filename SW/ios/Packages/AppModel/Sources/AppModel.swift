@@ -68,7 +68,7 @@ public struct ApprovalCard: Identifiable, Sendable {
     public var routingRules: RoutingRules? = nil
     public var routeDescription: String? {
         guard let route else { return nil }
-        return (route.available ? "Connected\n" : "Offline — this task will wait\n") + "\(route.session.provider) / \(route.session.host) / \(route.session.workspace) / \(route.session.providerSessionID) / \(route.session.capabilityProfile)\n" + (route.session.executionWorkspace ?? "")
+        return (route.isCloud ? "Cloud fallback · new execution\n" : "") + (route.available ? "Connected\n" : "Offline — this task will wait\n") + "\(route.session.provider) / \(route.session.host) / \(route.session.workspace) / \(route.session.providerSessionID) / \(route.session.capabilityProfile)\n" + (route.session.executionWorkspace ?? "")
     }
     public var suggestionID: UUID? = nil
     public var suggestionRevision: Int = 0
@@ -322,8 +322,7 @@ public struct TaskCompletionCard: Identifiable, Sendable {
                 var currentSegment = segmentID
                 let slices = CaptureSegmenter().slices(from: source)
                 var firstSlice = true
-                var commandText = ""
-                var commandRevision = 0
+                var intents = CaptureIntentBuffer()
                 for await slice in slices {
                     guard epoch == token, !Task.isCancelled else { break }
                     if !firstSlice {
@@ -333,13 +332,15 @@ public struct TaskCompletionCard: Identifiable, Sendable {
                         currentSegment = UUID().uuidString
                         if state.mode == .dictation {
                             selected = try await pipeline.prepare(segmentID: currentSegment, state: state, picker: picker, now: now())
-                        } // AI command keeps its original destination for the whole utterance.
-                        guard epoch == token, !Task.isCancelled else { await pipeline.cancel(segmentID: currentSegment); return }
-                        if destination?.device_id != selected.device_id {
-                            suggestionEngine = nil; suggestions = []; suggestionTargets = [:]
                         }
-                        destination = selected
-                        stateDidChange?(isRecording, selected.display_name)
+                        guard epoch == token, !Task.isCancelled else { await pipeline.cancel(segmentID: currentSegment); return }
+                        if state.mode == .dictation {
+                            if destination?.device_id != selected.device_id {
+                                suggestionEngine = nil; suggestions = []; suggestionTargets = [:]
+                            }
+                            destination = selected
+                            stateDidChange?(isRecording, selected.display_name)
+                        }
                     }
                     firstSlice = false
                     var finals: [String] = []
@@ -361,13 +362,10 @@ public struct TaskCompletionCard: Identifiable, Sendable {
                         } else {
                             // Brain work is independent of the capture producer; it cannot
                             // authorize or stop capture. Bounded slice buffering fails closed.
-                            commandText += (commandText.isEmpty ? "" : " ") + text
-                            guard commandText.count <= 16_384 else { throw BrainError.invalidResponse }
-                            // A time/silence slice is not an utterance boundary. Retain
-                            // revisions so a later correction replaces the same input.
-                            commandRevision += 1
-                            try await propose(commandText, segmentID: segmentID, revision: commandRevision,
-                                complete: false, activation: activation, selected: selected, token: token, settings: snapshot)
+                            for intent in intents.append(text, boundary: slice.boundary, deliberate: activation == .ptt) {
+                                try await propose(intent.text, segmentID: intent.id, revision: intent.revision,
+                                    complete: false, activation: activation, selected: selected, token: token, settings: snapshot)
+                            }
                         }
                         await refresh()
                         guard epoch == token, !Task.isCancelled else { return }
@@ -377,10 +375,9 @@ public struct TaskCompletionCard: Identifiable, Sendable {
                 }
                 await pipeline.cancel(segmentID: currentSegment)
                 guard epoch == token, !Task.isCancelled else { return }
-                if state.mode == .ai_control, !failed, !commandText.isEmpty {
-                    commandRevision += 1
-                    try await propose(commandText, segmentID: segmentID, revision: commandRevision,
-                        complete: true, activation: activation, selected: selected, token: token, settings: snapshot)
+                if state.mode == .ai_control, !failed, let final = intents.finish() {
+                    try await propose(final.text, segmentID: final.id, revision: final.revision,
+                        complete: true, activation: intents.rolledOver ? .inferred : activation, selected: selected, token: token, settings: snapshot)
                 }
                 source.finish(); capture = nil
                 await refresh()
@@ -388,7 +385,7 @@ public struct TaskCompletionCard: Identifiable, Sendable {
                 partial = ""; cloudInUse = false
                 trigger.stop()
                 listening = failed ? .interrupted : .idle; worker = nil
-                stateDidChange?(false, selected.display_name)
+                stateDidChange?(false, destination?.display_name ?? selected.display_name)
             } catch {
                 await pipeline.cancel(segmentID: segmentID)
                 guard epoch == token else { return }
@@ -423,7 +420,7 @@ public struct TaskCompletionCard: Identifiable, Sendable {
                    let request = UUID(uuidString: task.command.candidate_id) { _ = policy.transition(requestID: request, to: .cancelled) }
             }
         }
-        segmentTexts[segmentID] = text
+        segmentTexts = [segmentID: text]
         await engine.setMutedDuringMeeting(muted)
         let update = await engine.ingest(TranscriptSegment(id: segmentID, revision: revision, text: text,
             isFinal: true, isComplete: complete, contextID: selected.device_id, commandContext: activation == .ptt || wakeArmed,
@@ -452,13 +449,16 @@ public struct TaskCompletionCard: Identifiable, Sendable {
     /// A deliberately narrow low-risk grammar. Scope/identity come only from the
     /// phone permission setting and pinned capture, never from Brain or wake text.
     private func submitExplicitTarget(_ text: String, selected: DeviceInfo) throws -> Bool {
-        guard let scope = armedTargetScope, scope.device == selected.device_id,
-              scope.project == (agentControl?.selected?.workspace ?? "default"),
-              selected.account_id == accountID, selected.capabilities.contains(.receive_text) else { return false }
+        guard let scope = armedTargetScope,
+              scope.project == (agentControl?.selected?.workspace ?? "default") else { return false }
         let words = text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-        let names = [selected.device_id, selected.display_name] + (selected.device_id == phoneID ? ["phone", "iphone"] : [])
-        let allowed = names.flatMap { name in ["switch to " + name.lowercased(), "select " + name.lowercased()] }
-        guard allowed.contains(words) || allowed.contains(where: { words == $0 + "." }) else { return false }
+        let matches = (devices + [picker.phone]).filter { device in
+            guard device.account_id == accountID, device.capabilities.contains(.receive_text) else { return false }
+            let names = [device.device_id, device.display_name] + (device.device_id == phoneID ? ["phone", "iphone"] : [])
+            let allowed = names.flatMap { ["switch to " + $0.lowercased(), "select " + $0.lowercased()] }
+            return allowed.contains(words) || allowed.contains(where: { words == $0 + "." })
+        }
+        guard Set(matches.map(\.device_id)).count == 1, matches.first?.device_id == scope.device else { return false }
         let session = input.session(account: accountID, actor: actorID, session: UUID().uuidString,
             device: scope.device, project: scope.project, destinationKind: .software)
         let tool = ToolCall.selectTargetTool(SelectTargetTool(account_id: accountID, device_id: scope.device))

@@ -65,3 +65,5 @@ Cross-review: scene resume requires a prior background transition; Live Activity
 | Account records | `AppHistoryStore` / `RemoteOfflineSync`: version-2 account envelopes; validate whole input before use and migrate legacy data under the pin |
 
 An exact known offline local route remains reviewable as an explicit durable hold; its preview says it will wait. Availability is never rewritten for review, and only the same approved provider session can release it on reconnect.
+
+`CaptureSegmenter` carries silence/limit/end boundaries into bounded `CaptureIntentBuffer` revisions. Independent speech preserves earlier approvals/offline tasks; corrections invalidate only their unfinished intent. AI slices retain the displayed approved target. `ProviderOrderDraft` preserves typed commas; approval route descriptions label cloud fallback as new execution.

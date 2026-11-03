@@ -11,6 +11,8 @@ import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @Bindable var host: AppRuntime
+    @State private var localProviders = ProviderOrderDraft()
+    @State private var cloudProviders = ProviderOrderDraft()
     @State private var retentionWarnings: [HistoryEntry] = []
     var body: some View {
         @Bindable var model = host.model
@@ -51,12 +53,10 @@ struct SettingsView: View {
                 Text("Model and API version must match the relay deployment.").font(.footnote)
             }
             Section("Agent routing") {
-                TextField("Local providers in fallback order (comma separated)", text: Binding(
-                    get: { model.settings.routing.localProviderOrder.joined(separator: ",") },
-                    set: { model.settings.routing.localProviderOrder = $0.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty } }))
-                TextField("Cloud providers in fallback order (comma separated)", text: Binding(
-                    get: { model.settings.routing.cloudProviderOrder.joined(separator: ",") },
-                    set: { model.settings.routing.cloudProviderOrder = $0.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty } }))
+                TextField("Local providers in fallback order (comma separated)", text: $localProviders.text)
+                    .onChange(of: localProviders.text) { _, _ in model.settings.routing.localProviderOrder = localProviders.providers }
+                TextField("Cloud providers in fallback order (comma separated)", text: $cloudProviders.text)
+                    .onChange(of: cloudProviders.text) { _, _ in model.settings.routing.cloudProviderOrder = cloudProviders.providers }
                 Text("Choose the project, selected session and default in Suggestions. Named destinations stay constraints. Machine or file dependent work waits for its host.").font(.footnote)
             }
             Section("Vocabulary") {
@@ -89,6 +89,10 @@ struct SettingsView: View {
             }
             Section { NavigationLink("Benchmark recorder") { RecorderView(host: host) } }
         }.navigationTitle("Settings")
+        .onAppear {
+            localProviders = ProviderOrderDraft(text: model.settings.routing.localProviderOrder.joined(separator: ","))
+            cloudProviders = ProviderOrderDraft(text: model.settings.routing.cloudProviderOrder.joined(separator: ","))
+        }
         .onChange(of: model.settings) { _, _ in host.saveSettings() }
         .task {
             while !Task.isCancelled {

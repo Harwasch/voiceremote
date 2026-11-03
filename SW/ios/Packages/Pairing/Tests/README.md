@@ -35,3 +35,5 @@ All inputs are public test secrets or synthetic values generated in memory.
 | [TestDeadline.swift](TestDeadline.swift) | All async test bodies bounded (20 s; Rust interop 120 s); cancellation-ignoring wait and blocked-SIGTERM child cleanup regressions; cargo group killed/reaped within 90 s | ✅ Linux |
 
 The HTTP helper has its own 15 s lifetime cap. These are test bounds, not product latency targets. Six pre-change bounded runs passed; the original historical orphan cause is **unverified**. Existing production reconnect refusal/backoff/cancellation behavior remains covered without a speculative reconnect change.
+
+`testPeerEOFAfterRevokeDeliveryCannotUndoLocalRevocation` deterministically closes the session during the transport write, reproducing peer EOF after delivered revoke; local enrollment must remain retired.

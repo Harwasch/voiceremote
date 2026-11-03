@@ -79,3 +79,5 @@ Remote controls (REQ-4/8/18/49–53): both named boards use `RemoteBLECaptureSou
 Evidence: [cross-review tests](../Packages/AppModel/Tests/CrossReviewTests.swift) and [replacement-enforcing socket tests](../Packages/AppModel/Tests/SignedPhoneTransportTests.swift). Apple SDK/Keychain/physical BLE execution remains **unverified**.
 
 AI Control now exposes automatic session priorities/defaults, configured fallback orders and a one-action independence choice. Exact changed routes require new approval. The owner completion sheet shows instruction/task/full provider route and explains that linked steps wait for “This finished”. AppRuntime binds local history/offline/audit construction to the protected installation account. Argmax remains visibly unavailable without a licensed loaded adapter. Portable flows are tested in AppModel; SwiftUI/LA/device execution **unverified** on Linux.
+
+Provider-order editing keeps raw comma-separated drafts rather than rewriting text on every keystroke. Cloud approval previews explicitly say “Cloud fallback · new execution”. Portable draft/preview tests pass; Apple UI execution remains **unverified**.
