@@ -1,5 +1,6 @@
 //! Desktop session driver: encrypted focus reports plus existing bounded supervisors.
 //! Derived from core receiver; kept here until core exposes a platform metadata hook.
+use super::control;
 use super::desktop_transport::{LanListener, RelayTransport};
 use std::{future::Future, sync::Arc, time::Duration};
 use tokio::{sync::watch, task::JoinSet};
@@ -79,7 +80,15 @@ pub async fn serve(
         .get()
         .cloned()
         .unwrap_or_else(|| Arc::new(|| (false, 0)));
-    let result = serve_with_sampler(session, transport, injector, stop, sampler).await;
+    let result = serve_with_sampler(
+        session,
+        transport,
+        injector,
+        stop,
+        sampler,
+        control::hub().clone(),
+    )
+    .await;
     let _ = tokio::time::timeout(Duration::from_secs(1), transport.close()).await;
     result
 }
@@ -89,7 +98,10 @@ async fn serve_with_sampler(
     injector: &mut dyn TextInjector,
     stop: watch::Receiver<bool>,
     sampler: Sampler,
+    hub: Arc<std::sync::Mutex<control::Hub>>,
 ) -> Result<()> {
+    let (_registration, mut requests) = control::register(hub.clone());
+    let mut capture = None;
     let local = session
         .registry()
         .local_info()?
@@ -106,6 +118,27 @@ async fn serve_with_sampler(
             _=stopped(stop.clone())=>return Ok(()),
             _=poll.tick()=>session.check_active()?,
             _=tokio::time::sleep_until(idle)=>voiceremote_core::bail!("application idle timeout"),
+            request=requests.recv()=>{
+                let Some(request) = request else { continue; };
+                if request.expires <= tokio::time::Instant::now() || capture.is_none() {
+                    let _ = request.reply.send(false);
+                    continue;
+                }
+                use voiceremote_core::protocol::{CaptureState, CaptureStateReport, CaptureStateReportKind};
+                let desired = if capture == Some(CaptureState::Off) { CaptureState::Continuous } else { CaptureState::Off };
+                // Existing wire type only. This is a desired-state report to the phone;
+                // it never claims microphone state changed without a phone report.
+                let report = InnerMessage::CaptureStateReport(CaptureStateReport {
+                    kind: CaptureStateReportKind::CaptureState,
+                    account_id: local.account_id.clone(),
+                    device_id: session.peer().info.device_id.clone(),
+                    capture_state: desired,
+                });
+                let result = tokio::time::timeout(Duration::from_secs(2), session.send(transport, &report)).await;
+                let ok = matches!(result, Ok(Ok(())));
+                let _ = request.reply.send(ok);
+                result??;
+            },
             _=focus.tick()=>{
                 session.check_active()?;
                 let sampler = sampler.clone();
@@ -130,6 +163,21 @@ async fn serve_with_sampler(
                     Ok(tokio::time::timeout(IDLE_TIMEOUT, session.receive(&mut input)).await??)
                 }, &registry, &peer, stop.clone()).await?;
                 idle = tokio::time::Instant::now() + IDLE_TIMEOUT;
+                {
+                    let mut h = hub.lock().unwrap();
+                    match &message {
+                        InnerMessage::CaptureStateReport(report) if report.device_id == peer.info.device_id => {
+                            capture = Some(report.capture_state.clone());
+                            h.status.capture = capture.clone();
+                        }
+                        InnerMessage::ModeState(report) if report.device_id == peer.info.device_id => h.status.mode = Some(report.mode.clone()),
+                        InnerMessage::DictationText(text) if text.target_device_id == local.device_id => {
+                            h.status.destination = Some(local.display_name.clone());
+                            h.status.flash = h.status.flash.wrapping_add(1);
+                        }
+                        _ => {}
+                    }
+                }
                 // Do not print errors from decoding or field data. Native
                 // injection errors are fixed, content-free messages.
                 if session.deliver(transport, message, injector).await? == Delivery::Revoked {
@@ -360,6 +408,8 @@ mod tests {
         let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let called = calls.clone();
         let (_stop, watch) = watch::channel(false);
+        let hub = Arc::new(std::sync::Mutex::new(control::Hub::default()));
+        let observed = hub.clone();
         let task = tokio::spawn(async move {
             serve_with_sampler(
                 ds,
@@ -367,6 +417,7 @@ mod tests {
                 &mut Injector(injected, failure, called),
                 watch,
                 sampler,
+                hub,
             )
             .await
         });
@@ -379,6 +430,66 @@ mod tests {
         assert_eq!(first.last_activity_at, 1234);
         assert_eq!(first.device_id, "desktop");
         assert_eq!(serde_json::to_value(&first)?.as_object().unwrap().len(), 5);
+        // Prove a local hotkey request reaches the authenticated encrypted session.
+        ps.send(
+            &mut phone,
+            &InnerMessage::CaptureStateReport(CaptureStateReport {
+                kind: CaptureStateReportKind::CaptureState,
+                account_id: "synthetic-account".into(),
+                device_id: "phone".into(),
+                capture_state: CaptureState::Off,
+            }),
+        )
+        .await?;
+        for _ in 0..100 {
+            if observed.lock().unwrap().status.capture.is_some() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let control_hub = observed.clone();
+        let toggle = tokio::spawn(async move { control::toggle(&control_hub).await });
+        let request =
+            tokio::time::timeout(Duration::from_secs(3), ps.receive(&mut phone)).await??;
+        assert!(
+            matches!(request, InnerMessage::CaptureStateReport(CaptureStateReport {
+            capture_state: CaptureState::Continuous, device_id, ..
+        }) if device_id == "phone")
+        );
+        toggle.await??;
+        ps.send(
+            &mut phone,
+            &InnerMessage::CaptureStateReport(CaptureStateReport {
+                kind: CaptureStateReportKind::CaptureState,
+                account_id: "synthetic-account".into(),
+                device_id: "other-phone".into(),
+                capture_state: CaptureState::Continuous,
+            }),
+        )
+        .await?;
+        ps.send(
+            &mut phone,
+            &InnerMessage::ModeState(ModeState {
+                kind: ModeStateKind::Mode,
+                account_id: "synthetic-account".into(),
+                device_id: "phone".into(),
+                mode: Mode::AiControl,
+            }),
+        )
+        .await?;
+        for _ in 0..100 {
+            if observed.lock().unwrap().status.mode.is_some() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(observed.lock().unwrap().status.mode, Some(Mode::AiControl));
+        // Reports naming a different device cannot alter the displayed capture state.
+        // Sending a request must not optimistically change reported mic state.
+        assert_eq!(
+            observed.lock().unwrap().status.capture,
+            Some(CaptureState::Off)
+        );
         let literal = "Synthetic 🦀 ".repeat(1000);
         let dictation = InnerMessage::DictationText(DictationText {
             kind: DictationTextKind::DictationText,
@@ -452,6 +563,11 @@ mod tests {
             "polling must not invent user activity"
         );
         assert_eq!(*inserted.lock().unwrap(), [literal]);
+        assert!(observed.lock().unwrap().status.flash > 0);
+        assert_eq!(
+            observed.lock().unwrap().status.destination.as_deref(),
+            Some("desktop")
+        );
         dr.revoke(&peer)?;
         assert!(
             tokio::time::timeout(Duration::from_secs(2), task)
