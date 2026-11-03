@@ -42,9 +42,12 @@ All characteristics and notification subscriptions require an authenticated,
 encrypted bonded link. Live capture requires subscriptions, compatible info, a fresh
 snapshot and a complete phone-state write. The offline exception below permits local
 capture without phone arming; it never permits live transmission before this handshake.
-Accept only version 1.1 in this draft. The existing exact-version rule means a 1.0
-phone rejects 1.1 and disables capture with incompatibility shown; a 1.1 phone likewise
-rejects 1.0. No silent downgrade. Reconnect resets live fragment buffers, sequences,
+Compatibility: the same major version connects, whatever the minor version; a different
+major disables capture and shows incompatibility. Features are gated by capability bits
+only, so a 1.1 phone works with 1.0 firmware, where bit 7 clear means no sync. A newer minor
+never changes an existing layout. Each side ignores capability and Input status bits it
+doesn't know when the peer reports a higher minor, and sends them as zero itself; every other
+reserved field is still rejected. Reconnect resets live fragment buffers, sequences,
 segments and trigger history; never replay live input/audio. Persisted offline records
 and resumable phone copies survive reconnect. Existing v1 byte offsets/lengths remain
 unchanged; minor version, capability and Input status meanings are extended below.
