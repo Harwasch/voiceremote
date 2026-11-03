@@ -4,6 +4,8 @@ import { once } from "node:events";
 import { convertV4MiniflareOptions, Log, LogLevel, Miniflare, Response as MFResponse, type Request as MFRequest, type WebSocket as MFWebSocket } from "miniflare";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { RelayFrame, RelayCiphertext } from "../src/protocol/generated.js";
+import { ARCHIVE_LIMITS, archiveHash } from "../src/archive.js";
+import type { AuditArchiveBlock } from "../src/protocol/generated.js";
 import { hash, LIMITS } from "../src/security.js";
 import { mutationPlugin } from "./mutations.js";
 
@@ -168,6 +170,139 @@ beforeAll(async () => {
 afterAll(async () => { await mf?.dispose(); });
 
 describe("real local Durable Object relay", () => {
+  it("review: creator cannot claim the archive writer before the enrolled phone", async () => {
+    const { room, a, b } = await pair();
+    const first = await block(room);
+    const denied = await room.auth(a, "archive/append", first);
+    expect(denied.status).toBe(403);
+    expect((await denied.json() as any).error).toBe("archive_writer_mismatch");
+    expect((await room.auth(b, "archive/append", first)).status).toBe(201);
+    expect((await room.auth(a, "revoke", { device_id: b.device_id })).status).toBe(200);
+    expect((await room.join(b, await room.invite(a))).status).toBe(201);
+    expect((await room.auth(b, "archive/append", await block(room, 1, first.block_hash))).status).toBe(201);
+  });
+  it("review: only an old-writer-signed handoff can replace the phone key", async () => {
+    const { room, a, b } = await pair(), replacement = await device("replacement-phone");
+    expect((await room.join(replacement, await room.invite(a))).status).toBe(201);
+    const message = JSON.stringify(["voiceremote-audit-writer-v1", room.account, room.room, b.public_key,
+      replacement.device_id, replacement.public_key, 0]);
+    const value = { account_id: room.account, room_id: room.room, device_id: replacement.device_id,
+      public_key: replacement.public_key, revision: 0, old_signature: await sign(a, message) };
+    expect((await room.auth(a, "archive/writer", value)).status).toBe(403);
+    value.old_signature = await sign(b, message);
+    expect((await room.auth(replacement, "archive/writer", value)).status).toBe(200);
+    expect((await room.auth(b, "archive/append", await block(room))).status).toBe(403);
+    expect((await room.auth(replacement, "archive/append", await block(room))).status).toBe(201);
+    expect((await room.auth(replacement, "archive/writer", value)).status).toBe(403);
+  });
+  it("review: deletes memberless rooms and expires inactive archives", async () => {
+    const { room, a, b } = await pair();
+    expect((await room.auth(b, "archive/append", await block(room))).status).toBe(201);
+    expect((await room.auth(a, "revoke", { device_id: b.device_id })).status).toBe(200);
+    expect((await room.auth(a, "revoke", { device_id: a.device_id })).status).toBe(200);
+    expect((await room.inspectAll()).sql).toEqual({});
+    const other = await pair();
+    expect((await other.room.auth(other.b, "archive/append", await block(other.room))).status).toBe(201);
+    await other.room.inspect("archiveExpired"); await other.room.alarm();
+    expect((await other.room.inspectAll()).sql).toEqual({});
+  });
+  it("review: a signed epoch checkpoint releases archive_full without allowing stale writes", async () => {
+    const { room, a, b } = await pair();
+    let previous = "0".repeat(64);
+    for (let sequence = 0; sequence < 128; sequence++) {
+      const next = await block(room, sequence, previous);
+      expect((await room.auth(b, "archive/append", next)).status).toBe(201); previous = next.block_hash;
+    }
+    const full = await room.auth(b, "archive/append", await block(room, 128, previous));
+    expect((await full.json() as any).error).toBe("archive_full");
+    const unsigned = { ...await block(room, 0, previous, "A".repeat(100_000)), epoch: 1 };
+    const checkpoint = { ...unsigned, block_hash: await archiveHash(unsigned) };
+    expect((await room.auth(b, "archive/checkpoint", checkpoint)).status).toBe(201);
+    expect((await room.auth(b, "archive/checkpoint", checkpoint)).status).toBe(201);
+    expect((await room.auth(a, "archive/checkpoint", checkpoint)).status).toBe(403);
+    const rows = (await room.inspectAll()).sql.audit_archive;
+    expect(rows).toHaveLength(1);
+    const page = await (await room.auth(b, "archive/read", { account_id: room.account, room_id: room.room, epoch: 1, sequence: 0 })).json() as any;
+    expect(page.epoch).toBe(1); expect(page.blocks).toEqual([checkpoint]);
+    const nextUnsigned = { ...await block(room, 1, checkpoint.block_hash), epoch: 1 };
+    const next = { ...nextUnsigned, block_hash: await archiveHash(nextUnsigned) };
+    expect((await room.auth(b, "archive/append", next)).status).toBe(201);
+    expect((await room.auth(b, "archive/checkpoint", checkpoint)).status).toBe(201);
+    expect((await room.inspectAll()).sql.audit_archive).toHaveLength(2);
+
+    expect((await room.auth(b, "archive/append", await block(room, 1, checkpoint.block_hash))).status).toBe(409);
+  }, 30_000);
+  async function block(room: RoomClient, sequence = 0, previous_hash = "0".repeat(64), ciphertext = b64(crypto.getRandomValues(new Uint8Array(30)))): Promise<AuditArchiveBlock> {
+    const value = { account_id: room.account, room_id: room.room, sequence, previous_hash, ciphertext };
+    return { ...value, epoch: 0, block_hash: await archiveHash(value) };
+  }
+  it("archives only endpoint-sealed bytes, survives eviction and refuses nonmembers and altered proofs", async () => {
+    const { room, a, b } = await pair(), outsider = await device("outsider");
+    const key = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+    const marker = "SYNTHETIC-AUDIT-PRIVATE-METADATA";
+    const nonce = crypto.getRandomValues(new Uint8Array(12));
+    const sealed = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce }, key, new TextEncoder().encode(marker)));
+    const first = await block(room, 0, "0".repeat(64), b64(new Uint8Array([...nonce, ...sealed])));
+    expect((await room.post("archive/append", first)).status).toBe(403);
+    expect((await room.post("archive/read", { account_id: room.account, room_id: room.room, sequence: 0 })).status).toBe(403);
+    const challenge = JSON.stringify({ device_id: outsider.device_id, operation: "archive/read", body_sha256: await hash("") });
+    expect((await room.post("challenge", challenge, { "x-relay-signature": await sign(outsider,
+      JSON.stringify(["voiceremote-relay-challenge-v1", room.account, room.room, await hash(challenge)])) })).status).toBe(403);
+    expect((await room.auth(b, "archive/append", first)).status).toBe(201);
+    expect((await room.auth(b, "archive/append", first)).status).toBe(201);
+    // A fresh signature binds these differently ordered transport bytes, while
+    // logical idempotency still compares the same closed block fields.
+    const reordered = Object.fromEntries(Object.entries(first).reverse());
+    expect((await room.auth(b, "archive/append", reordered)).status).toBe(201);
+    expect((await room.auth(a, "archive/append", first)).status).toBe(403);
+    expect(JSON.stringify(await room.inspectAll())).not.toContain(marker);
+    expect(runtimeOutput.join("")).not.toContain(first.ciphertext);
+    await room.evict();
+    const query = { account_id: room.account, room_id: room.room, sequence: 0 };
+    const page = await (await room.auth(a, "archive/read", query)).json() as any;
+    expect(page.blocks).toEqual([first]);
+    const encrypted = Buffer.from(page.blocks[0].ciphertext, "base64");
+    expect(new TextDecoder().decode(await crypto.subtle.decrypt({ name: "AES-GCM", iv: encrypted.subarray(0, 12) }, key, encrypted.subarray(12)))).toBe(marker);
+    const changed = await block(room, 0);
+    expect((await room.auth(b, "archive/append", changed)).status).toBe(409);
+    expect((await room.auth(b, "archive/append", await block(room, 2, first.block_hash))).status).toBe(409);
+    expect((await room.auth(b, "archive/append", await block(room, 1))).status).toBe(409);
+    expect((await room.auth(b, "archive/append", { ...await block(room, 1, first.block_hash), block_hash: "1".repeat(64) })).status).toBe(400);
+    const next = await block(room, 1, first.block_hash), raw = JSON.stringify(next);
+    const proof = await room.proof(b, "archive/append", raw);
+    expect((await room.post("archive/append", JSON.stringify({ ...next, ciphertext: "A".repeat(40) }), proof)).status).toBe(403);
+    expect((await room.post("archive/append", raw, proof)).status).toBe(403);
+    expect((await room.auth(a, "revoke", { device_id: b.device_id })).status).toBe(200);
+    expect((await room.post("archive/read", query, proof)).status).toBe(403);
+    // Reenrollment with the same device id cannot inherit the old archive writer.
+    const replacement = await device(b.device_id);
+    expect((await room.join(replacement, await room.invite(a))).status).toBe(201);
+    expect((await room.auth(replacement, "archive/append", next)).status).toBe(403);
+    expect((await (await room.auth(a, "archive/read", query)).json() as any).blocks).toEqual([first]);
+  });
+  it("bounds archive count and bytes without eviction, pages eight blocks and retries at capacity", async () => {
+    for (const large of [false, true]) {
+      const { room, b } = await pair();
+      let previous = "0".repeat(64), last: AuditArchiveBlock | undefined, accepted = 0;
+      for (let sequence = 0; sequence <= ARCHIVE_LIMITS.blocks; sequence++) {
+        const next = await block(room, sequence, previous, large ? "A".repeat(65_536) : "A".repeat(40));
+        const response = await room.auth(b, "archive/append", next);
+        if (response.status === 409) { expect((await response.json() as any).error).toBe("archive_full"); break; }
+        expect(response.status).toBe(201); accepted++; previous = next.block_hash; last = next;
+      }
+      expect(accepted).toBe(large ? 31 : 128);
+      expect((await room.auth(b, "archive/append", last!)).status).toBe(201);
+      const stored = (await room.inspectAll()).sql.audit_archive;
+      expect(stored.length).toBe(accepted);
+      expect(stored.reduce((n: number, row: any) => n + row.bytes, 0)).toBeLessThanOrEqual(ARCHIVE_LIMITS.bytes);
+      const page = await (await room.auth(b, "archive/read", { account_id: room.account, room_id: room.room, sequence: 0 })).json() as any;
+      expect(page.blocks).toHaveLength(8); expect(page.blocks[0].sequence).toBe(0);
+      expect(page.blocks[7].sequence).toBe(7);
+      expect((await room.auth(b, "archive/append", { ...last!, plaintext: "SYNTHETIC-REJECT" })).status).toBe(400);
+      expect((await room.post("archive/append", "x".repeat(ARCHIVE_LIMITS.bodyBytes + 1))).status).toBe(413);
+    }
+  }, 30_000);
+
   it("a failed join to an unknown room allocates no persistent application tables", async () => {
     const room = new RoomClient(); expect((await room.post("join", {})).status).toBe(403);
     const stored = await room.inspectAll(); expect(stored.kv).toEqual({}); expect(stored.sql).toEqual({});
@@ -394,7 +529,8 @@ describe("real local Durable Object relay", () => {
     try { sb.send(room.frame(b)); } catch { /* revoked transport */ }
     const state = await room.inspect();
     expect(state.members.some((m: any) => m.device === b.device_id)).toBe(false);
-    expect(JSON.stringify(state)).not.toContain(b.public_key);
+    expect(JSON.stringify(state.members)).not.toContain(b.public_key);
+    expect(state.archiveWriterKey).toBe(b.public_key); // Public verification tombstone, not transport membership.
     expect(state.queue).toHaveLength(0);
     expect((await room.post("challenge", { device_id: b.device_id, operation: "connect", body_sha256: await hash("") })).status).toBe(403);
     expect((await mf.dispatchFetch(room.path("connect"), { headers: { upgrade: "websocket", "CF-Connecting-IP": room.ip, ...proof } })).status).toBe(403);

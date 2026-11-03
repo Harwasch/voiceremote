@@ -1475,6 +1475,70 @@
         "capture_state": "continuous",
         "listening": false
       }
+    },
+    {
+      "name": "AuditArchiveBlock archive round trip",
+      "schema": "AuditArchiveBlock",
+      "value": {
+        "account_id": "fixture-account",
+        "room_id": "fixture-room",
+        "sequence": 0,
+        "previous_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "ciphertext": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "block_hash": "1111111111111111111111111111111111111111111111111111111111111111"
+      }
+    },
+    {
+      "name": "AuditArchiveRead archive round trip",
+      "schema": "AuditArchiveRead",
+      "value": {
+        "account_id": "fixture-account",
+        "room_id": "fixture-room",
+        "sequence": 0
+      }
+    },
+    {
+      "name": "AuditArchivePage archive round trip",
+      "schema": "AuditArchivePage",
+      "value": {
+        "account_id": "fixture-account",
+        "room_id": "fixture-room",
+        "blocks": [
+          {
+            "account_id": "fixture-account",
+            "room_id": "fixture-room",
+            "sequence": 0,
+            "previous_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+            "ciphertext": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "block_hash": "1111111111111111111111111111111111111111111111111111111111111111"
+          }
+        ]
+      }
+    },
+    {
+      "schema": "AuditArchiveWriter",
+      "name": "old phone signs archive writer replacement",
+      "value": {
+        "account_id": "fixture-account",
+        "room_id": "fixture-room",
+        "device_id": "fixture-phone",
+        "public_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "old_signature": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "revision": 0
+      }
+    },
+    {
+      "schema": "AuditArchiveBlock",
+      "name": "archive epoch checkpoint",
+      "value": {
+        "account_id": "fixture-account",
+        "room_id": "fixture-room",
+        "sequence": 0,
+        "previous_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "ciphertext": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "block_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "epoch": 1
+      }
     }
   ],
   "invalid": [
@@ -4115,6 +4179,79 @@
         "ttl_ms": 2000,
         "request_sequence": 1
       }
+    },
+    {
+      "name": "archive invalid sequence",
+      "schema": "AuditArchiveBlock",
+      "value": {
+        "account_id": "fixture-account",
+        "room_id": "fixture-room",
+        "sequence": -1,
+        "previous_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "ciphertext": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "block_hash": "1111111111111111111111111111111111111111111111111111111111111111"
+      }
+    },
+    {
+      "name": "archive invalid previous_hash",
+      "schema": "AuditArchiveBlock",
+      "value": {
+        "account_id": "fixture-account",
+        "room_id": "fixture-room",
+        "sequence": 0,
+        "previous_hash": "fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "ciphertext": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "block_hash": "1111111111111111111111111111111111111111111111111111111111111111"
+      }
+    },
+    {
+      "name": "archive invalid ciphertext",
+      "schema": "AuditArchiveBlock",
+      "value": {
+        "account_id": "fixture-account",
+        "room_id": "fixture-room",
+        "sequence": 0,
+        "previous_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "ciphertext": "plaintext",
+        "block_hash": "1111111111111111111111111111111111111111111111111111111111111111"
+      }
+    },
+    {
+      "name": "archive invalid plaintext",
+      "schema": "AuditArchiveBlock",
+      "value": {
+        "account_id": "fixture-account",
+        "room_id": "fixture-room",
+        "sequence": 0,
+        "previous_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "ciphertext": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "block_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "plaintext": "SYNTHETIC-REJECT"
+      }
+    },
+    {
+      "name": "archive hash trailing LF previous_hash",
+      "schema": "AuditArchiveBlock",
+      "value": {
+        "account_id": "fixture-account",
+        "room_id": "fixture-room",
+        "sequence": 0,
+        "previous_hash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\n",
+        "ciphertext": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "block_hash": "1111111111111111111111111111111111111111111111111111111111111111"
+      }
+    },
+    {
+      "name": "archive hash trailing LF block_hash",
+      "schema": "AuditArchiveBlock",
+      "value": {
+        "account_id": "fixture-account",
+        "room_id": "fixture-room",
+        "sequence": 0,
+        "previous_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "ciphertext": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "block_hash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\n"
+      }
     }
   ],
   "raw_invalid": [
@@ -4232,6 +4369,11 @@
       "schema": "CandidateAction",
       "name": "trailing comma in array",
       "json": "{\"kind\":\"candidate_action\",\"account_id\":\"fixture-account\",\"candidate_id\":\"fixture-candidate\",\"parent_capture_session\":\"fixture-capture\",\"segment_span_ids\":[\"fixture-segment\",],\"proposed_task_kind\":\"open_resource\",\"proposed_task\":{\"kind\":\"open_resource\",\"account_id\":\"fixture-account\",\"device_id\":\"fixture-desktop\",\"resource_uri\":\"https://example.invalid/fixture\"},\"proposed_payload_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"destination_hint\":\"fixture-desktop\",\"origin_confidence\":0.75,\"proposed_risk_class\":\"read_display\",\"suggestion_expiry\":1793664120000,\"card_visibility\":\"visible\",\"candidate_state\":\"suggested\"}"
+    },
+    {
+      "name": "archive duplicate sequence",
+      "schema": "AuditArchiveBlock",
+      "json": "{\"account_id\": \"fixture-account\", \"room_id\": \"fixture-room\", \"sequence\": 0, \"previous_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"ciphertext\": \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\", \"block_hash\": \"1111111111111111111111111111111111111111111111111111111111111111\",\"sequence\":0}"
     }
   ]
 }

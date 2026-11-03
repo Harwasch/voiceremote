@@ -7,7 +7,7 @@ flowchart LR
 
 | File | What it is | Status |
 |---|---|---|
-| [RoundTripTests.swift](RoundTripTests.swift) | Shared vectors, encode/decode control-cluster rejection and scalar-pattern checks | ✅ Linux |
+| [RoundTripTests.swift](RoundTripTests.swift) | Shared vectors including archive block/read/page, encode/decode control-cluster rejection and scalar-pattern checks | ✅ Linux |
 
 Start with the tests; the corpus is located relative to the source file, so run
 from any directory in the checkout. Trace: product §4/§7; [REQ-59](../../../../../../SYS/requirements.md#extensibility), [REQ-61](../../../../../../SYS/requirements.md#extensibility).

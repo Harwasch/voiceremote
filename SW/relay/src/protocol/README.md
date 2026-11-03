@@ -8,7 +8,7 @@ flowchart LR
 
 | File | What it is | Status |
 |---|---|---|
-| [generated.ts](generated.ts) | Generated types, bundled schema, Ajv codec | ✅ Node |
+| [generated.ts](generated.ts) | Generated types, bundled schema, Ajv codec; audit archive block/read/page | ✅ Node |
 
 Start with `decode("RelayFrame", json)` / `encode("RelayFrame", value)`.
 The relay uses only the outer union; inner types are shared contract artifacts,

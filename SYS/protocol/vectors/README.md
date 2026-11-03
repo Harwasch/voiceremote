@@ -7,7 +7,7 @@ flowchart LR
 
 | File | What it is | Status |
 |---|---|---|
-| [golden.json](golden.json) | Shared positive/negative values and `raw_invalid` JSON strings | ✅ |
+| [golden.json](golden.json) | Shared positive/negative values, encrypted archive epoch/block/read/page/writer round trips and `raw_invalid` JSON strings | ✅ |
 | [.gitattributes](.gitattributes) | Disable Git text conversion recursively; deterministic Noise fixture remains byte-exact on Windows | ✅ `git check-attr text` reports unset |
 | [noise/](noise/) | Byte-exact synthetic XX/confirmation/application fixture | ✅ Linux reproduction; Windows CI rerun pending |
 

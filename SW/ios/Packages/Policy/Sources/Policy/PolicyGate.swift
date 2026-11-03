@@ -88,7 +88,7 @@ public enum GateDecision: Sendable {
         try audit.claim()
         self.audit = audit; self.biometric = biometric; self.clock = clock
         approvalLifetime = approvalLifetimeMilliseconds; proposalLifetime = proposalLifetimeMilliseconds
-        lastTime = audit.records.last?.timestamp ?? 0
+        lastTime = try audit.minimumTime()
         // Persisted reservation is the at-most-once boundary, before returning a permit.
         for record in audit.records {
             if record.event == .queued {
@@ -110,8 +110,9 @@ public enum GateDecision: Sendable {
     private func key(_ input: ActivationEvidence) -> String {
         // A reconnect uses the same phone-issued request UUID. Actor/account are
         // included, session is deliberately excluded so reconnect cannot reset it.
-        identityDigest([input.session.account, input.session.actor, input.requestID.uuidString])
+        identityDigest(([audit.checkpoint.authorityID].compactMap { $0 }) + [input.session.account, input.session.actor, input.requestID.uuidString])
     }
+    private var activePolicyVersion: String { audit.checkpoint.authorityID.map { Self.policyVersion + ":" + $0 } ?? Self.policyVersion }
     private func sessionKey(_ session: InputSession) -> String {
         identityDigest([session.account, session.actor, session.session])
     }
@@ -130,7 +131,8 @@ public enum GateDecision: Sendable {
     private func valid(_ session: InputSession) -> Bool {
         [session.account, session.actor, session.session, session.device, session.project].allSatisfy {
             !$0.isEmpty && $0.unicodeScalars.count <= 128 && $0 != "*"
-        } && !revokedSessions.contains(sessionKey(session))
+        } && (audit.checkpoint.authoritySessionHash == nil || audit.checkpoint.authoritySessionHash == sessionKey(session))
+          && !revokedSessions.contains(sessionKey(session))
     }
     private func record(_ event: AuditEvent, _ input: ActivationEvidence, hash: String, time: Int64) throws {
         try audit.append(event: event, subject: key(input), payloadHash: hash, actor: input.session.actor,
@@ -212,7 +214,7 @@ public enum GateDecision: Sendable {
         guard account == input.session.account, device == input.session.device else { try fail(.contextMismatch) }
         let rank: [RiskClass: Int] = [.read_display: 0, .workspace_modify: 1, .sensitive: 2]
         let risk = [minimumRisk, proposedRisk, riskFloor].max { rank[$0]! < rank[$1]! }!
-        let body = PreviewBody(policy: Self.policyVersion, request: input.requestID, revision: revision,
+        let body = PreviewBody(policy: activePolicyVersion, request: input.requestID, revision: revision,
                                account: account, actor: input.session.actor, session: input.session.session,
                                device: device, project: input.session.project, tool: tool, risk: risk, expiresAt: expiry)
         let bytes = try canonical(body)
@@ -308,7 +310,7 @@ public enum GateDecision: Sendable {
             candidate_id: p.input.requestID.uuidString, immutable_task_payload: p.tool, payload_hash: p.hash,
             source_tier: p.inferred ? .inferred : .explicit, activation_kind: activation,
             authenticated_actor: p.input.session.actor, approval_credential_class: credential,
-            approval_event_id: approval?.eventID.uuidString, risk_class: p.risk, policy_version: Self.policyVersion,
+            approval_event_id: approval?.eventID.uuidString, risk_class: p.risk, policy_version: activePolicyVersion,
             granted_scope_id: scope, destination_id: p.input.session.device, provider_session_id: provider,
             idempotency_key: p.key, execution_state: .queued, created_at: time, updated_at: time)
         _ = try ProtocolCodec.encode(command)

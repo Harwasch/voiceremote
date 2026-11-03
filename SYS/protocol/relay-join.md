@@ -67,7 +67,7 @@ A room that has never acquired a second member expires at its last registered
 invite deadline. Before the first invite, its cleanup deadline is creation + two
 minutes. A Durable Object alarm deletes all room data/storage and closes its
 sockets; access at/after the deadline also deletes it. Once a second member has
-joined, the room persists independently of invite expiry. Room IDs can be reused
+joined, the room persists independently of invite expiry, subject to the archive contract's authenticated-inactivity TTL and immediate deletion when memberless. Room IDs can be reused
 only after expiration cleanup, although clients always generate fresh IDs.
 
 ## Member challenges, connect and revoke
@@ -75,7 +75,7 @@ only after expiration cleanup, although clients always generate fresh IDs.
 1. Prepare the exact subsequent operation body. For `connect`, body bytes are
    empty. Compute `body_sha256` from those exact bytes.
 2. `POST /challenge`, body exactly `device_id`, `operation`, `body_sha256`;
-   `operation` is `invite`, `connect`, `revoke` or one of the cloud proxy operations below. `X-Relay-Signature` signs
+   `operation` is `invite`, `connect`, `revoke` `archive/append`, `archive/read`, `archive/checkpoint`, `archive/writer`, or one of the cloud proxy operations below. `X-Relay-Signature` signs
    `["voiceremote-relay-challenge-v1", account_id, room_id, SHA256_BASE64(exact_challenge_body)]`.
    This proof permits challenge issuance only.
 3. Response 200: `challenge`, `message`, `expires_at`, `server_time`. `message` is
@@ -195,6 +195,13 @@ response-body deadline. Response size remains bounded to 1 MiB. Spend caps and
 concurrency use the deployment's conservative reservations; see
 [relay SECURITY.md](../../SW/relay/SECURITY.md#cloud-configuration-and-spend).
 
+## Encrypted audit archive
+
+Member-signed `archive/append`, `archive/read`, `archive/checkpoint` and `archive/writer` operations use the same challenge flow.
+See [audit-archive.md](audit-archive.md) for exact generated records, encryption/AAD,
+per-room bounds, recovery anchors and stale-frame task reconciliation. These operations
+are separate from transient Noise frame queues.
+
 ## Frames and offline delivery
 
 | Item | Contract |
@@ -208,7 +215,7 @@ concurrency use the deployment's conservative reservations; see
 | Overflow | Drop that recipient's oldest frames until both bounds fit. Continue live delivery and other queues. Never close the sender for an offline recipient's overflow. Persist the number of overflow drops for that recipient. |
 | Reconnect | Report overflow count in `X-Relay-Dropped-Frames`, then replay retained unexpired frames in order and remove them. Reset the reported count. TTL expiration is not included in overflow count. The count, like delivery, is best effort if upgrade fails. |
 | Delivery meaning | There is no application/execute acknowledgment. Crashes can lose or duplicate delivery; endpoints need retry and command idempotency. A relay send is not proof a task executed. |
-| Presence / wake | Server emits online/offline presence. Wake registration is only for the authenticated sender, stored as routing metadata, never broadcast. APNs receives only a fixed background signal, with no room/task/content payload. |
+| Presence / wake | Server emits online/offline presence. Wake registration is only for the authenticated sender, stored as routing metadata, never broadcast. APNs receives only a fixed background signal, with no room/task/content payload. On wake, the phone establishes a fresh session and reconciles durable task identities; queued stale frames never authorize execution. See [archive/wake contract](audit-archive.md#sleeping-phone-and-stale-frames). |
 
 ## Admission, errors and verification
 

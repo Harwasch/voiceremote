@@ -6,6 +6,7 @@ flowchart LR
   Cloud --> Vendors[Fixed ElevenLabs / AssemblyAI / Anthropic APIs]
   Cloud --> Budget[Global reservation ledger]
   Worker --> Room[Hibernating room DO: account + room]
+  Room <--> Archive[SQLite: bounded encrypted audit archive]
   Room <--> Queue[SQLite: bounded queue per recipient]
   Room --> Wake[WakeProvider DO: cached JWT]
   Wake --> APNs[APNs: fixed background signal]
@@ -16,6 +17,7 @@ flowchart LR
 | [src/](src/README.md) | Enrollment, hibernating sockets, per-device queues, APNs | ✅ local runtime |
 | [test/](test/README.md) | Real room/socket regressions and security mutations | ✅ |
 | [relay-join.md](../../SYS/protocol/relay-join.md) | First-pair/client signing contract and transport limits | ✅ implemented; client pairing unverified |
+| [audit-archive.md](../../SYS/protocol/audit-archive.md) | Phone-writer ciphertext archive, signed rollover/handoff, TTL and per-room limits, recovery checkpoints and stale-frame reconciliation | ✅ local tests; phone adapters unverified |
 | [SECURITY.md](SECURITY.md) | Trust, storage, cloud endpoint/auth contract and spend configuration | ✅ synthetic tests; live vendors unverified |
 | [ci/](ci/README.md) / [relay.yml](../../.github/workflows/relay.yml) | Daily/tag/manual CI; version, credential and main-ancestry deployment guards | ✅ local guards; hosted run unverified |
 | [wrangler.jsonc](wrangler.jsonc) | Room, Admission, WakeProvider and CloudBudget SQLite bindings/migrations | ✅ dry-run configuration |

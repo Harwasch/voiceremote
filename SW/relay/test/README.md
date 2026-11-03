@@ -10,7 +10,7 @@ flowchart LR
 
 | File | What it verifies | Status |
 |---|---|---|
-| [relay.test.ts](relay.test.ts) | First pair, eviction-safe deadlines, orphan cleanup, stale membership/generation, actual queue purge, silent closure, per-recipient drops, legal maximum frames, schema-closed payloads and APNs cache eviction | ✅ local runtime + native network socket |
+| [relay.test.ts](relay.test.ts) | Encrypted archive member admission, exact retries, eviction, enrollment writer/handoff/rejoin, signed epoch pruning, memberless/TTL cleanup, count/byte caps and nondestructive paging; first pair, eviction-safe deadlines, orphan cleanup, stale membership/generation, actual queue purge, silent closure, per-recipient drops, legal maximum frames, schema-closed payloads and APNs cache eviction | ✅ local runtime + native network socket |
 | [services.test.ts](services.test.ts) | Provisioned/pair admission, upstream abort/reader-cancel proofs, normalized query binding, bidirectional speech, Messages, allowlists, missing configuration, secret/content containment, persisted daily budgets and concurrency/body/frame/time caps | ✅ synthetic vendors; live use unverified |
 | [runtime-fixture.ts](runtime-fixture.ts) | Test-only subclasses for room/ledger inspection, clock and expiry injection; never the Wrangler entrypoint | ✅ |
 | [codec.test.ts](codec.test.ts) | Worker adapter agreement with generated codec, shared vectors and variant/field mutations | ✅ |

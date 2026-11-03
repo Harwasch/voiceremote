@@ -6,7 +6,7 @@ flowchart LR
 
 | File | What it is | Status |
 |---|---|---|
-| [Generated.swift](Generated.swift) | Typed records, unions, schema and scalar-validated codec | ✅ shared vectors |
+| [Generated.swift](Generated.swift) | Typed records, unions, schema and scalar-validated codec; audit archive block/read/page | ✅ shared vectors |
 
 Start with `ProtocolCodec`. Edit `SYS/codegen/templates/runtime.swift` or the
 source schemas, then run `make -C SYS generate` and `make -C SYS check`.

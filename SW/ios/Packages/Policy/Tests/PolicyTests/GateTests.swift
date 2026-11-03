@@ -20,13 +20,18 @@ import VoiceRemoteProtocol
         bytes.append(data)
     }
 }
-@MainActor final class TestCheckpoint: AuditCheckpointStore {
+@MainActor final class TestCheckpoint: AuditRecoveryCheckpointStore {
+    let recoverySlotID = UUID().uuidString
     var value = AuditCheckpoint.empty
     var fail = false
     var failAtCount: Int?
+    var failPending = false
     var pending: AuditPending?
     func loadPending() throws -> AuditPending? { pending }
-    func savePending(_ value: AuditPending?) throws { pending = value }
+    func savePending(_ value: AuditPending?) throws {
+        if failPending { throw PolicyError.auditUnavailable }
+        pending = value
+    }
     func load() throws -> AuditCheckpoint { value }
     func save(_ checkpoint: AuditCheckpoint) throws {
         if fail || checkpoint.count == failAtCount { throw PolicyError.auditUnavailable }

@@ -10,8 +10,17 @@ public enum PolicyError: Error { case invalid, auditUnavailable, tampered, locke
 public struct AuditCheckpoint: Codable, Equatable, Sendable {
     public let count: Int
     public let head: String
+    public let compactionHash: String?
+    /// Migration tombstone: preserved forensic head, permanently inactive writer.
+    public let retired: Bool?
+    public let recoveryTarget: String?
+    public let authorityID: String?
+    public let authoritySessionHash: String?
     public static let empty = AuditCheckpoint(count: 0, head: String(repeating: "0", count: 64))
-    public init(count: Int, head: String) { self.count = count; self.head = head }
+    public init(count: Int, head: String, compactionHash: String? = nil, retired: Bool? = nil, recoveryTarget: String? = nil, authorityID: String? = nil, authoritySessionHash: String? = nil) {
+        self.count = count; self.head = head; self.compactionHash = compactionHash; self.retired = retired
+        self.recoveryTarget = recoveryTarget; self.authorityID = authorityID; self.authoritySessionHash = authoritySessionHash
+    }
 }
 
 /// Implement with rollback-resistant trusted storage. Never derive this value
@@ -23,6 +32,12 @@ public struct AuditCheckpoint: Codable, Equatable, Sendable {
     /// Each save is atomic and durable; nil clears only a committed intent.
     func loadPending() throws -> AuditPending?
     func savePending(_ pending: AuditPending?) throws
+}
+
+/// Recovery slots need stable, unique protected identities across process restart.
+/// Never assign one identity to two stores or reuse a retired/deleted slot identity.
+@MainActor public protocol AuditRecoveryCheckpointStore: AuditCheckpointStore {
+    var recoverySlotID: String { get }
 }
 
 /// Write-ahead evidence contains audit metadata only, never command contents.
@@ -68,7 +83,9 @@ public struct AuditPending: Codable, Equatable, Sendable {
     public func read() throws -> Data {
         try verifyFileIdentity()
         try handle.seek(toOffset: 0)
-        return try handle.readToEnd() ?? Data()
+        let bytes = try handle.read(upToCount: AuditLog.maximumJournalBytes + 1) ?? Data()
+        guard bytes.count <= AuditLog.maximumJournalBytes else { throw PolicyError.auditUnavailable }
+        return bytes
     }
     public func append(_ bytes: Data) throws {
         try verifyFileIdentity()
@@ -78,7 +95,7 @@ public struct AuditPending: Codable, Equatable, Sendable {
 }
 
 public enum AuditEvent: String, Codable, Sendable {
-    case suggested, edited, authenticationRequired, approved, denied, queued, duplicate
+    case authorityReset, suggested, edited, authenticationRequired, approved, denied, queued, duplicate
     case dismissed, expired, dispatched, running, succeeded, failed, cancelled, grantIssued, grantRevoked, sessionRevoked, recovered
 }
 
@@ -109,7 +126,7 @@ public struct AuditRecord: Codable, Equatable, Sendable {
 
 public struct AuditRetention: Sendable {
     /// Age before records are due for encrypted archival. Live journal and replay
-    /// tombstones are never erased by retention. Archival transport is later work.
+    /// tombstones are never erased by retention.
     public let archiveAfterMilliseconds: Int64
     public init(archiveAfterMilliseconds: Int64 = 30 * 24 * 60 * 60 * 1000) throws {
         guard archiveAfterMilliseconds > 0 else { throw PolicyError.invalid }
@@ -118,11 +135,12 @@ public struct AuditRetention: Sendable {
 }
 
 @MainActor public final class AuditLog {
-    private let journal: any AuditJournal
-    private let checkpoints: any AuditCheckpointStore
+    public static let maximumJournalBytes = 4_194_304
+    let journal: any AuditJournal
+    let checkpoints: any AuditCheckpointStore
     public let retention: AuditRetention
     public private(set) var records: [AuditRecord]
-    private var checkpoint: AuditCheckpoint
+    var checkpoint: AuditCheckpoint
     private var poisoned = false
     // One gate owns each log; sharing a journal across gates would split replay state.
     private var claimed = false
@@ -131,6 +149,7 @@ public struct AuditRetention: Sendable {
                 retention: AuditRetention) throws {
         self.journal = journal; self.checkpoints = checkpoints; self.retention = retention
         checkpoint = try checkpoints.load()
+        guard checkpoint.retired != true else { throw PolicyError.auditUnavailable }
         guard try checkpoints.loadPending() == nil else { throw PolicyError.auditUnavailable }
         records = try Self.verify(journal.read(), against: checkpoint)
     }
@@ -139,19 +158,35 @@ public struct AuditRetention: Sendable {
         claimed = true
     }
     public static func verify(_ bytes: Data, against checkpoint: AuditCheckpoint) throws -> [AuditRecord] {
-        guard bytes.isEmpty || bytes.last == 10 else { throw PolicyError.tampered }
+        guard bytes.count <= maximumJournalBytes, bytes.isEmpty || bytes.last == 10 else { throw PolicyError.tampered }
         let lines = bytes.split(separator: 10, omittingEmptySubsequences: false).dropLast(bytes.isEmpty ? 0 : 1)
         var result: [AuditRecord] = []
-        var head = AuditCheckpoint.empty.head
-        for line in lines where !bytes.isEmpty {
-            let record = try JSONDecoder().decode(AuditRecord.self, from: Data(line))
-            guard try canonical(record) == Data(line), record.sequence == result.count, record.previousHash == head,
-                  record.recordHash == PayloadDigest.sha256(try canonical(record.body)),
-                  record.timestamp >= 0, record.timestamp <= 9_007_199_254_740_991,
-                  (record.event == .recovered || record.timestamp >= (result.last?.timestamp ?? 0)) else { throw PolicyError.tampered }
-            head = record.recordHash; result.append(record)
+        var head = AuditCheckpoint.empty.head, sequence = 0
+        var timestamp: Int64 = 0
+        var remaining = Array(lines)
+        if let digest = checkpoint.compactionHash {
+            guard let first = remaining.first else { throw PolicyError.tampered }
+            let capsule = try JSONDecoder().decode(AuditCompaction.self, from: Data(first))
+            guard try canonical(capsule) == Data(first), PayloadDigest.sha256(Data(first)) == digest,
+                  capsule.base.compactionHash == nil, capsule.base.authorityID == checkpoint.authorityID,
+                  capsule.base.authoritySessionHash == checkpoint.authoritySessionHash, capsule.base.count <= checkpoint.count,
+                  capsule.base.count >= 0, capsule.timestamp >= 0,
+                  capsule.timestamp <= 9_007_199_254_740_991 else { throw PolicyError.tampered }
+            result = capsule.replay
+            guard result.allSatisfy({ AuditCompaction.replayEvents.contains($0.event) && $0.sequence < capsule.base.count }),
+                  zip(result, result.dropFirst()).allSatisfy({ $0.sequence < $1.sequence }) else { throw PolicyError.tampered }
+            head = capsule.base.head; sequence = capsule.base.count; timestamp = capsule.timestamp; remaining.removeFirst()
         }
-        guard result.count == checkpoint.count, head == checkpoint.head else { throw PolicyError.tampered }
+        for line in remaining where !bytes.isEmpty {
+            let record = try JSONDecoder().decode(AuditRecord.self, from: Data(line))
+            guard try canonical(record) == Data(line), record.sequence == sequence, record.previousHash == head,
+                  record.recordHash == PayloadDigest.sha256(try canonical(record.body)),
+                  record.policyVersion == (checkpoint.authorityID.map { "policy-v1:" + $0 } ?? "policy-v1"),
+                  record.timestamp >= 0, record.timestamp <= 9_007_199_254_740_991,
+                  (record.event == .recovered || record.timestamp >= timestamp) else { throw PolicyError.tampered }
+            head = record.recordHash; sequence += 1; timestamp = record.timestamp; result.append(record)
+        }
+        guard sequence == checkpoint.count, head == checkpoint.head else { throw PolicyError.tampered }
         return result
     }
     func checkIntegrity() throws {
@@ -165,7 +200,7 @@ public struct AuditRetention: Sendable {
         let body = AuditRecord.Body(sequence: checkpoint.count, previousHash: checkpoint.head,
                                     timestamp: now, event: event, subjectHash: subject,
                                     payloadHash: payloadHash, actorHash: PayloadDigest.sha256(Data(actor.utf8)),
-                                    policyVersion: "policy-v1", scopeHash: scopeHash)
+                                    policyVersion: checkpoint.authorityID.map { "policy-v1:" + $0 } ?? "policy-v1", scopeHash: scopeHash)
         return AuditRecord(sequence: body.sequence, previousHash: body.previousHash, timestamp: now,
                            event: event, subjectHash: subject, payloadHash: payloadHash,
                            actorHash: body.actorHash, policyVersion: body.policyVersion, scopeHash: scopeHash,
@@ -174,11 +209,12 @@ public struct AuditRetention: Sendable {
     func append(event: AuditEvent, subject: String, payloadHash: String, actor: String, now: Int64, scopeHash: String? = nil) throws {
         do {
             try checkIntegrity()
-            guard event != .recovered, now >= (records.last?.timestamp ?? 0) else { throw PolicyError.clock }
+            guard event != .recovered, now >= (try minimumTime()) else { throw PolicyError.clock }
             let record = try Self.makeRecord(event: event, subject: subject, payloadHash: payloadHash,
                                             actor: actor, now: now, checkpoint: checkpoint, scopeHash: scopeHash)
-            let next = AuditCheckpoint(count: records.count + 1, head: record.recordHash)
+            let next = AuditCheckpoint(count: checkpoint.count + 1, head: record.recordHash, compactionHash: checkpoint.compactionHash, authorityID: checkpoint.authorityID, authoritySessionHash: checkpoint.authoritySessionHash)
             var bytes = try canonical(record); bytes.append(10)
+            guard try journal.read().count + bytes.count <= Self.maximumJournalBytes else { throw PolicyError.auditUnavailable }
             try checkpoints.savePending(AuditPending(base: checkpoint, next: next, recordBytes: bytes))
             try journal.append(bytes)
             try checkpoints.save(next)

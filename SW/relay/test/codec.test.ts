@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { decodeArchive, archiveHash } from "../src/archive.js";
 import { decodeFrame } from "../src/codec.js";
 import { parseControl } from "../src/control.js";
 import { decode, schemaDocument } from "../src/protocol/generated.js";
@@ -15,6 +16,21 @@ describe("Worker transport adapter agrees with generated contract", () => {
     expect(new TextEncoder().encode(raw).length).toBeLessThanOrEqual(LIMITS.frameBytes);
     expect(decodeFrame(raw)).toEqual(frame);
   });
+  it("shares the Swift archive hash vector", async () => {
+    expect(await archiveHash({ account_id: "fixture-account", room_id: "fixture-room", sequence: 0,
+      previous_hash: "0".repeat(64), ciphertext: "A".repeat(40) })).toBe("45fdc0c74c2ced2c088eeb7ee4bfe845a798c3a98b736044af8e376dc2e41477");
+  });
+  for (const group of ["valid", "invalid", "raw_invalid"]) {
+    const fixtures = JSON.parse(readFileSync(new URL("../../../SYS/protocol/vectors/golden.json", import.meta.url), "utf8"));
+    for (const v of fixtures[group]) {
+      if (!["AuditArchiveBlock", "AuditArchiveRead"].includes(v.schema)) continue;
+      it(`archive adapter ${group}: ${v.name}`, () => {
+        const raw = v.json ?? JSON.stringify(v.value);
+        if (group === "valid") expect(decodeArchive(raw, v.schema === "AuditArchiveRead")).toEqual(decode(v.schema, raw));
+        else expect(() => decodeArchive(raw)).toThrow();
+      });
+    }
+  }
   it("normalizes IPv6 spelling and groups exactly the first 64 bits", () => {
     expect(sourceBucket("2001:db8:1:2::1")).toBe(sourceBucket("2001:0db8:0001:0002:abcd:ffff:0000:9999"));
     expect(sourceBucket("2001:db8:1:3::1")).not.toBe(sourceBucket("2001:db8:1:2::1"));

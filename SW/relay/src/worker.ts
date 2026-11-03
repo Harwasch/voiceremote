@@ -18,7 +18,7 @@ export default {
       const url = new URL(request.url);
       const cloud = /\/proxy\/(elevenlabs|assemblyai|anthropic)$/.test(url.pathname);
       requireThat(url.search === "" || (cloud && !url.pathname.endsWith("/anthropic")), 400);
-      const match = /^\/v1\/accounts\/([^/]+)\/rooms\/([^/]+)\/(create|challenge|join|invite|revoke|connect|proxy\/(?:elevenlabs|assemblyai|anthropic))$/.exec(url.pathname);
+      const match = /^\/v1\/accounts\/([^/]+)\/rooms\/([^/]+)\/(create|challenge|join|invite|revoke|connect|archive\/(?:append|read|checkpoint|writer)|proxy\/(?:elevenlabs|assemblyai|anthropic))$/.exec(url.pathname);
       requireThat(match, 404, "not_found");
       if (cloud) requireThat(cloudProvisioned(env), 503, "cloud_not_configured");
       const [, account, room, operation] = match;

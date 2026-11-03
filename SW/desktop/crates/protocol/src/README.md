@@ -8,7 +8,7 @@ flowchart LR
 | File | What it is | Status |
 |---|---|---|
 | [lib.rs](lib.rs) | Public protocol module | ✅ |
-| [generated.rs](generated.rs) | Generated records, unions, schema and codecs | ✅ shared vectors |
+| [generated.rs](generated.rs) | Generated records, unions, schema and codecs, including encrypted audit archives | ✅ shared vectors |
 
 Start with `decode`/`encode`; regenerate from `SYS` instead of editing generated
 Rust. Trace: product §4/§7; [REQ-59](../../../../../SYS/requirements.md#extensibility), [REQ-61](../../../../../SYS/requirements.md#extensibility). Cryptographic enforcement is future work.
