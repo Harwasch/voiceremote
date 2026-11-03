@@ -22,6 +22,7 @@
 static const gpio_num_t BUTTON_GPIOS[2]={GPIO_NUM_2,GPIO_NUM_1}; /* yellow PTT, blue cycle */
 static const board_info_t info={1,466,466,0x3f,true,true,true};
 static i2c_master_dev_handle_t ioe, pm, touch, codec;
+static i2c_master_bus_handle_t bus;
 static esp_lcd_panel_handle_t panel;
 static SemaphoreHandle_t dma_done;
 static uint32_t motor_started;
@@ -31,13 +32,23 @@ static esp_err_t read_reg(i2c_master_dev_handle_t d, uint8_t reg, uint8_t *p, si
 { return i2c_master_transmit_receive(d,&reg,1,p,n,50); }
 static esp_err_t write_reg(i2c_master_dev_handle_t d, uint8_t reg, uint8_t v)
 { uint8_t b[]={reg,v}; return i2c_master_transmit(d,b,2,50); }
-static esp_err_t update(i2c_master_dev_handle_t d, uint8_t reg, uint8_t mask, uint8_t value)
+static esp_err_t update_once(i2c_master_dev_handle_t d, uint8_t reg, uint8_t mask, uint8_t value)
 {
     uint8_t old, check;
     esp_err_t e=read_reg(d,reg,&old,1); if(e) return e;
     e=write_reg(d,reg,(old&~mask)|(value&mask)); if(e) return e;
     e=read_reg(d,reg,&check,1); if(e) return e;
     return (check&mask)==(value&mask) ? ESP_OK : ESP_ERR_INVALID_RESPONSE;
+}
+/* Touch controller resets can disturb the shared I2C bus, seen as intermittent boot failures. */
+static esp_err_t update(i2c_master_dev_handle_t d, uint8_t reg, uint8_t mask, uint8_t value)
+{
+    esp_err_t e=ESP_FAIL;
+    for(int attempt=0;attempt<5;attempt++) {
+        e=update_once(d,reg,mask,value); if(!e) return ESP_OK;
+        i2c_master_bus_reset(bus); vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    return e;
 }
 /* IOE pin numbers are one-based here; vendor register bits are zero-based. */
 static esp_err_t ioe_output(unsigned pin, bool high)
@@ -64,7 +75,6 @@ esp_err_t board_init(void)
 {
     i2c_master_bus_config_t bc={.i2c_port=I2C_NUM_0,.sda_io_num=47,.scl_io_num=48,
         .clk_source=I2C_CLK_SRC_DEFAULT,.glitch_ignore_cnt=7,.flags.enable_internal_pullup=true};
-    i2c_master_bus_handle_t bus;
     ESP_ERROR_CHECK(i2c_new_master_bus(&bc,&bus));
     i2c_device_config_t dc={.dev_addr_length=I2C_ADDR_BIT_LEN_7,.device_address=0x4f,.scl_speed_hz=100000};
     ESP_ERROR_CHECK(i2c_master_bus_add_device(bus,&dc,&ioe));
@@ -82,7 +92,6 @@ esp_err_t board_init(void)
     ESP_ERROR_CHECK(ioe_output(10,false));
     gpio_config_t amp={.pin_bit_mask=1ULL<<14,.mode=GPIO_MODE_OUTPUT};
     ESP_ERROR_CHECK(gpio_config(&amp)); ESP_ERROR_CHECK(gpio_set_level(14,0));
-    ESP_ERROR_CHECK(ioe_output(3,true)); /* Vendor hal_ioe: AU_EN stays high. */
     ESP_ERROR_CHECK(write_reg(ioe,0x25,0x88)); /* PWM 5000 Hz */
     ESP_ERROR_CHECK(write_reg(ioe,0x26,0x13));
     gpio_config_t cs={.pin_bit_mask=1ULL<<39,.mode=GPIO_MODE_OUTPUT};
@@ -95,6 +104,7 @@ esp_err_t board_init(void)
     uint8_t id;
     ESP_ERROR_CHECK(read_reg(touch,0xa7,&id,1));
     if(!id) return ESP_ERR_INVALID_RESPONSE;
+    ESP_ERROR_CHECK(ioe_output(3,true));
     gpio_config_t inputs={.pin_bit_mask=(1ULL<<BUTTON_GPIOS[0])|(1ULL<<BUTTON_GPIOS[1])|(1ULL<<13)|(1ULL<<38),
         .mode=GPIO_MODE_INPUT,.pull_up_en=GPIO_PULLUP_ENABLE};
     ESP_ERROR_CHECK(gpio_config(&inputs));
