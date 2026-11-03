@@ -102,7 +102,10 @@ PTT position, AI mode, audio stopped. Each row is exactly 14 bytes:
 
 Rows are independent examples, not a sequence. Down/up discriminator and PTT
 level agree; snapshots carry no synthetic edge. Send a snapshot immediately on
-Input subscription, on phone request, and after audio starts/stops. On a gap,
+Input subscription, on phone request, and after audio starts/stops. A bonded
+reconnect restores the subscription, so that snapshot can arrive before the phone
+is listening: the phone must not wait for it, and sets the snapshot-request flag in
+its first state write instead (seen on the StopWatch with BlueZ, 2026-11-02). On a gap,
 invalid transition or reconnect, the phone cancels the held/locked gesture,
 stops this source, requests a snapshot and requires release then a fresh PTT
 press (or a fresh deliberate REC selection) before recording. Recovered snapshots
