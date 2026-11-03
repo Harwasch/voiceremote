@@ -63,6 +63,15 @@ private final class BoundedBrainReader: NSObject, URLSessionDataDelegate, @unche
         guard let http = response as? HTTPURLResponse else {
             finish(.failure(BrainError.invalidResponse)); completionHandler(.cancel); return
         }
+        // Foundation can report an unknown expected length even when the HTTP
+        // response carries Content-Length (including URLProtocol on Apple).
+        // Check the header independently; fail closed on overflow/invalid lengths.
+        if let declared = http.value(forHTTPHeaderField: "Content-Length") {
+            guard let length = UInt64(declared.trimmingCharacters(in: .whitespacesAndNewlines)),
+                  length <= UInt64(limit) else {
+                finish(.failure(BrainError.responseTooLarge)); completionHandler(.cancel); return
+            }
+        }
         guard response.expectedContentLength <= Int64(limit) else {
             finish(.failure(BrainError.responseTooLarge)); completionHandler(.cancel); return
         }
@@ -70,7 +79,8 @@ private final class BoundedBrainReader: NSObject, URLSessionDataDelegate, @unche
     }
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive chunk: Data) {
         guard chunk.count <= limit - data.count else {
-            dataTask.cancel(); finish(.failure(BrainError.responseTooLarge)); return
+            // Publish the cap error before cancellation can report a URL error.
+            finish(.failure(BrainError.responseTooLarge)); dataTask.cancel(); return
         }
         data.append(chunk)
     }

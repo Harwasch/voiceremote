@@ -20,16 +20,31 @@ final class FakeMessagesServer: URLProtocol {
     override func stopLoading() {}
 }
 
-/// Oversized chunked response deliberately never completes: bounded reads must reject early.
+private final class UnknownLengthHTTPResponse: HTTPURLResponse, @unchecked Sendable {
+    // A declared HTTP length need not be exposed as Foundation's expected length.
+    override var expectedContentLength: Int64 { -1 }
+}
+
+/// Oversized responses deliberately never complete: bounded reads must reject early.
 final class OversizedMessagesServer: URLProtocol {
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
-        let header = request.url!.path.contains("header") ? ["Content-Length": "1048577"] : [:]
-        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: header)!
+        let path = request.url!.lastPathComponent
+        let header = path.contains("header") ? ["content-length": path == "header-overflow" ? "18446744073709551616" : "1048577"] : [:]
+        let response: HTTPURLResponse
+        if path == "unknown-header" || path == "header-overflow" {
+            response = UnknownLengthHTTPResponse(url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: header)!
+        } else {
+            response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: header)!
+        }
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         if header.isEmpty {
             client?.urlProtocol(self, didLoad: Data(repeating: 32, count: 1_048_576))
+            if path == "exact" {
+                client?.urlProtocolDidFinishLoading(self)
+                return
+            }
             client?.urlProtocol(self, didLoad: Data([32]))
         }
     }
@@ -46,6 +61,18 @@ actor InspectingProxy: BrainHTTPTransport {
 final class ClaudeBrainTests: XCTestCase, @unchecked Sendable {
     let proxyURL = URL(string: "https://relay.example.invalid/brain/messages")!
 
+    private func sendBeforeDeadline(_ http: URLRequest, through transport: URLSessionBrainTransport) async throws -> BrainHTTPResponse {
+        try await withThrowingTaskGroup(of: BrainHTTPResponse.self) { group in
+            defer { group.cancelAll() }
+            group.addTask { try await transport.send(http) }
+            group.addTask {
+                try await Task.sleep(for: .seconds(3))
+                throw URLError(.timedOut)
+            }
+            return try await group.next()!
+        }
+    }
+
     func testFakeServerThroughURLSession() async throws {
         let transport = URLSessionBrainTransport(protocolClasses: [FakeMessagesServer.self])
         let brain = ClaudeBrain(configuration: try .init(proxyURL: proxyURL), transport: transport)
@@ -54,14 +81,73 @@ final class ClaudeBrainTests: XCTestCase, @unchecked Sendable {
     }
 
     func testStreamingCapRejectsHeadersAndChunksWithoutWaitingForEOF() async throws {
-        for path in ["header", "chunks"] {
+        for path in ["header", "unknown-header", "header-overflow", "chunks"] {
             let transport = URLSessionBrainTransport(protocolClasses: [OversizedMessagesServer.self])
+            let http = URLRequest(url: proxyURL.appendingPathComponent(path))
             do {
-                _ = try await transport.send(URLRequest(url: proxyURL.appendingPathComponent(path)))
-                XCTFail("Oversized response accepted")
-            } catch { XCTAssertEqual(error as? BrainError, .responseTooLarge) }
+                _ = try await sendBeforeDeadline(http, through: transport)
+                XCTFail("Oversized response accepted: \(path)")
+            } catch { XCTAssertEqual(error as? BrainError, .responseTooLarge, path) }
         }
     }
+
+    func testStreamingCapAcceptsExactlyTheLimit() async throws {
+        let transport = URLSessionBrainTransport(protocolClasses: [OversizedMessagesServer.self])
+        let response = try await sendBeforeDeadline(URLRequest(url: proxyURL.appendingPathComponent("exact")), through: transport)
+        XCTAssertEqual(response.statusCode, 200)
+        XCTAssertEqual(response.data, Data(repeating: 32, count: 1_048_576))
+    }
+
+    #if os(Linux) || os(macOS)
+    func testNativeStreamingCapRejectsBeforeServerFinishes() async throws {
+        // Exercise Foundation's native HTTP implementation, with no URLProtocol.
+        let server = Process(), pipe = Pipe()
+        server.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        server.arguments = ["python3", "-u", "-c", #"""
+import http.server, signal, threading
+signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGTERM})
+class Handler(http.server.BaseHTTPRequestHandler):
+    protocol_version = 'HTTP/1.1'
+    def log_message(self, *args): pass
+    def do_GET(self):
+        self.send_response(200)
+        if self.path == '/header':
+            self.send_header('Content-Length', '1048577')
+        else:
+            self.send_header('Transfer-Encoding', 'chunked')
+        self.end_headers()
+        self.wfile.flush()
+        try:
+            if self.path == '/chunks':
+                for chunk in (b' ' * 1048576, b' '):
+                    self.wfile.write(('%x\r\n' % len(chunk)).encode() + chunk + b'\r\n')
+                    self.wfile.flush()
+            # No body for /header; no terminating chunk for /chunks.
+            threading.Event().wait(10)
+        except (BrokenPipeError, ConnectionResetError): pass
+server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+print(server.server_port, flush=True)
+server.serve_forever()
+"""#]
+        server.standardOutput = pipe
+        try server.run()
+        defer {
+            if server.isRunning { server.terminate() }
+            server.waitUntilExit()
+        }
+        var portBytes = Data()
+        while let byte = try pipe.fileHandleForReading.read(upToCount: 1), byte.first != 10 { portBytes += byte }
+        let port = try XCTUnwrap(Int(String(decoding: portBytes, as: UTF8.self)))
+        for path in ["header", "chunks"] {
+            let http = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/\(path)")!)
+            // A missing cap fails with a timeout, before the server can finish.
+            do {
+                _ = try await sendBeforeDeadline(http, through: URLSessionBrainTransport())
+                XCTFail("Oversized native response accepted: \(path)")
+            } catch { XCTAssertEqual(error as? BrainError, .responseTooLarge, path) }
+        }
+    }
+    #endif
 
     func testMessagesRequestUsesConfiguredModelAndNoAPIKey() async throws {
         let proxy = InspectingProxy(#"{"type":"message","role":"assistant","content":[],"stop_reason":"end_turn"}"#)
