@@ -245,7 +245,7 @@ def verify_copies(copies, previous, *, interrupted=False):
 
 
 class Runner:
-    steps = ('hook boot', 'live streaming and clean OFF END', 'live start / link drop',
+    steps = ('hook boot', 'live streaming and clean OFF END', 'held PTT stays one segment', 'live start / link drop',
              'reconnect while recording', 'finalize / sync / verify', 'idempotent re-sync',
              'interrupted fetch', 'resume after interrupted fetch', 'OFF during offline',
              'reboot mid-recording', 'serial stats')
@@ -333,6 +333,22 @@ class Runner:
             self.passed(step)
 
             step = self.steps[2]
+            # A control edge must not interrupt audio that its own status snapshot started.
+            await self.command('p')
+            await self.pause(1)
+            frames, reports = s.frames, len(s.reports)
+            await self.command('d')
+            await self.pause(5)
+            await self.command('u')
+            await wait_for(lambda: len(s.reports) > reports, 'END after held PTT', session=s)
+            await self.pause(1)
+            if len(s.reports) != reports + 1 or s.frames - frames < 200:
+                raise ValueError(f'held PTT split or short: {len(s.reports) - reports} segments, {s.frames - frames} frames')
+            await self.command('o')
+            await self.pause(1)
+            self.passed(step)
+
+            step = self.steps[3]
             before = s.frames
             await self.command('r')
             await wait_for(lambda: s.latest['streaming'] and s.frames >= before + 50, 'second live start', session=s)
@@ -342,7 +358,7 @@ class Runner:
             await self.pause(3)
             self.passed(step)
 
-            step = self.steps[3]
+            step = self.steps[4]
             s = await self.connect()
             await wait_for(lambda: s.latest['offline'], 'locally owned recording survives reconnect', session=s)
             await self.pause(1)
@@ -356,7 +372,7 @@ class Runner:
                 raise ValueError('sync available during open recording')
             self.passed(step)
 
-            step = self.steps[4]
+            step = self.steps[5]
             await self.idle()
             await s.transport.set_clock()
             await self.sync(copies)
@@ -366,14 +382,14 @@ class Runner:
             previous.add(first.recording)
             self.passed(step)
 
-            step = self.steps[5]
+            step = self.steps[6]
             before = durable_states(copies)
             await self.sync(copies)
             if durable_states(copies) != before:
                 raise ValueError('re-sync changed durable IDs/metadata')
             self.passed(step)
 
-            step = self.steps[6]
+            step = self.steps[7]
             await self.disconnect()
             await self.offline_record(seconds=5)
             await self.idle()
@@ -390,7 +406,7 @@ class Runner:
             await self.disconnect()
             self.passed(step)
 
-            step = self.steps[7]
+            step = self.steps[8]
             s = await self.connect()
             await self.sync(copies)
             if not s.fetch_offsets or s.fetch_offsets[0] != partial.resume_offset:
@@ -399,7 +415,7 @@ class Runner:
             previous.add(second.recording)
             self.passed(step)
 
-            step = self.steps[8]
+            step = self.steps[9]
             await self.disconnect()
             await self.offline_record()
             await self.command('o')
@@ -418,7 +434,7 @@ class Runner:
             previous.add(third.recording)
             self.passed(step)
 
-            step = self.steps[9]
+            step = self.steps[10]
             old_boot = s.transport.snapshot['boot']
             await self.disconnect()
             await self.offline_record()
@@ -435,7 +451,7 @@ class Runner:
                 raise ValueError('record ID reuse or capture boot changed')
             self.passed(step)
 
-            step = self.steps[10]
+            step = self.steps[11]
             await self.pause(5.5)
             lines = [l for l in self.serial.lines if any(k in l for k in ('timing:', 'audio:', 'offline:'))]
             (self.output / 'serial-stats.log').write_text('\n'.join(lines) + '\n')
