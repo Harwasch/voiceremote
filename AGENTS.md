@@ -130,7 +130,7 @@ the folder, not an essay:
 | `SW/desktop` | hwgeekom (Linux); Windows via CI | `cargo test --workspace` |
 | `SW/relay` | hwgeekom | `npm test` |
 | `SW/ios` | **GitHub Actions macOS runner only** (no Mac) | `xcodebuild test` in CI |
-| `FW/` | hwgeekom | `idf.py build` + ESP-IDF Unity tests (runner TBD); ESP-IDF at `~/hw-tools/esp-idf` |
+| `FW/` | hwgeekom | `heavy bash FW/tests/run.sh` (host); board builds: see `FW/README.md`; ESP-IDF at `~/hw-tools/esp-idf` |
 
 - **Compute tiers (owner's machines).** On hwgeekom, builds and tests up to
   10 cores / 20 GB go through `heavy <command>` (lowest priority, capped), one

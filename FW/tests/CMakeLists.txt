@@ -1,0 +1,11 @@
+cmake_minimum_required(VERSION 3.16)
+project(remote_logic_tests C)
+enable_testing()
+add_executable(remote_tests test.c ../app/protocol.c ../app/state.c)
+target_include_directories(remote_tests PRIVATE ../app)
+target_compile_features(remote_tests PRIVATE c_std_11)
+target_compile_options(remote_tests PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+add_test(NAME remote_logic COMMAND remote_tests)
+find_package(Python3 3.12 REQUIRED COMPONENTS Interpreter)
+add_test(NAME ble_client_wire COMMAND ${Python3_EXECUTABLE} -m unittest discover
+    -s ${CMAKE_CURRENT_SOURCE_DIR}/../tools/ble_client -p test_wire.py -v)
