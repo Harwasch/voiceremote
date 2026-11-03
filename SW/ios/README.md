@@ -1,7 +1,8 @@
 ```mermaid
 flowchart LR
-  SYS[SYS design + product definition] --> App[VoiceRemote · SwiftUI]
-  App --> Core[Packages/Core] & Pairing[Packages/Pairing] & Stt[Packages/Stt] & Brain[Packages/Brain]
+  SYS[SYS design + product definition] --> App[VoiceRemote · native SwiftUI tabs]
+  App --> AppModel[Packages/AppModel]
+  AppModel --> Core[Packages/Core] & Pairing[Packages/Pairing] & Stt[Packages/Stt] & Brain[Packages/Brain]
   Core & Pairing --> Protocol[Packages/Protocol]
   Brain --> BrainApple[Packages/BrainApple adapters] & Protocol
   App --> Keyboard[KeyboardExt · UIKit] & Live[LiveActivity · WidgetKit]
@@ -13,31 +14,28 @@ flowchart LR
 | Path | What | Status |
 |---|---|---|
 | [project.yml](project.yml) | XcodeGen targets, one bundle prefix, marketing version | ✅ Scaffold |
-| [App/](App/README.md) | “Voice Remote / Ready for setup” screen | 🟡 macOS build **unverified** |
+| [App/](App/README.md) | Home, Devices, History, Suggestions, approval, Settings and benchmark recorder | 🟡 macOS build **unverified** |
 | [KeyboardExt/](KeyboardExt/README.md) | Status, globe/space/delete; committed-text insertion; no mic/network/Send | 🟡 Linux bridge tested; Apple compile/device **unverified** |
 | [Packages/KeyboardBridge/](Packages/KeyboardBridge/README.md) | Bounded App Group queue, Darwin wakeup, private crash receipts, copy/share APIs | ✅ Linux tests; main-app wiring **unverified** |
-| [LiveActivity/](LiveActivity/README.md) | ActivityKit lock-screen and Dynamic Island views; no activity started | 🟡 Stub |
+| [LiveActivity/](LiveActivity/README.md) | ActivityKit listening/destination, recording intent and Action Button | 🟡 Apple/device **unverified** |
 | [Configuration/](Configuration/README.md) | Shared App Group entitlement; generated Info plists | ✅ Configuration |
+| [Packages/AppModel/](Packages/AppModel/README.md) | Plain Swift composition, epoch cancellation, suggestions/Policy, recorder, BLE parsing and source scoring | ✅ Synthetic Linux tests; device behavior **unverified** |
 | [Packages/Core/](Packages/Core/README.md) | Independent mode/capture, triggers, Auto target, text history, registry and safe dictation | ✅ Linux unit tests; UI adapters pending |
 | [Packages/Pairing/](Packages/Pairing/README.md) | Noise XX, QR checks, four-word phrase and both-screen confirmation gate | ✅ Cacophony/Linux tests; live desktop pairing **unverified** |
 | [Packages/Router/](Packages/Router/README.md) | Policy-permit routing, destination-bound holds, labelled cloud candidates and durable task queue (REQ-34/42–45/60) | ✅ Linux Policy integration tests; UI/provider wiring **unverified** |
 | [Packages/Protocol/](Packages/Protocol/README.md) | Generated validating wire codecs | ✅ Linux round-trip tests |
-| [Packages/](Packages/README.md) | Stt and Brain skeletons; portable package map | 🟡 Feature implementations pending |
-| [Packages/](Packages/README.md) | Core, Stt, Brain: portable Swift skeletons with tests | ✅ Linux tests; features not implemented |
 | [Packages/Policy/](Packages/Policy/README.md) | Deterministic gate, bounded grants, durable revocation, payload-bound approval and authenticated audit recovery; REQ-28–35 | ✅ Linux tests; phone/checkpoint integration **unverified** |
-| [Packages/](Packages/README.md) | Brain skeleton; portable package map | 🟡 Feature implementations pending |
 | [Packages/Stt/](Packages/Stt/README.md) | Streaming engines, router, per-user vocabulary, guarded cleanup, A/B bench export, proxy clients ([REQ-9]–[REQ-12]) | ✅ Linux synthetic tests; live use **unverified** |
 | [Packages/SttApple/](Packages/SttApple/README.md) | SpeechAnalyzer, MIT WhisperKit small.en, optional licensed Argmax; debug picker ready for UI embedding | 🟡 Coordinator `ios-ci-*` build and device use **unverified** |
 | [Packages/Brain/](Packages/Brain/README.md) | Strict non-executable proposals, relay Claude client, router, incremental suggestion cards and benchmark hook | ✅ Synthetic Linux tests; live/UI/Policy integration **unverified** |
 | [Packages/BrainApple/](Packages/BrainApple/README.md) | Foundation Models + optional on-demand MLX adapters | 🟡 Apple CI/device behavior **unverified** |
-| [Packages/](Packages/README.md) | Portable package map; Stt skeleton | 🟡 Feature implementations pending |
 | [Tests/](Tests/README.md) | Hosted app unit test | 🟡 macOS test **unverified** |
 | [ci/](ci/README.md) | Tested release guard and simulator discovery | ✅ Linux helper tests |
 | [ios.yml](../../.github/workflows/ios.yml) | Unsigned simulator tests; optional TestFlight release | 🟡 GitHub run **unverified** |
 
 Start with `project.yml`. Design: [Components and Repo](../../SYS/system-design-v1.md#components),
 [product definition](../../SYS/product-definition-v0.2.md). Core logic traces to REQ-3/4/5/8/16/17/18/25/56/60; Pairing traces to REQ-22–25/60/61.
-Package tests prove portable logic; app targets remain scaffolds and on-device behavior is **unverified**.
+Package tests prove portable logic; Apple SDK compilation and on-device behavior remain **unverified**.
 
 Linux checks (Swift 6+, no Apple frameworks):
 
@@ -99,3 +97,59 @@ Keyboard task 9 ([REQ-16], [REQ-46–48], [REQ-56]):
 | Linux check | `swift test -j 4 --package-path SW/ios/Packages/KeyboardBridge` (through `heavy` here): ordering, ID dedup, crash/restart, seven-day expiry, capacity, controls and newline rejection. |
 | Owner real-device check | **Unverified:** enable keyboard with Full Access off; dictate synthetic text in main app; activate in Messages and Mail, confirm text at caret and **no auto-send**; exercise globe, space/delete, suspension/restart, and copy/share in a rejecting field. |
 | Coordinator CI | **Unverified:** `ios-ci-*` tag run compiles UIKit/Darwin adapters and keyboard target; Linux does not compile Apple-only code. |
+
+Task 6 owner acceptance ([design plan](../../SYS/system-design-v1.md#plan),
+[product P0](../../SYS/product-definition-v0.2.md#p0--iphone--windows-experience-first-priority)):
+
+| Owner check | Status |
+|---|---|
+| AirPods remain connected to iPhone while committed text goes to the PC; switch back to iPhone without reconnecting headset (task 6 done-when) | **Unverified** |
+| QR pair on home LAN and an external network, no manual IP; goal under one minute | **Unverified**; LAN adapter present; short-code/relay service integration remains open |
+| Four words match on both screens; enrollment waits for both; role/capabilities and revoke work | **Unverified** |
+| Revocation immediately blocks the next message and removes peer credentials/relay membership | **Unverified**; current adapter joins no relay room |
+| Windows correct field: Notepad, Chrome, Teams; text insertion never presses Send/Enter | **Unverified** |
+| Clear destination before first word: named target and Auto; phone fallback after stale focus; desktop tray/remote presentation | **Unverified**; merged wire protocol has no tray display acknowledgement |
+| OFF/HOLD/CONTINUOUS and Dictation/AI Control are separate; mode switch preserves target; short taps/hold/double-tap match shared trigger | **Unverified** on phone; portable tests cover state boundaries |
+| Immediate Stop while idle, preparing, listening, finishing, interrupted or failed; deny microphone access; unplug AirPods; take a call; no automatic restart or late text | **Unverified** on phone |
+| Continuous dictation segments reach history/field while microphone remains on; source loss drops only unfinished text | **Unverified** on phone; segmentation thresholds **TBC** |
+| Action Button unlocked/locked, warm/cold start, microphone indicator and Live Activity; document observed limitations and fallbacks | **Unverified**; intent requests foreground opening; cold start has no proven guarantee |
+| Messages/Mail keyboard inserts committed text at caret with Full Access off; no auto-send; copy/share in unsupported fields | **Unverified** |
+| Seven-day text-only history, manual delete, private storage/backup exclusion; no normal capture audio files | **Unverified** on phone; synthetic retention/delete tests |
+| Speech model provisioning, offline on-device path, cloud consent/indicator, vocabulary, speech/brain pickers and A/B | **Unverified**; proxy authentication/provider behavior requires deployed services |
+| Meeting suggestions do nothing untouched, deduplicate/expire, mute, edit destination, review and dismiss | **Unverified** on phone; conservative inferred-only app activation |
+| Exact action/destination/recipient/consequences remain visible during approval; tier 3 requires fresh Policy Face ID/passcode; cancellation/failure never executes; remote cannot approve | **Unverified** on phone; synthetic Policy integration tests |
+| Benchmark prompts, same-audio A/B, run-schema JSON share, audio local and removed after successful export unless kept | **Unverified** on phone; synthetic schema and deletion tests |
+| BLE authenticated Numeric Comparison enrollment, version/snapshot/display-write barrier, raw Opus, OFF/disconnect/loss/watchdog, release then fresh trigger | **Unverified**; remote capture disabled until trusted enrollment is supplied; draft contract/PR #9 untested on hardware |
+| Dynamic Type largest sizes, VoiceOver all controls and approval details, dark mode | **Unverified** |
+| Owner speech/brain benchmark gate: named iPhone/AirPods, WER/terms/first words/latency/battery; no engine selected on synthetic scores | **Unverified** |
+| Privacy/recording consent, cloud retention and encryption policy reviewed before release | **Unverified** |
+
+Task 6 integration limits: computer enrollment metadata and revocation tombstones persist
+in protected files; keys remain in Keychain. Relaunch restores Core and performs a fresh,
+pinned LAN Noise resume handshake on use; real-device resumption remains **unverified**. Account identifier
+must match the receiver (Settings; restart after change). Provider-session executors are not yet supplied: supported machine actions queue against
+paired registry destinations and hold visibly; unsupported/pinned unknown sessions report
+queue-confirmation failure and retain the approval permit for a verified retry.
+Tier 2 wake/grant automation stays disabled pending authenticated actor/scope integration.
+The app uses the merged Core trigger window; draft BLE trigger ambiguity remains unresolved.
+BLE capture stays fail-closed because CoreBluetooth does not expose the Numeric Comparison
+security evidence required by the draft. Opus integration and all Apple APIs await the
+coordinator's `ios-ci-*` tag. No commit, push, merge or PR was performed by this worker.
+
+Scoped portable checks: `swift test -j 4 --package-path SW/ios/Packages/AppModel` and
+`swift test -j 4 --package-path SW/ios/Packages/Stt` (through `HEAVY_CPUS=4 heavy` on hwgeekom).
+In this restricted worktree, export `CLANG_MODULE_CACHE_PATH=/tmp/voiceremote-clang-cache`
+and `SWIFTPM_MODULECACHE_OVERRIDE=/tmp/voiceremote-swift-cache` so compiler caches are writable.
+Apple observation, microphone controls and approval screens still need cross review and CI.
+
+Cross-review regression evidence lives in [AppModel tests](Packages/AppModel/Tests/README.md):
+HOLD failure/cancellation, Auto presentation, real Router queue/retry, persisted enrollment
+restoration, PairingFlow, revoke cleanup, consent withdrawal and cold-runtime bootstrap.
+Apple route reconfiguration, local Bindable fixes, gestures and BLE display writes remain
+**unverified** until `ios-ci-*` and phone checks. No Core package modification was needed.
+
+Swift 6 follow-up audits all App, LiveActivity, KeyboardExt and intent sources:
+ActivityKit ID-only operations, serial camera ownership, synchronous main-queue BLE
+delegates, and explicit Sendable callbacks. Reconnect requests an Input snapshot in
+the first state write after subscriptions. Portable regression reproduced failing
+first; Apple SDK compilation and device execution of these changes **unverified**.

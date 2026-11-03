@@ -16,3 +16,11 @@ flowchart LR
 
 Start with SttEngine; see [package assumptions](../README.md). [REQ-9]–[REQ-12], [REQ-21].
 Purpose: source map. Inputs: task 7 contracts. Verification: Linux synthetic tests only.
+
+Task 6 capture interruption addition ([REQ-5], [REQ-50], [REQ-56]): `CaptureSource.events()`
+carries frames or terminal `.interrupted`; finite legacy sources default to frame wrapping.
+Live sources must implement interruption events. EngineRouter discards all uncommitted text
+on loss (including offline), and A/B refuses to export an interrupted run. Consumers use
+events rather than stripping the loss signal via `frames()`. Existing engine PCM interfaces
+remain unchanged. [InterruptedCaptureTests](../Tests/InterruptedCaptureTests.swift) cover
+loss/late-frame rejection and A/B failure; Apple/BLE behavior is **unverified**.

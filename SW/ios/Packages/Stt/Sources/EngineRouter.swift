@@ -53,8 +53,38 @@ extension EngineRouter {
             let worker = Task {
                 var stable: [String] = []
                 var terminalFailure: SttFailure?
-                engineEvents: for await event in engine.transcribe(source.frames(), vocabulary: vocabulary) {
+                let audio = AsyncStream<AudioFrame>.makeStream()
+                let messages = AsyncStream<CaptureMessage>.makeStream()
+                let feeder = Task {
+                    for await event in source.events() {
+                        if Task.isCancelled { break }
+                        switch event {
+                        case .frame(let frame): audio.continuation.yield(frame)
+                        case .interrupted:
+                            messages.continuation.yield(.interrupted)
+                            audio.continuation.finish()
+                            return
+                        }
+                    }
+                    audio.continuation.finish()
+                    messages.continuation.yield(.captureEnded)
+                }
+                let reader = Task {
+                    for await event in engine.transcribe(audio.stream, vocabulary: vocabulary) {
+                        messages.continuation.yield(.event(event))
+                    }
+                    messages.continuation.yield(.engineEnded)
+                }
+                defer { feeder.cancel(); reader.cancel(); audio.continuation.finish(); messages.continuation.finish() }
+                var captureEnded = false, engineEnded = false
+                engineEvents: for await message in messages.stream {
                     if Task.isCancelled { break }
+                    switch message {
+                    case .interrupted:
+                        output.yield(.failure(.interrupted)); output.finish(); return
+                    case .captureEnded: captureEnded = true
+                    case .engineEnded: engineEnded = true
+                    case .event(let event):
                     switch event {
                     case .selected: break // Selection is frozen by this router for the utterance.
                     case .final(let raw):
@@ -64,10 +94,14 @@ extension EngineRouter {
                         output.yield(.partial(stable.joined(separator: " ")))
                     case .partial(let text):
                         output.yield(.partial((stable + [text]).joined(separator: " ")))
+                    case .failure(.interrupted):
+                        output.yield(.failure(.interrupted)); output.finish(); return
                     case .failure(let failure):
                         terminalFailure = failure
                         break engineEvents
                     }
+                    }
+                    if captureEnded && engineEnded { break engineEvents }
                 }
                 if !Task.isCancelled, !stable.isEmpty {
                     let raw = stable.joined(separator: " ")
@@ -81,3 +115,5 @@ extension EngineRouter {
         }
     }
 }
+
+private enum CaptureMessage: Sendable { case event(SttEvent), captureEnded, engineEnded, interrupted }
