@@ -492,6 +492,45 @@ mod tests {
     }
     #[cfg(unix)]
     #[tokio::test]
+    async fn observed_nonzero_exit_survives_deadline_and_tree_cleanup() -> Result<()> {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir()?;
+        let file = root.path().join("claude");
+        // The leader exits 7 while a descendant keeps both output pipes open.
+        // The pipe deadline then cancels work and runs cleanup; it must retain
+        // the leader's observed status rather than substitute SIGKILL or None.
+        std::fs::write(&file, "#!/bin/sh\nread input\n/bin/sleep 60 &\nexit 7\n")?;
+        std::fs::set_permissions(file, std::fs::Permissions::from_mode(0o700))?;
+        let session = SessionIdentity {
+            provider: Provider::Claude,
+            account: "test".into(),
+            host: "test".into(),
+            project: "test".into(),
+            workspace: root.path().to_path_buf(),
+            provider_session_id: "test-session".into(),
+            capability_profile: crate::CapabilityProfile::ReadOnly,
+        };
+        // No systemctl on this trusted PATH: exercise the real no-bus path.
+        let adapter = CliAdapter::with_path(root.path().as_os_str().to_owned());
+        let (_send, receive) = watch::channel(false);
+        let result = adapter
+            .run(
+                &session,
+                "synthetic\n",
+                Duration::from_secs(3),
+                1024,
+                receive,
+            )
+            .await;
+        assert_eq!(result.exit_code, Some(7));
+        assert_eq!(result.signal, None);
+        assert_eq!(result.finish, Finish::Unconfirmed);
+        assert!(!result.success);
+        assert!(!result.termination_confirmed);
+        Ok(())
+    }
+    #[cfg(unix)]
+    #[tokio::test]
     async fn real_exit_code_and_timeout_signal_are_retained() -> Result<()> {
         use std::os::unix::fs::PermissionsExt;
         let root = tempfile::tempdir()?;

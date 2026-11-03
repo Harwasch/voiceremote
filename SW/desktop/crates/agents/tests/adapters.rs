@@ -575,7 +575,18 @@ async fn replay_runs_once_across_restart_even_with_changed_payload() -> Result<(
 async fn nonzero_timeout_output_overflow_and_bad_structured_results_fail() -> Result<()> {
     for provider in [Provider::Claude, Provider::Codex] {
         let mut f = Fixture::new(provider)?;
-        f.config.timeout_ms = 200;
+        // Deterministically reproduce a loaded runner's launcher startup. These
+        // fakes do not use a real user bus; both Python startups count against
+        // the task deadline, before the requested nonzero exit can execute.
+        let launcher = f.root.path().join("bin/systemd-run");
+        let body = fs::read_to_string(&launcher)?;
+        fs::write(
+            &launcher,
+            body.replace(
+                "import os,sys,json",
+                "import os,sys,json,time\ntime.sleep(.3)",
+            ),
+        )?;
         for (n, text) in [
             "nonzero",
             "timeout",
@@ -587,6 +598,9 @@ async fn nonzero_timeout_output_overflow_and_bad_structured_results_fail() -> Re
         .iter()
         .enumerate()
         {
+            // Exit/format/overflow assertions must reach the fake provider even
+            // on a loaded runner. Keep the deliberately hung case at 200 ms.
+            f.config.timeout_ms = if *text == "timeout" { 200 } else { 5_000 };
             let node = f.node()?;
             let status = f
                 .call(node.clone(), command(&format!("fail-{n}"), text))
@@ -596,7 +610,14 @@ async fn nonzero_timeout_output_overflow_and_bad_structured_results_fail() -> Re
             let results = node.recent_results();
             let result = results.last().unwrap().process.as_ref().unwrap();
             if *text == "nonzero" {
-                assert_eq!(result.exit_code, Some(7));
+                assert_eq!(
+                    result.exit_code,
+                    Some(7),
+                    "finish={:?}, signal={:?}, calls={}",
+                    result.finish,
+                    result.signal,
+                    f.calls().len()
+                );
             }
             if *text == "timeout" {
                 assert_eq!(result.finish, Finish::TimedOut);

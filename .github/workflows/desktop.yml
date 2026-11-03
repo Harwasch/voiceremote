@@ -24,6 +24,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Install Linux protocol-double runtime
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y dbus-daemon libxkbcommon0 xkb-data
       - name: Test workspace
         run: cargo test --workspace -j4
       - name: Check OS keychain feature
@@ -43,6 +46,8 @@ jobs:
           components: clippy
       - name: Lint Windows injector
         run: cargo clippy -p voiceremote-inject-windows --no-deps --all-targets -j4 -- -D warnings
+      - name: Test desktop acquisition outcomes
+        run: cargo test -p voiceremote-inject-windows --example desktop-smoke -j4
       - name: Exercise an owned desktop edit control
         shell: pwsh
         run: |
@@ -53,3 +58,19 @@ jobs:
           $status = $output | Where-Object { "$_" -match '^(PASS:|SKIPPED:)' }
           if (-not $status) { throw 'Smoke produced no PASS or SKIPPED status' }
           $status | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+
+  linux-x11-injection:
+    runs-on: ubuntu-latest
+    env:
+      RUST_TEST_THREADS: 4
+      XDG_SESSION_TYPE: x11
+    defaults:
+      run:
+        working-directory: SW/desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install isolated X11 test server
+        run: sudo apt-get update && sudo apt-get install -y xvfb xauth dbus-daemon libxkbcommon0 xkb-data
+      - name: Inject into X11 field, read back, preserve clipboard, reject Enter
+        run: xvfb-run -a cargo test -p voiceremote-inject-linux --test x11_display -j4 -- --ignored --test-threads=1

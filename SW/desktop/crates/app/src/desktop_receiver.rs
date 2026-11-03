@@ -1,6 +1,6 @@
-//! Windows session driver: encrypted focus reports plus existing bounded supervisors.
+//! Desktop session driver: encrypted focus reports plus existing bounded supervisors.
 //! Derived from core receiver; kept here until core exposes a platform metadata hook.
-use super::windows_transport::{LanListener, RelayTransport};
+use super::desktop_transport::{LanListener, RelayTransport};
 use std::{future::Future, sync::Arc, time::Duration};
 use tokio::{sync::watch, task::JoinSet};
 use voiceremote_core::protocol::{FocusReport, FocusReportKind, InnerMessage};
@@ -40,7 +40,7 @@ async fn guarded<T>(
 }
 /// First raw packet is staged outside Session::receive: cancelling that method
 /// would poison the session and lose fragment state. Only cancellation-safe
-/// Windows transport.recv is polled alongside focus/registry timers.
+/// Desktop transport.recv is polled alongside focus/registry timers.
 struct Prefetched<'a> {
     first: Option<Vec<u8>>,
     inner: &'a mut dyn Transport,
@@ -61,24 +61,24 @@ impl Transport for Prefetched<'_> {
         self.inner.close().await
     }
 }
-type Sampler = Arc<dyn Fn() -> (bool, u64) + Send + Sync>;
+static SAMPLER: std::sync::OnceLock<Sampler> = std::sync::OnceLock::new();
+pub fn set_focus_sampler(sampler: Sampler) {
+    let _ = SAMPLER.set(sampler);
+}
+pub type Sampler = Arc<dyn Fn() -> (bool, u64) + Send + Sync>;
+fn focus_report_due(previous: Option<((bool, u64), u64)>, current: (bool, u64), now: u64) -> bool {
+    previous.is_none_or(|(old, at)| old != current || now.saturating_sub(at) >= 30_000)
+}
 pub async fn serve(
     session: Session,
     transport: &mut dyn Transport,
     injector: &mut dyn TextInjector,
     stop: watch::Receiver<bool>,
 ) -> Result<()> {
-    let sampler: Sampler = Arc::new(|| {
-        #[cfg(windows)]
-        {
-            let snapshot = voiceremote_inject_windows::focus_snapshot();
-            (snapshot.text_field_focused, snapshot.last_activity_at)
-        }
-        #[cfg(not(windows))]
-        {
-            (false, 0)
-        }
-    });
+    let sampler = SAMPLER
+        .get()
+        .cloned()
+        .unwrap_or_else(|| Arc::new(|| (false, 0)));
     let result = serve_with_sampler(session, transport, injector, stop, sampler).await;
     let _ = tokio::time::timeout(Duration::from_secs(1), transport.close()).await;
     result
@@ -111,7 +111,7 @@ async fn serve_with_sampler(
                 let sampler = sampler.clone();
                 let (focused, activity) = tokio::task::spawn_blocking(move || sampler()).await?;
                 let now = started.elapsed().as_millis() as u64;
-                if !voiceremote_inject_windows::policy::focus_report_due(previous, (focused, activity), now) { continue; }
+                if !focus_report_due(previous, (focused, activity), now) { continue; }
                 let report = InnerMessage::FocusReport(FocusReport {
                     kind: FocusReportKind::FocusReport,
                     account_id: local.account_id.clone(), device_id: local.device_id.clone(),
@@ -132,7 +132,9 @@ async fn serve_with_sampler(
                 idle = tokio::time::Instant::now() + IDLE_TIMEOUT;
                 // Do not print errors from decoding or field data. Native
                 // injection errors are fixed, content-free messages.
-                if session.deliver(transport, message, injector).await? == Delivery::Revoked { return Ok(()); }
+                if session.deliver(transport, message, injector).await? == Delivery::Revoked {
+                    return Ok(());
+                }
             },
         }
     }
@@ -277,16 +279,37 @@ mod tests {
             Ok(true)
         }
     }
-    struct Injector(Arc<Mutex<Vec<String>>>);
+    struct Injector(
+        Arc<Mutex<Vec<String>>>,
+        Option<voiceremote_core::InsertionFailure>,
+        Arc<std::sync::atomic::AtomicUsize>,
+    );
     impl TextInjector for Injector {
         fn insert_text(&mut self, text: &str) -> Result<()> {
-            self.0.lock().unwrap().push(text.into());
-            Ok(())
+            self.2.fetch_add(1, Ordering::SeqCst);
+            if self.1 != Some(voiceremote_core::InsertionFailure::NotStarted) {
+                self.0.lock().unwrap().push(text.into());
+            }
+            match self.1 {
+                Some(failure) => Err(failure.into()),
+                None => Ok(()),
+            }
         }
     }
     #[tokio::test]
     async fn encrypted_session_reports_focus_changes_without_contents_and_delivers_fragmented_literal_text()
     -> Result<()> {
+        exercise_session(None).await
+    }
+    #[tokio::test]
+    async fn refused_before_input_reports_unavailable_and_keeps_session_open() -> Result<()> {
+        exercise_session(Some(voiceremote_core::InsertionFailure::NotStarted)).await
+    }
+    #[tokio::test]
+    async fn unconfirmed_paste_reports_error_and_replay_never_reinserts() -> Result<()> {
+        exercise_session(Some(voiceremote_core::InsertionFailure::Unconfirmed)).await
+    }
+    async fn exercise_session(failure: Option<voiceremote_core::InsertionFailure>) -> Result<()> {
         let listener = LanListener::bind("127.0.0.1:0".parse()?).await?;
         let mut phone =
             voiceremote_core::transport::LanTransport::connect(listener.address()?).await?;
@@ -334,9 +357,18 @@ mod tests {
         let sampler: Sampler = Arc::new(move || (sample.load(Ordering::SeqCst), 1234));
         let inserted = Arc::new(Mutex::new(Vec::new()));
         let injected = inserted.clone();
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let called = calls.clone();
         let (_stop, watch) = watch::channel(false);
         let task = tokio::spawn(async move {
-            serve_with_sampler(ds, &mut desktop, &mut Injector(injected), watch, sampler).await
+            serve_with_sampler(
+                ds,
+                &mut desktop,
+                &mut Injector(injected, failure, called),
+                watch,
+                sampler,
+            )
+            .await
         });
         let message =
             tokio::time::timeout(Duration::from_secs(3), ps.receive(&mut phone)).await??;
@@ -348,19 +380,57 @@ mod tests {
         assert_eq!(first.device_id, "desktop");
         assert_eq!(serde_json::to_value(&first)?.as_object().unwrap().len(), 5);
         let literal = "Synthetic 🦀 ".repeat(1000);
-        ps.send(
-            &mut phone,
-            &InnerMessage::DictationText(DictationText {
-                kind: DictationTextKind::DictationText,
-                account_id: "synthetic-account".into(),
-                segment_id: "synthetic-segment".into(),
-                revision: 1,
-                state: DictationTextState::Committed,
-                target_device_id: "desktop".into(),
-                text: literal.clone(),
-            }),
-        )
-        .await?;
+        let dictation = InnerMessage::DictationText(DictationText {
+            kind: DictationTextKind::DictationText,
+            account_id: "synthetic-account".into(),
+            segment_id: "synthetic-segment".into(),
+            revision: 1,
+            state: DictationTextState::Committed,
+            target_device_id: "desktop".into(),
+            text: literal.clone(),
+        });
+        ps.send(&mut phone, &dictation).await?;
+        if let Some(failure) = failure {
+            for attempt in 1..=2 {
+                let message =
+                    tokio::time::timeout(Duration::from_secs(3), ps.receive(&mut phone)).await??;
+                let InnerMessage::TaskStatus(report) = message else {
+                    panic!("missing insertion status")
+                };
+                assert_eq!(report.command_id, "synthetic-segment");
+                assert_eq!(
+                    report.execution_state,
+                    voiceremote_core::protocol::ExecutionState::Failed
+                );
+                let not_started = failure == voiceremote_core::InsertionFailure::NotStarted;
+                assert_eq!(
+                    report.outcome,
+                    Some(if not_started {
+                        voiceremote_core::protocol::TaskStatusOutcome::Unavailable
+                    } else {
+                        voiceremote_core::protocol::TaskStatusOutcome::Error
+                    })
+                );
+                assert_eq!(
+                    calls.load(Ordering::SeqCst),
+                    if not_started { attempt } else { 1 }
+                );
+                if attempt == 1 {
+                    ps.send(&mut phone, &dictation).await?;
+                }
+            }
+            assert_eq!(
+                inserted.lock().unwrap().len(),
+                usize::from(failure != voiceremote_core::InsertionFailure::NotStarted)
+            );
+            dr.revoke(&peer)?;
+            assert!(
+                tokio::time::timeout(Duration::from_secs(2), task)
+                    .await??
+                    .is_err()
+            );
+            return Ok(());
+        }
         // Keep Session::receive pinned while checking silence; cancelling and
         // recreating it would poison the session and invalidate this test.
         let next = ps.receive(&mut phone);

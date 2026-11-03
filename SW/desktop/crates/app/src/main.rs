@@ -2,12 +2,8 @@ use anyhow::{Result, bail, ensure};
 use clap::{Parser, Subcommand};
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use tokio::sync::watch;
-#[cfg(not(windows))]
 use voiceremote_core::{
-    TextInjector, receiver,
-    transport::{LanListener, RelayTransport},
-};
-use voiceremote_core::{
+    TextInjector,
     pairing::{self, Offer, SystemClock},
     protocol::*,
     receiver::InjectorFactory,
@@ -15,16 +11,19 @@ use voiceremote_core::{
     storage::{FileKeyStore, Identity, KeyStore, ReceiverLease, Registry},
     transport::{RelayRoute, Transport},
 };
-#[cfg(windows)]
-use windows_receiver as receiver;
-#[cfg(windows)]
-use windows_transport::{LanListener, RelayTransport};
-#[cfg(any(windows, test))]
-#[cfg_attr(not(windows), allow(dead_code))]
-mod windows_receiver;
-#[cfg(any(windows, test))]
-#[cfg_attr(not(windows), allow(dead_code))]
-mod windows_transport;
+#[cfg(any(windows, target_os = "linux", test))]
+mod desktop_receiver;
+#[cfg(any(windows, target_os = "linux", test))]
+mod desktop_transport;
+#[cfg(any(windows, target_os = "linux"))]
+use desktop_receiver as receiver;
+#[cfg(any(windows, target_os = "linux"))]
+use desktop_transport::{LanListener, RelayTransport};
+#[cfg(not(any(windows, target_os = "linux")))]
+use voiceremote_core::{
+    receiver,
+    transport::{LanListener, RelayTransport},
+};
 fn default_state_dir() -> PathBuf {
     if cfg!(windows) {
         return std::env::var_os("LOCALAPPDATA")
@@ -132,9 +131,7 @@ enum Command {
 enum DictateCommand {
     Toggle,
 }
-#[cfg(not(windows))]
 struct UnavailableInjector;
-#[cfg(not(windows))]
 impl TextInjector for UnavailableInjector {
     fn insert_text(&mut self, _: &str) -> Result<()> {
         Err(voiceremote_core::InsertionFailure::NotStarted.into())
@@ -180,6 +177,37 @@ impl voiceremote_core::TextInjector for SyntheticInjector {
         ensure!(text == "Synthetic e2e 🦀", "unexpected e2e input");
         println!("E2E_INSERTED");
         Ok(())
+    }
+}
+fn injector_factory(state_dir: &std::path::Path, headless: bool) -> InjectorFactory {
+    if headless {
+        #[cfg(any(windows, target_os = "linux"))]
+        desktop_receiver::set_focus_sampler(Arc::new(|| (false, 0)));
+        return Arc::new(|| Box::new(UnavailableInjector));
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let injector = voiceremote_inject_linux::LinuxInjector::new(state_dir.to_path_buf());
+        let sampler = injector.clone();
+        desktop_receiver::set_focus_sampler(Arc::new(move || {
+            let snapshot = sampler.focus_snapshot();
+            (snapshot.text_field_focused, snapshot.last_activity_at)
+        }));
+        Arc::new(move || Box::new(injector.clone()))
+    }
+    #[cfg(windows)]
+    {
+        let _ = state_dir;
+        desktop_receiver::set_focus_sampler(Arc::new(|| {
+            let snapshot = voiceremote_inject_windows::focus_snapshot();
+            (snapshot.text_field_focused, snapshot.last_activity_at)
+        }));
+        Arc::new(|| Box::new(WindowsAppInjector))
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
+    {
+        let _ = state_dir;
+        Arc::new(|| Box::new(UnavailableInjector))
     }
 }
 fn store(cli: &Cli) -> Result<Arc<dyn KeyStore>> {
@@ -259,6 +287,11 @@ async fn read_confirmation(stop: watch::Receiver<bool>) -> Result<String> {
 #[tokio::main(flavor = "multi_thread", worker_threads = 4)]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
+    #[cfg(target_os = "linux")]
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter("voiceremote_inject_linux=info")
+        .with_writer(std::io::stderr)
+        .try_init();
     if matches!(cli.command, Command::Dictate { .. }) {
         println!("dictate toggle: stub; phone capture control is not connected");
         return Ok(());
@@ -275,10 +308,10 @@ async fn main() -> Result<()> {
         let _ = tokio::signal::ctrl_c().await;
         let _ = stop_send.send(true);
     });
-    #[cfg(not(windows))]
-    let injectors: InjectorFactory = Arc::new(|| Box::new(UnavailableInjector));
-    #[cfg(windows)]
-    let injectors: InjectorFactory = Arc::new(|| Box::new(WindowsAppInjector));
+    let injectors = injector_factory(
+        &cli.state_dir,
+        matches!(cli.command, Command::Run { headless: true, .. }),
+    );
     #[cfg(feature = "e2e-test")]
     let injectors: InjectorFactory = if cli.e2e_injector {
         Arc::new(|| Box::new(SyntheticInjector))
@@ -633,6 +666,22 @@ mod agent_cli_tests {
                 "/synthetic/config.toml"
             ])
             .is_ok()
+        );
+    }
+}
+
+#[cfg(test)]
+mod injector_tests {
+    use super::*;
+    #[test]
+    fn headless_agent_never_needs_display_or_portal() {
+        let factory = injector_factory(std::path::Path::new("/not-created-for-agent"), true);
+        assert_eq!(
+            factory()
+                .insert_text("synthetic")
+                .unwrap_err()
+                .downcast_ref::<voiceremote_core::InsertionFailure>(),
+            Some(&voiceremote_core::InsertionFailure::NotStarted)
         );
     }
 }

@@ -13,7 +13,7 @@ flowchart LR
 | Path | What it is | Status |
 |---|---|---|
 | [src/](src/) | Linux-testable policy; Windows-only native TextInjector and UIA | 🟡 synthetic tests; native runtime unverified |
-| [examples/](examples/) | Owned edit-window smoke and timed manual insertion | 🟡 Windows CI execution pending |
+| [examples/](examples/) | Owned edit-window smoke, desktop-acquisition regression tests, and timed manual insertion | 🟡 Windows CI execution pending |
 | [manual-test.md](manual-test.md) | Owner's Notepad, Chrome, Teams and privacy checklist | ⬜ owner checks unverified |
 | [../../../../DOCS/licences/](../../../../DOCS/licences/) | Pinned Handy/Hex MIT provenance | ✅ notices retained |
 

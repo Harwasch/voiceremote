@@ -1,29 +1,23 @@
 ```mermaid
 flowchart LR
-    main[main.rs] --> Core[voiceremote-core]
-    main --> QR[terminal QR / full code]
-    main --> Headless[core receiver supervisors]
-    main --> Agents[agents: duplex headless controls + durable receipts]
-    main --> Relay[signed create/invite/join + optional provisioning]
-    main -->|Windows| Win[windows_receiver.rs: focus over Noise]
-    Win --> Wire[windows_transport.rs: persistent framing / keepalive]
-    main --> Inject[Windows TextInjector]
+    main[main.rs] --> Receiver[desktop_receiver.rs: shared encrypted focus + sessions]
+    Receiver --> Wire[desktop_transport.rs: cancellation-safe framing]
+    main --> Inject[Windows / Linux TextInjector]
+    main --> Agents[opt-in headless agents + duplex controls]
+    main --> Core[pairing / registry / signed relay]
 ```
 
 | File | What it is | Status |
 |---|---|---|
-| [main.rs](main.rs) | Pair, persisted identity, revoke, signed relay rooms, concurrent headless run and opt-in agent adapters | ✅ CLI + local Worker/Swift E2E; physical device unverified |
-| [windows_receiver.rs](windows_receiver.rs) | Windows receiver; encrypted focus changes / 30-second heartbeat | ✅ synthetic Noise/fragmentation test; native runtime unverified |
-| [windows_transport.rs](windows_transport.rs) | Windows LAN framing plus shared core VRR1 relay codec / persistent keepalive | ✅ synthetic partial-frame tests; native network unverified |
+| [main.rs](main.rs) | CLI, signed relay rooms/invites, platform injector factory, headless agent opt-in | ✅ synthetic CLI tests |
+| [desktop_receiver.rs](desktop_receiver.rs) | Shared Windows/Linux driver, content-free focus changes and 30-second heartbeat, core insertion status reports | ✅ encrypted session tests; native runtime unverified |
+| [desktop_transport.rs](desktop_transport.rs) | LAN frame progress and shared core VRR1 relay codec/keepalive retained across focus polls | ✅ synthetic fragmentation/relay tests |
 
-Start at `Cli` and `main`. Configuration/limitations are in the
-[desktop README](../../../README.md). REQ-16/18–21/22–25/27/41/44/57.
-Windows selects its injection backend; Linux reports unavailable. Agent execution
-requires headless `--agents-config` and an owner allowlist. No Tauri/overlay.
-
-Windows receiver mirrors core supervisors because the core API has no metadata
-hook. Its LAN adapter retains partial reads across cancellation; relay delegates
-to the shared core codec with persistent keepalive timers.
+Start at `Cli` and `main`; see [desktop README](../../../README.md).
+REQ-16/18–25/27/41/44/57. Headless mode avoids both platform injectors.
+Unknown focus reports false. Real desktops and phone UI remain **unverified**.
+Keep these adapters aligned with core supervisors and wire validation.
 
 The opt-in `e2e-test` feature adds a fixed synthetic TextInjector and explicit
-loopback HTTP relay access for `SYS/tests/e2e/run.sh`.
+loopback HTTP relay access for `SYS/tests/e2e/run.sh`. Production adapters remain
+selected in ordinary builds.
