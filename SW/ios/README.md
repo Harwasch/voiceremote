@@ -24,6 +24,9 @@ flowchart LR
 | [Packages/](Packages/README.md) | Stt and Brain skeletons; portable package map | 🟡 Feature implementations pending |
 | [Packages/](Packages/README.md) | Core, Stt, Brain: portable Swift skeletons with tests | ✅ Linux tests; features not implemented |
 | [Packages/Policy/](Packages/Policy/README.md) | Deterministic gate, bounded grants, durable revocation, payload-bound approval and authenticated audit recovery; REQ-28–35 | ✅ Linux tests; phone/checkpoint integration **unverified** |
+| [Packages/](Packages/README.md) | Brain skeleton; portable package map | 🟡 Feature implementations pending |
+| [Packages/Stt/](Packages/Stt/README.md) | Streaming engines, router, per-user vocabulary, guarded cleanup, A/B bench export, proxy clients ([REQ-9]–[REQ-12]) | ✅ Linux synthetic tests; live use **unverified** |
+| [Packages/SttApple/](Packages/SttApple/README.md) | SpeechAnalyzer, MIT WhisperKit small.en, optional licensed Argmax; debug picker ready for UI embedding | 🟡 Coordinator `ios-ci-*` build and device use **unverified** |
 | [Tests/](Tests/README.md) | Hosted app unit test | 🟡 macOS test **unverified** |
 | [ci/](ci/README.md) | Tested release guard and simulator discovery | ✅ Linux helper tests |
 | [ios.yml](../../.github/workflows/ios.yml) | Unsigned simulator tests; optional TestFlight release | 🟡 GitHub run **unverified** |

@@ -16,6 +16,8 @@ packages:
     path: Packages/Core
   Stt:
     path: Packages/Stt
+  SttApple:
+    path: Packages/SttApple
   Brain:
     path: Packages/Brain
   KeyboardBridge:
@@ -43,6 +45,7 @@ targets:
     dependencies:
       - package: Core
       - package: Stt
+      - package: SttApple
       - package: Brain
       - target: KeyboardExt
         embed: true

@@ -184,3 +184,20 @@ extension PairingTests {
         do { _ = try await d.receive(); XCTFail("timeout left transport open") } catch {}
     }
 }
+
+extension PairingTests {
+    func testQRRejectsCRLFAndControlCombiningClustersInEncodedKeyMaterial() throws {
+        let valid = try qr(key: Data(repeating: 1, count: 32))
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: valid) as? [String: Any])
+        for field in ["desktop_public_key", "one_use_token"] {
+            for cluster in ["\r\n", "a\r\nb", "\n\u{0301}", "\u{0000}\u{0301}"] {
+                var corrupted = object
+                let encoded = try XCTUnwrap(object[field] as? String)
+                corrupted[field] = String(encoded.prefix(20)) + cluster + String(encoded.dropFirst(20))
+                let bytes = try JSONSerialization.data(withJSONObject: corrupted)
+                XCTAssertThrowsError(try ProtocolCodec.decode(PairingPayload.self, from: bytes))
+                XCTAssertThrowsError(try PairingInvitation(qr: bytes, expectedAccount: "synthetic", clock: TestClock(now: 1)))
+            }
+        }
+    }
+}

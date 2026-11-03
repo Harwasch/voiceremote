@@ -464,3 +464,15 @@ extension LogicTests {
         XCTAssertEqual(trigger.capture, .off)
     }
 }
+
+extension LogicTests {
+    func testDictationSanitizesControlScalarsInCRLFAndCombiningClusters() {
+        let cases = [("\r\n", ""), ("a\r\nb", "a b"), ("\n\u{0301}", "\u{0301}"),
+                     ("a\n\u{0301}b", "a \u{0301}b"), ("a\u{0000}\u{0301}b", "a\u{0301}b")]
+        for (input, expected) in cases {
+            let clean = DictationPipeline.sanitize(input)
+            XCTAssertEqual(Array(clean.unicodeScalars), Array(expected.unicodeScalars))
+            XCTAssertFalse(clean.unicodeScalars.contains { $0.value <= 0x1f || (0x7f...0x9f).contains($0.value) || $0.value == 0x2028 || $0.value == 0x2029 })
+        }
+    }
+}

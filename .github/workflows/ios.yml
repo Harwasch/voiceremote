@@ -73,7 +73,7 @@ jobs:
           echo "id=$device_id" >> "$GITHUB_OUTPUT"
       - name: Test packages
         run: |
-          for p in Core Stt Brain; do
+          for p in Protocol Core Stt Brain Policy Pairing; do
             swift test --jobs 4 --package-path "Packages/$p"
           done
       - name: Build app and extensions and run app unit tests unsigned

@@ -174,3 +174,23 @@ final class KeyboardBridgeTests: XCTestCase {
         XCTAssertTrue(destination.texts.isEmpty)
     }
 }
+
+extension KeyboardBridgeTests {
+    @MainActor func testNoSendRejectsCRLFAndControlCombiningClustersAtBothBoundaries() async throws {
+        let (_, shared, local) = try directories()
+        let writer = QueueWriter(sharedDirectory: shared)
+        try FileManager.default.createDirectory(at: shared, withIntermediateDirectories: true)
+        for text in ["\r\n", "a\r\nb", "\n\u{0301}", "a\u{0000}\u{0301}b"] {
+            XCTAssertThrowsError(try BridgePolicy.validate(text))
+            let unsafe = segment(text)
+            XCTAssertThrowsError(try writer.enqueue(unsafe, listening: false, now: now))
+            // Model a corrupted queue that bypassed the app's enqueue validation.
+            let bytes = try JSONSerialization.data(withJSONObject: ["version": 1, "listening": false,
+                "segments": [["id": unsafe.id.uuidString, "createdAt": now.timeIntervalSinceReferenceDate, "text": text]]])
+            try bytes.write(to: shared.appendingPathComponent(BridgePolicy.queueFilename))
+            let destination = Destination()
+            XCTAssertThrowsError(try QueueReader(sharedDirectory: shared, localDirectory: local).drain(into: destination, now: now))
+            XCTAssertTrue(destination.texts.isEmpty)
+        }
+    }
+}
