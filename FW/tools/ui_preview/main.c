@@ -57,6 +57,8 @@ void remote_event(uint8_t event,uint8_t value,uint32_t sampled)
 }
 esp_err_t board_flush(int x1,int y1,int x2,int y2,const void *data)
 {
+    /* Panels like the CO5300 distort updates that aren't aligned this way. */
+    assert(!(x1&1) && !(y1&1) && (x2&1) && (y2&1));
     assert(!mutex_depth); /* Panel DMA never owns the input/audio mutex. */
     now+=flush_delay; flush_delay=0;
     if(interrupt_render) {

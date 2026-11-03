@@ -367,6 +367,13 @@ static void act(vr_hit_t hit)
         if(!(current.secure && current.valid)) ble_pair_start();
     }
 }
+/* AMOLED controllers such as the CO5300 need even start and odd end coordinates;
+ * anything else distorts partial updates. */
+static void round_area(lv_event_t *e)
+{
+    lv_area_t *a=lv_event_get_param(e);
+    a->x1&=~1; a->y1&=~1; a->x2|=1; a->y2|=1;
+}
 static void flush(lv_display_t *d,const lv_area_t *a,uint8_t *pixels)
 {
     uint64_t start=timing_now_us(); frame_flushed=true;
@@ -400,6 +407,7 @@ void ui_init(void)
     lv_display_set_color_format(display,LV_COLOR_FORMAT_RGB565);
     lv_display_set_buffers(display,buffer,NULL,bytes,LV_DISPLAY_RENDER_MODE_PARTIAL);
     lv_display_set_flush_cb(display,flush);
+    lv_display_add_event_cb(display,round_area,LV_EVENT_INVALIDATE_AREA,NULL);
     screen=lv_screen_active(); lv_obj_remove_style_all(screen);
     lv_obj_set_style_bg_color(screen,lv_color_black(),0); lv_obj_set_style_bg_opa(screen,255,0);
     lv_obj_remove_flag(screen,LV_OBJ_FLAG_SCROLLABLE); lv_obj_add_flag(screen,LV_OBJ_FLAG_CLICKABLE);
