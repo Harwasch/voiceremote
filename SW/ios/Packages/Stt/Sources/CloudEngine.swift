@@ -71,13 +71,15 @@ public struct CloudEngine: SttEngine {
     public let sockets: any SttSocketFactory
     /// Maximum inactivity (including connect); successful sends and receives reset it.
     public let timeout: Duration
+    public let clock: any SttIdleClock
     public var descriptor: EngineDescriptor {
         .init(id: vendor == .elevenLabs ? "elevenlabs-scribe" : "assemblyai",
               version: vendor == .elevenLabs ? "scribe_v2_realtime" : "universal-3-5-pro", location: .cloud)
     }
     public init(vendor: Vendor, settings: ProxySettings,
-                sockets: any SttSocketFactory = URLSessionSocketFactory(), timeout: Duration = .seconds(60)) {
-        self.vendor = vendor; self.settings = settings; self.sockets = sockets; self.timeout = timeout
+                sockets: any SttSocketFactory = URLSessionSocketFactory(), timeout: Duration = .seconds(60),
+                clock: any SttIdleClock = ContinuousIdleClock()) {
+        self.vendor = vendor; self.settings = settings; self.sockets = sockets; self.timeout = timeout; self.clock = clock
     }
     // Docs checked 2026-11-02; live service and future relay proxy are UNVERIFIED.
     // https://elevenlabs.io/docs/eleven-api/guides/how-to/speech-to-text/realtime/event-reference
@@ -108,12 +110,13 @@ public struct CloudEngine: SttEngine {
     }
     public func transcribe(_ audio: AsyncStream<AudioFrame>, vocabulary: Vocabulary) -> AsyncStream<SttEvent> {
         AsyncStream { output in
-            let lifetime = CloudLifetime()
+            let idle = IdleTimeout(timeout: timeout, clock: clock)
+            let lifetime = CloudLifetime(idle: idle)
             let task = Task {
                 do {
                     let connected = try await sockets.connect(to: connectionURL(vocabulary: vocabulary))
                     guard await lifetime.install(connected) else { return }
-                    let socket = ActivitySocket(base: connected, lifetime: lifetime)
+                    let socket = ActivitySocket(base: connected, idle: idle)
                     let sender = Task {
                         do {
                             if vendor == .elevenLabs {
@@ -257,15 +260,16 @@ public struct CloudEngine: SttEngine {
                 await lifetime.stop()
             }
             let timer = Task {
-                while let remaining = await lifetime.remainingIdleTime(timeout) {
-                    if remaining <= .zero {
+                while let deadline = idle.nextDeadline() {
+                    do { try await clock.sleep(until: deadline) } catch { return }
+                    if idle.expireIfIdle() {
                         output.yield(.failure(.timedOut)); output.finish()
                         task.cancel(); await lifetime.stop(); return
                     }
-                    do { try await Task.sleep(for: remaining) } catch { return }
                 }
             }
             output.onTermination = { _ in
+                idle.stop()
                 task.cancel(); timer.cancel()
                 Task { await lifetime.stop() }
             }
@@ -278,7 +282,8 @@ public struct CloudEngine: SttEngine {
 
 /// Closing is independent of the receive task, including cancellation while connect is suspended.
 private actor CloudLifetime {
-    private var lastActivity = ContinuousClock.now
+    private let idle: IdleTimeout
+    init(idle: IdleTimeout) { self.idle = idle }
     var socket: (any SttSocket)?
     var sender: Task<Void, Never>?
     var stopped = false
@@ -288,13 +293,8 @@ private actor CloudLifetime {
     func install(_ socket: any SttSocket) async -> Bool {
         guard !stopped else { await socket.close(); return false }
         self.socket = socket
-        activity()
+        idle.activity()
         return true
-    }
-    func activity() { lastActivity = ContinuousClock.now }
-    func remainingIdleTime(_ timeout: Duration) -> Duration? {
-        guard !stopped else { return nil }
-        return timeout - lastActivity.duration(to: ContinuousClock.now)
     }
     func track(_ task: Task<Void, Never>) {
         if stopped { task.cancel() } else { sender = task }
@@ -316,6 +316,7 @@ private actor CloudLifetime {
         return inputEnded
     }
     func stop() async {
+        idle.stop()
         stopped = true; sender?.cancel(); sender = nil
         acknowledgement?.resume(throwing: SttFailure.cancelled); acknowledgement = nil
         let old = socket; socket = nil
@@ -324,16 +325,16 @@ private actor CloudLifetime {
 }
 
 /// Covers both directions; outbound audio counts even while a provider has no new text.
-private struct ActivitySocket: SttSocket {
+struct ActivitySocket: SttSocket {
     let base: any SttSocket
-    let lifetime: CloudLifetime
+    let idle: IdleTimeout
     func send(_ message: SocketMessage) async throws {
         try await base.send(message)
-        await lifetime.activity()
+        idle.activity()
     }
     func receive() async throws -> SocketMessage {
         let message = try await base.receive()
-        await lifetime.activity()
+        idle.activity()
         return message
     }
     func close() async { await base.close() }

@@ -60,64 +60,57 @@ private struct BridgeFactory: SttSocketFactory {
 private actor StalledSocket: SttSocket {
     var waiter: CheckedContinuation<SocketMessage, any Error>?
     var closed = false
+    let receives = AsyncStream<Void>.makeStream()
+    let closes = AsyncStream<Void>.makeStream()
     func send(_ message: SocketMessage) async throws {}
     func receive() async throws -> SocketMessage {
         if closed { throw SttFailure.cancelled }
+        receives.continuation.yield(())
         return try await withCheckedThrowingContinuation { waiter = $0 }
     }
     func close() {
         closed = true; waiter?.resume(throwing: SttFailure.cancelled); waiter = nil
+        closes.continuation.yield(()); closes.continuation.finish()
     }
 }
 private struct StalledFactory: SttSocketFactory {
     let socket: StalledSocket
     func connect(to url: URL) async throws -> any SttSocket { socket }
 }
-private struct SlowFactory: SttSocketFactory {
+private actor SuspendedFactory: SttSocketFactory {
+    let started = AsyncStream<Void>.makeStream()
+    private let release = AsyncStream<Void>.makeStream()
     func connect(to url: URL) async throws -> any SttSocket {
-        try await Task.sleep(for: .seconds(5)); return StalledSocket()
+        started.continuation.yield(())
+        var iterator = release.stream.makeAsyncIterator()
+        guard await iterator.next() != nil else { throw SttFailure.cancelled }
+        return StalledSocket()
     }
 }
+private struct FailingActivitySocket: SttSocket {
+    func send(_ message: SocketMessage) async throws { throw SttFailure.transport }
+    func receive() async throws -> SocketMessage { throw SttFailure.transport }
+    func close() async {}
+}
 
+/// No autonomous timing: tests decide when I/O completes.
 private actor ActivityTestSocket: SttSocket {
     let replies = AsyncStream<SocketMessage>.makeStream()
-    let heartbeatOnly: Bool
-    var count = 0
-    init(heartbeatOnly: Bool = false) { self.heartbeatOnly = heartbeatOnly }
-    func send(_ message: SocketMessage) async throws {
-        if !heartbeatOnly, case .text(let text) = message, text.contains("Terminate") {
-            replies.continuation.yield(.text("{\"type\":\"Turn\",\"turn_order\":0,\"end_of_turn\":true,\"transcript\":\"Synthetic phrase.\"}"))
-            replies.continuation.yield(.text("{\"type\":\"Termination\"}"))
-        }
-    }
+    let receives = AsyncStream<Void>.makeStream()
+    let sent = AsyncStream<SocketMessage>.makeStream()
+    func send(_ message: SocketMessage) async throws { sent.continuation.yield(message) }
     func receive() async throws -> SocketMessage {
-        if heartbeatOnly {
-            try await Task.sleep(for: .milliseconds(30)); count += 1
-            return .text(count <= 8 ? "{\"type\":\"Heartbeat\"}" : "{\"type\":\"Termination\"}")
-        }
+        receives.continuation.yield(())
         var iterator = replies.stream.makeAsyncIterator()
         guard let value = await iterator.next() else { throw SttFailure.cancelled }
         return value
     }
+    func reply(_ message: SocketMessage) { replies.continuation.yield(message) }
     func close() { replies.continuation.finish() }
 }
 private struct ActivityTestFactory: SttSocketFactory {
     let socket: ActivityTestSocket
     func connect(to url: URL) async throws -> any SttSocket { socket }
-}
-private struct PacedTestSource: CaptureSource {
-    func frames() -> AsyncStream<AudioFrame> {
-        AsyncStream { output in
-            let task = Task {
-                for index in 0..<8 {
-                    do { try await Task.sleep(for: .milliseconds(30)) } catch { break }
-                    output.yield(try! AudioFrame(samples: Array(repeating: 0, count: 800), timestamp: Double(index) * 0.05))
-                }
-                output.finish()
-            }
-            output.onTermination = { _ in task.cancel() }
-        }
-    }
 }
 
 @MainActor final class CloudTests: XCTestCase {
@@ -162,16 +155,76 @@ private struct PacedTestSource: CaptureSource {
         XCTAssertFalse(events.contains { if case .failure = $0 { return true }; return false })
     }
     func testActiveStreamsOutliveIdleTimeoutWithOutboundOrInboundActivity() async throws {
-        for heartbeat in [true, false] {
-            let socket = ActivityTestSocket(heartbeatOnly: heartbeat)
-            let engine = CloudEngine(vendor: .assemblyAI, settings: try .init(url: URL(string: "wss://proxy.invalid/stt")!),
-                                     sockets: ActivityTestFactory(socket: socket), timeout: .milliseconds(100))
-            let source: any CaptureSource = heartbeat ? ScriptedCaptureSource([]) : PacedTestSource()
-            var events: [SttEvent] = []
-            for await event in engine.transcribe(source.frames(), vocabulary: vocabulary) { events.append(event) }
-            XCTAssertFalse(events.contains(.failure(.timedOut)))
-            if !heartbeat { XCTAssertTrue(events.contains(.final("Synthetic phrase."))) }
+        // Exercise the exact activity wrapper used for FoundationSocket on Apple.
+        // Await I/O completion before advancing time: no Task.sleep or scheduler deadline race.
+        for inbound in [true, false] {
+            let clock = ManualIdleClock()
+            let idle = IdleTimeout(timeout: .seconds(60), clock: clock)
+            let base = ActivityTestSocket()
+            let socket = ActivitySocket(base: base, idle: idle)
+            for _ in 0..<8 {
+                clock.advance(by: .seconds(59))
+                if inbound {
+                    await base.reply(.text("{\"type\":\"Heartbeat\"}"))
+                    _ = try await socket.receive()
+                } else {
+                    try await socket.send(.binary(Data(repeating: 0, count: 1600)))
+                }
+                XCTAssertEqual(idle.nextDeadline(), clock.now + .seconds(60))
+                XCTAssertFalse(idle.expireIfIdle())
+            }
+            // Virtual session duration is 472 s, well beyond the former 60 s overall timer.
+            clock.advance(by: .seconds(59))
+            XCTAssertFalse(idle.expireIfIdle())
+            clock.advance(by: .seconds(1))
+            XCTAssertTrue(idle.expireIfIdle())
+            XCTAssertNil(idle.nextDeadline())
+            idle.activity() // A late I/O completion cannot revive an expired session.
+            XCTAssertNil(idle.nextDeadline())
+            await base.close()
         }
+    }
+    func testEngineWatchdogRechecksAnOldDeadlineAfterInboundActivity() async throws {
+        let clock = ManualIdleClock()
+        let socket = ActivityTestSocket()
+        let engine = CloudEngine(vendor: .assemblyAI, settings: try .init(url: URL(string: "wss://proxy.invalid/stt")!),
+                                 sockets: ActivityTestFactory(socket: socket), timeout: .seconds(60), clock: clock)
+        let audio = AsyncStream<AudioFrame>.makeStream()
+        let output = AsyncStream<SttEvent>.makeStream()
+        let consumer = Task {
+            for await event in engine.transcribe(audio.stream, vocabulary: vocabulary) {
+                output.continuation.yield(event)
+            }
+            output.continuation.finish()
+            clock.suspensions.continuation.finish()
+        }
+        defer { consumer.cancel(); audio.continuation.finish() }
+        var sent = socket.sent.stream.makeAsyncIterator()
+        var receives = socket.receives.stream.makeAsyncIterator()
+        var sleeps = clock.suspensions.stream.makeAsyncIterator()
+        var events = output.stream.makeAsyncIterator()
+        _ = await receives.next() // Connect installed; no audio or EOS has been sent.
+        let initialDeadline = await sleeps.next()
+        XCTAssertEqual(initialDeadline, .seconds(60))
+        clock.advance(by: .seconds(59))
+        await socket.reply(.text("{\"type\":\"Turn\",\"turn_order\":0,\"end_of_turn\":false,\"transcript\":\"Synthetic phrase.\"}"))
+        let partial = await events.next()
+        XCTAssertEqual(partial, .partial("Synthetic phrase.")) // Receive activity has been recorded.
+        clock.advance(by: .seconds(1))
+        let extendedDeadline = await sleeps.next()
+        XCTAssertEqual(extendedDeadline, .seconds(119))
+        guard extendedDeadline == .seconds(119) else { return }
+        clock.advance(by: .seconds(58))
+        await socket.reply(.text("{\"type\":\"Turn\",\"turn_order\":0,\"end_of_turn\":true,\"transcript\":\"Synthetic phrase.\"}"))
+        let final = await events.next()
+        XCTAssertEqual(final, .final("Synthetic phrase."))
+        audio.continuation.finish()
+        let terminate = await sent.next()
+        XCTAssertEqual(terminate, .text("{\"type\":\"Terminate\"}"))
+        await socket.reply(.text("{\"type\":\"Termination\"}"))
+        let end = await events.next()
+        XCTAssertNil(end)
+        await consumer.value
     }
     func testAssemblyRechunksTinyAndOversizedFramesAndPadsOnlyEOSTail() async throws {
         let server = try LocalWebSocketServer(vendor: .assemblyAI, scenario: "chunks")
@@ -222,29 +275,69 @@ private struct PacedTestSource: CaptureSource {
         let consumer = Task {
             for await _ in engine.transcribe(ScriptedCaptureSource([]).frames(), vocabulary: vocabulary) {}
         }
-        try await Task.sleep(for: .milliseconds(20)); consumer.cancel(); await consumer.value
-        for _ in 0..<50 {
-            if await socket.closed { break }
-            try await Task.sleep(for: .milliseconds(2))
-        }
+        var receives = socket.receives.stream.makeAsyncIterator()
+        var closes = socket.closes.stream.makeAsyncIterator()
+        _ = await receives.next()
+        consumer.cancel(); await consumer.value
+        _ = await closes.next()
         let closed = await socket.closed; XCTAssertTrue(closed)
     }
     func testDeadlineIncludesConnectionEstablishment() async throws {
+        let clock = ManualIdleClock()
+        let factory = SuspendedFactory()
         let engine = CloudEngine(vendor: .assemblyAI, settings: try .init(url: URL(string: "wss://proxy.invalid/stt")!),
-                                 sockets: SlowFactory(), timeout: .milliseconds(10))
-        let clock = ContinuousClock(); let start = clock.now
-        var events: [SttEvent] = []
-        for await event in engine.transcribe(ScriptedCaptureSource([]).frames(), vocabulary: vocabulary) { events.append(event) }
+                                 sockets: factory, timeout: .seconds(60), clock: clock)
+        let consumer = Task { () -> [SttEvent] in
+            var events: [SttEvent] = []
+            for await event in engine.transcribe(ScriptedCaptureSource([]).frames(), vocabulary: vocabulary) { events.append(event) }
+            clock.suspensions.continuation.finish()
+            return events
+        }
+        defer { consumer.cancel() }
+        var connects = factory.started.stream.makeAsyncIterator()
+        var sleeps = clock.suspensions.stream.makeAsyncIterator()
+        _ = await connects.next()
+        let deadline = await sleeps.next()
+        XCTAssertEqual(deadline, .seconds(60))
+        clock.advance(by: .seconds(60))
+        let events = await consumer.value
         XCTAssertEqual(events, [.failure(.timedOut)])
-        XCTAssertLessThan(start.duration(to: clock.now), .seconds(1))
     }
     func testConnectedSocketTimesOutOnlyAfterInactivity() async throws {
-        let socket = StalledSocket()
+        let clock = ManualIdleClock()
+        let socket = ActivityTestSocket()
+        let audio = AsyncStream<AudioFrame>.makeStream()
         let engine = CloudEngine(vendor: .assemblyAI, settings: try .init(url: URL(string: "wss://proxy.invalid/stt")!),
-                                 sockets: StalledFactory(socket: socket), timeout: .milliseconds(20))
-        var events: [SttEvent] = []
-        for await event in engine.transcribe(ScriptedCaptureSource([]).frames(), vocabulary: vocabulary) { events.append(event) }
+                                 sockets: ActivityTestFactory(socket: socket), timeout: .seconds(60), clock: clock)
+        let consumer = Task { () -> [SttEvent] in
+            var events: [SttEvent] = []
+            for await event in engine.transcribe(audio.stream, vocabulary: vocabulary) { events.append(event) }
+            clock.suspensions.continuation.finish()
+            return events
+        }
+        defer { consumer.cancel(); audio.continuation.finish() }
+        var receives = socket.receives.stream.makeAsyncIterator()
+        var sleeps = clock.suspensions.stream.makeAsyncIterator()
+        _ = await receives.next()
+        let deadline = await sleeps.next()
+        XCTAssertEqual(deadline, .seconds(60))
+        clock.advance(by: .seconds(60))
+        let events = await consumer.value
         XCTAssertEqual(events, [.failure(.timedOut)])
+    }
+    func testFailedIOAndStoppedWatchdogDoNotExtendTheDeadline() async {
+        let clock = ManualIdleClock()
+        let idle = IdleTimeout(timeout: .seconds(60), clock: clock)
+        let socket = ActivitySocket(base: FailingActivitySocket(), idle: idle)
+        clock.advance(by: .seconds(59))
+        do { try await socket.send(.text("synthetic")); XCTFail("Expected transport failure") } catch {}
+        do { _ = try await socket.receive(); XCTFail("Expected transport failure") } catch {}
+        XCTAssertEqual(idle.nextDeadline(), .seconds(60))
+        idle.stop()
+        clock.advance(by: .seconds(100))
+        idle.activity()
+        XCTAssertNil(idle.nextDeadline())
+        XCTAssertFalse(idle.expireIfIdle())
     }
     func testProxySettingsRejectSecretsVendorURLsAndInsecureRemote() throws {
         for url in ["ws://proxy.invalid", "wss://key:secret@proxy.invalid", "wss://proxy.invalid?token=secret",

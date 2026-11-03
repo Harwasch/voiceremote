@@ -73,6 +73,11 @@ Contracts and assumptions:
   Nonfatal ElevenLabs warning/derived metadata and AssemblyAI speaker/liveness/LLM metadata are ignored;
   provider errors still fail. The configured cloud timeout is inactivity in either direction, including
   connection establishment; ongoing audio or replies reset it, so it does not cap dictation duration.
+  `SttIdleClock` is injectable; production uses `ContinuousIdleClock`. The shared socket wrapper records
+  successful sends and receives synchronously, including Apple's `URLSessionWebSocketTask` adapter.
+  Activity and expiry are serialized; a stale timer wake rechecks the latest deadline. Tests advance
+  virtual time through explicit I/O/sleep checkpoints, never competing wall-clock sleeps and deadlines.
+  The reported macOS active-stream test failure exercised a fake socket, not URLSession timing.
   Both live integrations remain **unverified**.
 - Linux requires an injected socket factory. Tests use a stdlib Python bridge over a real local
   WebSocket server; Apple's default URLSession transport awaits CI/device verification.

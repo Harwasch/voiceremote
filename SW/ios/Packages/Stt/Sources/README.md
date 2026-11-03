@@ -9,7 +9,8 @@ flowchart LR
 | [SttEngine.swift](SttEngine.swift) | PCM frames, events, capture/engine protocols, scalar-checked user vocabulary, scripted doubles | ✅ Synthetic tests |
 | [EngineRouter.swift](EngineRouter.swift) | Consented selection announcement, stable-text retention and whole-utterance cleanup | ✅ Linux tests |
 | [CleanupPass.swift](CleanupPass.swift) | Conservative rules and timeout/content fail-safe | ✅ Synthetic rejection tests |
-| [CloudEngine.swift](CloudEngine.swift) | Proxy-only vendor protocols, injectable sockets, valid PCM chunks, termination retention and idle timeout | 🟡 Local server tested; live **unverified** |
+| [CloudEngine.swift](CloudEngine.swift) | Proxy-only vendor protocols, injectable sockets/clock, valid PCM chunks, termination retention and idle timeout | 🟡 Local server tested; live **unverified** |
+| [IdleTimeout.swift](IdleTimeout.swift) | Injected monotonic clock; atomic activity/expiry/stop; continuous production clock | ✅ Virtual-time tests |
 | [ABRunner.swift](ABRunner.swift) | Identical-audio fanout, monotonic timings and multi-case bench v1 export with scalar ID validation | ✅ Schema test |
 | [AudioSampleCount.swift](AudioSampleCount.swift) | Existing nonnegative sample count | ✅ Unit test |
 
