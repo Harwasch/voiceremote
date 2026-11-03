@@ -58,7 +58,7 @@ void remote_event(uint8_t event,uint8_t value,uint32_t sampled)
 esp_err_t board_flush(int x1,int y1,int x2,int y2,const void *data)
 {
     /* Panels like the CO5300 distort updates that aren't aligned this way. */
-    assert(!(x1&1) && !(y1&1) && (x2&1) && (y2&1));
+    if((x1&1)||(y1&1)||!(x2&1)||!(y2&1)) { fprintf(stderr,"bad %d %d %d %d\n",x1,y1,x2,y2); abort(); }
     assert(!mutex_depth); /* Panel DMA never owns the input/audio mutex. */
     now+=flush_delay; flush_delay=0;
     if(interrupt_render) {
@@ -179,7 +179,7 @@ static void check(void)
     vr_phone_t candidate=remote_state.phone; strcpy(candidate.resolved,"Laptop");
     sent_pixels=0; min_x=min_y=466; max_x=max_y=0;
     assert(phone(&candidate) && flushes>initial && target_hash()!=before);
-    assert(min_y>=356 && max_y<=450 && sent_pixels<=466*95);
+    assert(min_y>=356 && max_y<=451 && sent_pixels<=466*96); /* One row wider: even/odd alignment. */
     printf("Destination update: %u pixels, y=%d..%d.\n",sent_pixels,min_y,max_y);
     skip_render=true; assert(!phone(&remote_state.phone)); skip_render=false;
     ui_tick(); /* A timed-out request cannot acknowledge on a later frame. */
@@ -213,7 +213,7 @@ static void check(void)
     remote_state.input.streaming=1; ui_refresh(); advance(100);
     sent_pixels=0;min_x=min_y=466;max_x=max_y=0; advance(1000);
     assert(sent_pixels>0 && sent_pixels<6*30000);
-    assert(min_x>=99 && min_y>=99 && max_x<367 && max_y<367);
+    assert(min_x>=98 && min_y>=98 && max_x<=367 && max_y<=367); /* Includes even/odd alignment. */
     printf("Pulse: %u pixels flushed in 1s, bounded to (%d,%d)-(%d,%d).\n",sent_pixels,min_x,min_y,max_x,max_y);
     for(unsigned phase=0;phase<10;phase++) { now+=200; ui_tick(); partial_matches_full(); }
     remote_state.input.ptt=0; ui_refresh(); advance(100);
