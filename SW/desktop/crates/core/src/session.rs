@@ -25,6 +25,8 @@ pub enum Delivery {
     CommandReserved,
     Revoked,
     Metadata,
+    InsertionNotStarted,
+    InsertionUnconfirmed,
 }
 impl Session {
     pub(crate) fn new(
@@ -160,6 +162,21 @@ impl Session {
                 );
                 if let Some(previous) = self.revisions.get(&text.segment_id) {
                     if text.revision <= *previous {
+                        if text.state == DictationTextState::Committed {
+                            self.report_insertion(
+                                transport,
+                                &text.segment_id,
+                                if self
+                                    .registry
+                                    .segment_inserted(&self.peer, &text.segment_id)?
+                                {
+                                    None
+                                } else {
+                                    Some(crate::InsertionFailure::Unconfirmed)
+                                },
+                            )
+                            .await?;
+                        }
                         return Ok(Delivery::Duplicate);
                     }
                 }
@@ -167,17 +184,57 @@ impl Session {
                     self.revisions.len() < 4096 || self.revisions.contains_key(&text.segment_id),
                     "segment limit reached; reconnect"
                 );
-                self.revisions
-                    .insert(text.segment_id.clone(), text.revision);
                 if text.state == DictationTextState::Partial {
+                    self.revisions
+                        .insert(text.segment_id.clone(), text.revision);
                     return Ok(Delivery::Ignored);
                 }
                 if !self.registry.claim_segment(&self.peer, &text.segment_id)? {
+                    self.report_insertion(
+                        transport,
+                        &text.segment_id,
+                        if self
+                            .registry
+                            .segment_inserted(&self.peer, &text.segment_id)?
+                        {
+                            None
+                        } else {
+                            Some(crate::InsertionFailure::Unconfirmed)
+                        },
+                    )
+                    .await?;
                     return Ok(Delivery::Duplicate);
                 }
                 self.check_active()?;
-                injector.insert_text(&text.text)?;
-                Ok(Delivery::Inserted)
+                let failure = injector
+                    .insert_text_async(&text.text)
+                    .await
+                    .err()
+                    .map(|error| {
+                        error
+                            .downcast_ref::<crate::InsertionFailure>()
+                            .copied()
+                            .unwrap_or(crate::InsertionFailure::Unconfirmed)
+                    });
+                if failure == Some(crate::InsertionFailure::NotStarted) {
+                    self.registry
+                        .release_unstarted_segment(&self.peer, &text.segment_id)?;
+                } else {
+                    self.revisions
+                        .insert(text.segment_id.clone(), text.revision);
+                    self.registry.finish_segment(
+                        &self.peer,
+                        &text.segment_id,
+                        failure.is_none(),
+                    )?;
+                }
+                self.report_insertion(transport, &text.segment_id, failure)
+                    .await?;
+                Ok(match failure {
+                    None => Delivery::Inserted,
+                    Some(crate::InsertionFailure::NotStarted) => Delivery::InsertionNotStarted,
+                    Some(crate::InsertionFailure::Unconfirmed) => Delivery::InsertionUnconfirmed,
+                })
             }
             InnerMessage::Revoke(revoke) => {
                 ensure!(
@@ -208,6 +265,37 @@ impl Session {
             }
             _ => Ok(Delivery::Metadata),
         }
+    }
+    async fn report_insertion(
+        &mut self,
+        transport: &mut dyn Transport,
+        segment: &str,
+        failure: Option<crate::InsertionFailure>,
+    ) -> Result<()> {
+        let Some(failure) = failure else {
+            return Ok(());
+        };
+        // Existing wire type: command_id correlates to the dictation segment.
+        // unavailable = safe retry; error = uncertain, reconcile without retry.
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        self.send(
+            transport,
+            &InnerMessage::TaskStatus(TaskStatus {
+                kind: TaskStatusKind::TaskStatus,
+                account_id: self.peer.info.account_id.clone(),
+                command_id: segment.into(),
+                updated_at: now,
+                execution_state: ExecutionState::Failed,
+                outcome: Some(match failure {
+                    crate::InsertionFailure::NotStarted => TaskStatusOutcome::Unavailable,
+                    crate::InsertionFailure::Unconfirmed => TaskStatusOutcome::Error,
+                }),
+            }),
+        )
+        .await
     }
 }
 fn check_accounts(value: &serde_json::Value, account: &str) -> Result<()> {

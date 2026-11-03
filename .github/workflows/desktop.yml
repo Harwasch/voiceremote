@@ -5,6 +5,7 @@ on:
   push:
     tags:
       - 'desktop-v*'
+      - 'desktop-ci-*'
   workflow_dispatch:
 permissions:
   contents: read
@@ -27,3 +28,28 @@ jobs:
         run: cargo test --workspace -j4
       - name: Check OS keychain feature
         run: cargo check --workspace --features os-keychain -j4
+  windows-injection-smoke:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      RUST_TEST_THREADS: 4
+    defaults:
+      run:
+        working-directory: SW/desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: Lint Windows injector
+        run: cargo clippy -p voiceremote-inject-windows --no-deps --all-targets -j4 -- -D warnings
+      - name: Exercise an owned desktop edit control
+        shell: pwsh
+        run: |
+          $output = & cargo run -p voiceremote-inject-windows --example desktop-smoke -j4 2>&1
+          $result = $LASTEXITCODE
+          $output | ForEach-Object { Write-Output $_ }
+          if ($result -ne 0) { exit $result }
+          $status = $output | Where-Object { "$_" -match '^(PASS:|SKIPPED:)' }
+          if (-not $status) { throw 'Smoke produced no PASS or SKIPPED status' }
+          $status | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
