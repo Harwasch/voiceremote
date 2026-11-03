@@ -174,7 +174,7 @@ Disconnect clears phone state and disables live audio; offline capture is the ex
 | 3 | 1 | Mode: 0 `dictation`, 1 `ai_control` |
 | 4 | 1 | Target count N, 1–8 |
 | 5 | 1 | Active index, 0–N−1; index 0 always Auto |
-| 6 | 4 | Acknowledged Input sequence; arm=1 takes effect only when it equals the latest emitted Input sequence, otherwise the state applies with arm treated as 0 |
+| 6 | 4 | Acknowledged Input sequence; arm=1 takes effect only when it's at or after the latest control event (PTT, target, capture or mode) and not ahead of the latest emitted Input, otherwise the state applies with arm treated as 0. Status snapshots don't need acknowledging |
 | 10 | variable | N entries: one-byte name length (1–32), then UTF-8 name; entry 0 exactly ASCII `Auto` |
 | after entries | variable | Resolved destination: one-byte length (1–32), then UTF-8 name, including when active index is Auto |
 | next | variable | Link text: one-byte length (0–48), then UTF-8 text |
@@ -183,7 +183,7 @@ Disconnect clears phone state and disables live audio; offline capture is the ex
 No trailing bytes. For a named active target, resolved name equals that entry;
 Auto shows the actual resolved destination, including iPhone fallback, per [REQ-18].
 The snapshot-request flag emits a new event-0 snapshot after state application.
-A stale acknowledged sequence is not an error: the display still updates and the
+A stale acknowledged sequence, one older than the latest control event, is not an error: the display still updates and the
 remote stays disarmed, so the phone rearms with a new write after the newer event.
 `off` requires stopped/paused/error recording and arm=0; arm=1 requires non-off
 capture and recording=1. Live remote audio requires arm=1 AND its local capture
