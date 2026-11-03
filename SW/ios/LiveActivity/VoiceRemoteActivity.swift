@@ -2,17 +2,11 @@ import ActivityKit
 import SwiftUI
 import WidgetKit
 
-struct VoiceRemoteAttributes: ActivityAttributes {
-    struct ContentState: Codable, Hashable {
-        var status: String
-    }
-}
-
 @main
 struct VoiceRemoteActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: VoiceRemoteAttributes.self) { context in
-            Text("Voice Remote: \(context.state.status)").padding()
+            VStack { Text(context.state.status); Text("To: \(context.state.destination)") }.padding()
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.center) {

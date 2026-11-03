@@ -116,17 +116,38 @@ public struct ABRunner: Sendable {
         let b = AsyncStream<AudioFrame>.makeStream()
         async let resultA = collect(first.transcribe(a.stream, vocabulary: vocabulary), timeout: timeout)
         async let resultB = collect(second.transcribe(b.stream, vocabulary: vocabulary), timeout: timeout)
+        let completion = AsyncStream<Bool>.makeStream()
+        let deadline = Task {
+            do { try await Task.sleep(for: timeout) } catch { return }
+            completion.continuation.yield(false); completion.continuation.finish()
+        }
         let fanout = Task {
-            for await frame in source.frames() {
+            defer { completion.continuation.yield(true); completion.continuation.finish() }
+            for await event in source.events() {
                 if Task.isCancelled { break }
-                await timing.start()
-                a.continuation.yield(frame); b.continuation.yield(frame)
+                switch event {
+                case .frame(let frame):
+                    await timing.start()
+                    a.continuation.yield(frame); b.continuation.yield(frame)
+                case .interrupted:
+                    await timing.interrupt()
+                    a.continuation.finish(); b.continuation.finish()
+                    return
+                }
             }
             await timing.end()
             a.continuation.finish(); b.continuation.finish()
         }
-        defer { fanout.cancel(); a.continuation.finish(); b.continuation.finish() }
-        let outputs = await (resultA, resultB)
+        defer { fanout.cancel(); deadline.cancel(); completion.continuation.finish(); a.continuation.finish(); b.continuation.finish() }
+        var outputs = await (resultA, resultB)
+        var completionIterator = completion.stream.makeAsyncIterator()
+        if await completionIterator.next() == true { await fanout.value }
+        else {
+            fanout.cancel(); a.continuation.finish(); b.continuation.finish()
+            // Preserve run-v1 failure semantics: timeout results have empty text.
+            outputs = (.failed, .failed)
+        }
+        if await timing.wasInterrupted { throw SttFailure.interrupted }
         let origins = await timing.origins()
         func result(_ output: Collected) -> BenchRun.Result {
             func milliseconds(_ start: ContinuousClock.Instant?, _ end: ContinuousClock.Instant?) -> Double? {
@@ -181,6 +202,8 @@ public struct ABRunner: Sendable {
 }
 
 private actor CaptureTiming {
+    private(set) var wasInterrupted = false
+    func interrupt() { wasInterrupted = true }
     private var first: ContinuousClock.Instant?
     private var last: ContinuousClock.Instant?
     func start() { if first == nil { first = ContinuousClock.now } }

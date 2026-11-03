@@ -1,11 +1,14 @@
 ```mermaid
 flowchart LR
-  Spec[../project.yml] --> Component[LiveActivity]
-  Component --> CI[macOS CI]
+  Intent[App AudioRecordingIntent] --> Host[ListeningActivity] --> Attributes[Shared attributes]
+  Attributes --> Widget[Lock screen + Dynamic Island]
 ```
 
 | File | What | Status |
 |---|---|---|
-| [VoiceRemoteActivity.swift](VoiceRemoteActivity.swift) | Activity attributes, lock-screen and Dynamic Island view stub. | 🟡 macOS build unverified |
+| [ListeningAttributes.swift](ListeningAttributes.swift) | Shared recording status/destination, compiled into app and widget | 🟡 Apple CI **unverified** |
+| [VoiceRemoteActivity.swift](VoiceRemoteActivity.swift) | Native listening/destination presentation | 🟡 Lock screen/device **unverified** |
 
-Start with the linked file; see the [iOS map](../README.md) for design and validation.
+Start with the app's [ListeningActivity](../App/ListeningActivity.swift).
+Purpose: task 6 recording visibility; inputs: Apple ActivityKit/AudioRecordingIntent contract;
+verification: syntax parse only. REQ-2/7. Intent cold-start and background reliability **unverified**.
