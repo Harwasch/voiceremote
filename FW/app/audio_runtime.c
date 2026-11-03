@@ -21,13 +21,15 @@ static unsigned encoded, max_us, notify_failures;
 static int source_error;
 static size_t internal_before, external_before;
 static bool closing, reported, local_running;
+static bool local_stop_snapshot;
 static void stop_local(void)
 {
     if(!local_running) return;
     board_mic_stop(); generation++;
     if(worker && xTaskGetCurrentTaskHandle()!=worker) vTaskSuspend(worker);
     local_running=false; remote_state.input.offline=0;
-    ble_emit(VR_SNAPSHOT,remote_now()); ui_refresh();
+    /* Sent from audio_poll, so a control edge that caused this stop is reported first. */
+    local_stop_snapshot=true; ui_refresh();
 }
 static void lock(void) { xSemaphoreTakeRecursive(remote_mutex,portMAX_DELAY); }
 static void unlock(void) { xSemaphoreGiveRecursive(remote_mutex); }
@@ -148,9 +150,15 @@ void audio_sync(void)
     if(local_running && !offline_local_active()) stop_local();
     if(stream.running && (!vr_capture_gate(&remote_state) || !offline_live_allowed())) stop();
 }
+/* Send failures clear streaming just before the disconnect event arrives, so link loss
+ * asks whether audio flowed very recently rather than whether it's flowing right now. */
+static uint32_t live_at;
+bool audio_recently_live(void) { return live_at && (uint32_t)(remote_now()-live_at)<1000; }
 void audio_poll(void)
 {
     audio_sync();
+    if(stream.running) live_at=remote_now();
+    if(local_stop_snapshot) { local_stop_snapshot=false; ble_emit(VR_SNAPSHOT,remote_now()); }
     timing_queue(stream.count);
     if(closing) {
         if(stream.ending && ble_audio_ready()) try_end();

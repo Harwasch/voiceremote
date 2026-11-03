@@ -28,6 +28,7 @@ void ui_poll(void);
 
 void audio_init(void);
 void audio_sync(void);
+bool audio_recently_live(void);
 void audio_poll(void);
 void audio_reset(void);
 void audio_fault(void);

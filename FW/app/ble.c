@@ -12,6 +12,7 @@ void ble_store_config_init(void);
 #include "services/gap/ble_svc_gap.h"
 #include "services/gatt/ble_svc_gatt.h"
 #include "store/config/ble_store_config.h"
+#include "nvs.h"
 #include <string.h>
 /* NimBLE UUID128_INIT uses Bluetooth little-endian byte arrays. Generate from
    canonical UUID text, reversing bytes once at this API boundary only. */
@@ -23,6 +24,20 @@ static unsigned audio_pending;
 static uint32_t audio_sent_at;
 static bool synced, enrollment, comparison_pending, comparison_accepted, known_connection, revoke_pending;
 static uint32_t enrollment_started, comparison_started;
+/* Bump when characteristics change. Bonded phones cache the layout, so they must be told. */
+#define VR_GATT_LAYOUT 2
+static void announce_gatt_layout(void)
+{
+    nvs_handle_t h; uint32_t stored=0;
+    if(nvs_open("remote",NVS_READWRITE,&h)) return;
+    nvs_get_u32(h,"gatt_layout",&stored);
+    if(stored!=VR_GATT_LAYOUT) {
+        ble_svc_gatt_changed(0x0001,0xffff);
+        ESP_LOGI("ble","GATT layout %lu -> %d announced",(unsigned long)stored,VR_GATT_LAYOUT);
+        if(!nvs_set_u32(h,"gatt_layout",VR_GATT_LAYOUT)) nvs_commit(h);
+    }
+    nvs_close(h);
+}
 static int gap_event(struct ble_gap_event *e,void *arg);
 static void lock(void) { xSemaphoreTakeRecursive(remote_mutex,portMAX_DELAY); }
 static void unlock(void) { xSemaphoreGiveRecursive(remote_mutex); }
@@ -90,7 +105,8 @@ static int access_value(uint16_t h,uint16_t attr,struct ble_gatt_access_ctxt *ct
             } else {
                 vr_apply_phone(&remote_state,&phone);
                 audio_sync();
-                if(phone.flags&1) ble_emit(VR_SNAPSHOT,remote_now());
+                if(phone.flags&1) offline_progress_refresh();
+            if(phone.flags&1) ble_emit(VR_SNAPSHOT,remote_now());
             }
         }
     } else if(which==5 && ctxt->op==BLE_GATT_ACCESS_OP_WRITE_CHR) {
@@ -144,7 +160,8 @@ static int gap_event(struct ble_gap_event *e,void *arg)
             revoke_pending=rc!=0;
             if(rc) ESP_LOGE("ble","bond removal failed: %d",rc);
         }
-        offline_disconnect(remote_state.input.streaming || vr_capture_gate(&remote_state));
+        offline_disconnect(remote_state.input.streaming || vr_capture_gate(&remote_state) ||
+            (audio_recently_live() && remote_state.has_phone && remote_state.phone.recording==1));
         result_subscribed=progress_subscribed=false;
         connection=BLE_HS_CONN_HANDLE_NONE; audio_pending=false; audio_reset(); vr_session_reset(&remote_state);
         comparison_pending=false; comparison_accepted=false;
@@ -155,6 +172,7 @@ static int gap_event(struct ble_gap_event *e,void *arg)
             d.sec_state.encrypted && d.sec_state.authenticated && d.sec_state.bonded && d.sec_state.key_size==16 &&
             (known_connection || comparison_accepted);
         if(!good) { disconnect(); break; }
+        announce_gatt_layout();
         offline_owner(true);
         remote_state.secure=true; enrollment=false; comparison_pending=false;
         ui_pair_hide(); ui_link("Bond secured");
@@ -265,7 +283,8 @@ static void on_sync(void)
 static void on_reset(int reason)
 {
     (void)reason; lock(); synced=false; connection=BLE_HS_CONN_HANDLE_NONE;
-    offline_disconnect(remote_state.input.streaming || vr_capture_gate(&remote_state));
+    offline_disconnect(remote_state.input.streaming || vr_capture_gate(&remote_state) ||
+            (audio_recently_live() && remote_state.has_phone && remote_state.phone.recording==1));
     result_subscribed=progress_subscribed=false; audio_pending=0; audio_reset();
     vr_session_reset(&remote_state); comparison_pending=false; enrollment=false;
     ui_pair_hide(); ui_refresh(); ui_link("Bluetooth reset"); unlock();

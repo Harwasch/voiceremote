@@ -21,6 +21,8 @@ static void test_poll(void)
     if(effect&(VR_TEST_SELECT|VR_TEST_MODE)) ui_test_control(effect,test_input.capture);
     if(effect&VR_TEST_HAPTIC) board_haptic(remote_now());
     if(effect&VR_TEST_REBOOT) esp_restart();
+    if(command=='B') ble_pair_start();
+    if(command=='Y') ble_pair_answer(true);
 }
 #endif
 vr_state_t remote_state;
@@ -55,7 +57,7 @@ void app_main(void)
     audio_init();
     ble_start();
 #ifdef REMOTE_TEST_HOOK
-    ESP_LOGW("test_hook","TEST BUILD: USB local-input hook ENABLED (o/p/r d/u h t x)");
+    ESP_LOGW("test_hook","TEST BUILD: USB local-input hook ENABLED (o/p/r d/u h t x B Y)");
     usb_serial_jtag_driver_config_t hook_config=USB_SERIAL_JTAG_DRIVER_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&hook_config));
 #endif

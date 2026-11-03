@@ -142,8 +142,10 @@ void offline_init(void)
         (unsigned long)boot_id,(unsigned long)waiting,(unsigned long long)free_bytes,(unsigned long long)total_bytes,(unsigned)sizeof *store);
 }
 bool offline_enrollment_allowed(void) { return !(board_info()->capabilities&128) || (ready && !retained && !opening && !writing); }
+/* A bonded reconnect can send progress before the phone is listening, as with Input snapshots. */
+void offline_progress_refresh(void) { progress_dirty=true; }
 void offline_owner(bool enrolled) { vr_local_owner(&policy,enrolled); }
-void offline_disconnect(bool was_live) { if(ready) vr_local_disconnect(&policy,was_live); offline_connection_reset(); }
+void offline_disconnect(bool was_live) { ESP_LOGI("offline","link lost was_live=%d capture=%u ptt=%u owner=%d wanted=%d streaming=%d armed=%d",was_live,policy.capture,policy.ptt,policy.owner,policy.wanted,remote_state.input.streaming,remote_state.armed); if(ready) vr_local_disconnect(&policy,was_live); offline_connection_reset(); }
 void offline_control(uint8_t event,uint8_t value)
 {
     bool was=policy.wanted; uint32_t epoch=policy.epoch;
@@ -229,6 +231,15 @@ static bool fragment_send(bool is_progress,uint16_t tx,const uint8_t *p,uint16_t
     if(!ble_offline_send(is_progress,bytes,count+6)) return false;
     *at+=count; return true;
 }
+static void send_progress(void)
+{
+    if(!progress_at && progress_dirty) {
+        memset(progress,0,sizeof progress); uint8_t input[14]; vr_input_encode(&remote_state.input,input); progress[0]=input[12];
+        vr_put32(progress+2,waiting); put64(progress+6,free_bytes); put64(progress+14,total_bytes); put64(progress+22,latest_id);
+        vr_put32(progress+30,latest_offset); vr_put32(progress+34,boot_id); put64(progress+38,now64()); progress_dirty=false;
+    } else if(!progress_at) return;
+    if(fragment_send(true,progress_seq,progress,46,&progress_at) && progress_at==46) { progress_at=0; progress_seq++; }
+}
 void offline_poll(void)
 {
     if(!ready) return;
@@ -246,6 +257,8 @@ void offline_poll(void)
     }
     if(capturing() && !(response_n==2 && (response[0]==1 || response[1]==3))) {
         if(response_n || progress_at || remote_state.input.syncing) offline_cancel_sync();
+        /* One small status message tells a reconnecting phone where things stand; audio bytes stay paused. */
+        if(remote_state.secure && remote_state.info_read && result_sub && progress_sub) send_progress();
         return;
     }
     if(!remote_state.secure || !remote_state.info_read || !result_sub || !progress_sub) return;
@@ -257,10 +270,5 @@ void offline_poll(void)
         return;
     }
     if(capturing()) return;
-    if(!progress_at && progress_dirty) {
-        memset(progress,0,sizeof progress); uint8_t input[14]; vr_input_encode(&remote_state.input,input); progress[0]=input[12];
-        vr_put32(progress+2,waiting); put64(progress+6,free_bytes); put64(progress+14,total_bytes); put64(progress+22,latest_id);
-        vr_put32(progress+30,latest_offset); vr_put32(progress+34,boot_id); put64(progress+38,now64()); progress_dirty=false;
-    } else if(!progress_at) return;
-    if(fragment_send(true,progress_seq,progress,46,&progress_at) && progress_at==46) { progress_at=0; progress_seq++; }
+    send_progress();
 }

@@ -24,3 +24,5 @@ CONFIG_LV_USE_DEMO_WIDGETS=n
 CONFIG_LV_BUILD_EXAMPLES=n
 
 CONFIG_COMPILER_OPTIMIZATION_PERF=y
+# NimBLE logs every notification at INFO, which costs real time while streaming.
+CONFIG_BT_NIMBLE_LOG_LEVEL_WARNING=y

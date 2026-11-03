@@ -6,6 +6,7 @@ void offline_init(void);
 void offline_poll(void);
 void offline_control(uint8_t event, uint8_t value);
 void offline_owner(bool enrolled);
+void offline_progress_refresh(void);
 bool offline_enrollment_allowed(void);
 void offline_disconnect(bool was_live);
 bool offline_local_wanted(void);
