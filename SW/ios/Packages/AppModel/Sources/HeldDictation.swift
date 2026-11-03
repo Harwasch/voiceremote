@@ -115,8 +115,11 @@ public actor HeldDictationPipeline {
         if state == .unconfirmed {
             guard let availability = target as? any DictationAvailability else { throw DictationDeliveryError.unconfirmed }
             let outcome = try await availability.reconcile(segmentID: id, deviceID: entry.targetID)
+            guard outcome.account_id == accountID, outcome.target_device_id == entry.targetID,
+                  outcome.segment_id == entry.segmentID else { throw DictationDeliveryError.unconfirmed }
             try await history.dictationOutcome(outcome, from: entry.targetID, accountID: accountID)
-            guard outcome.outcome == .unavailable else { return }
+            if outcome.outcome == .inserted { return }
+            guard outcome.outcome == .unavailable else { throw DictationDeliveryError.unconfirmed }
         }
         if entry.targetID != phoneID { _ = try await registry.textReceiver(entry.targetID) }
         let device = entry.targetID == phoneID ? TargetPicker(accountID: accountID, phoneID: phoneID).phone : try await registry.textReceiver(entry.targetID)

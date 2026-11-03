@@ -56,13 +56,31 @@ final class PhoneConnectionTests: XCTestCase, @unchecked Sendable {
         XCTAssertEqual(state.listening, true)
         await connection.close()
     }
+    func testLANTriesEveryCandidateAfterImpostorAndDiscoveryFailure() async throws {
+        let candidates = AsyncThrowingStream<Int, Error> { output in
+            output.yield(1); output.yield(2); output.finish(throwing: PairingError.noMessage)
+        }
+        let value = try await PreferredConnection.tryLAN(candidates: candidates) { candidate in
+            if candidate == 1 { throw PairingError.keyMismatch }
+            return candidate
+        }
+        XCTAssertEqual(value, 2)
+    }
+    func testDiscoveryCancellationWithoutTaskCancellationStillFallsBack() async throws {
+        let value: Int = try await PreferredConnection.connect(lan: { throw CancellationError() }, relay: { 2 })
+        XCTAssertEqual(value, 2)
+    }
     func testPreferredConnectionTriesLANFirstAndCancellationNeverFallsBack() async throws {
         let preferred = try await PreferredConnection.connect(lan: { 1 }, relay: { XCTFail("relay used while LAN healthy"); return 2 })
         XCTAssertEqual(preferred, 1)
         let fallback = try await PreferredConnection.connect(lan: { throw PairingError.noMessage }, relay: { 2 })
         XCTAssertEqual(fallback, 2)
         do {
-            let _: Int = try await PreferredConnection.connect(lan: { throw CancellationError() }, relay: { XCTFail("cancelled probe fell back"); return 2 })
+            let cancelled = Task<Int, Error> {
+                try await PreferredConnection.connect(lan: { try await Task.sleep(for: .seconds(5)); return 1 }, relay: { XCTFail("cancelled probe fell back"); return 2 })
+            }
+            cancelled.cancel()
+            _ = try await cancelled.value
             XCTFail("cancellation accepted")
         } catch is CancellationError {}
     }

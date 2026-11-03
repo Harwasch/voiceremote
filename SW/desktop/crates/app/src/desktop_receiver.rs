@@ -67,8 +67,21 @@ pub fn set_focus_sampler(sampler: Sampler) {
     let _ = SAMPLER.set(sampler);
 }
 pub type Sampler = Arc<dyn Fn() -> (bool, u64, Option<u64>) + Send + Sync>;
-fn focus_report_due(previous: Option<((bool, u64), u64)>, current: (bool, u64), now: u64) -> bool {
-    previous.is_none_or(|(old, at)| old != current || now.saturating_sub(at) >= 30_000)
+fn focus_report_due(
+    previous: Option<((bool, Option<u64>), u64)>,
+    current: (bool, Option<u64>),
+    now: u64,
+) -> bool {
+    previous.is_none_or(|(old, at)| {
+        let elapsed = now.saturating_sub(at);
+        old.0 != current.0
+            || elapsed >= 30_000
+            || match (old.1, current.1) {
+                (Some(age), Some(current)) => age.saturating_add(elapsed).abs_diff(current) > 250,
+                (None, None) => false,
+                _ => true,
+            }
+    })
 }
 pub async fn serve(
     session: Session,
@@ -102,6 +115,7 @@ async fn serve_with_sampler(
 ) -> Result<()> {
     let (_registration, mut requests) = control::register(hub.clone());
     let mut capture = None;
+    let mut request_sequence = 0u64;
     let mut pending_toggle: Option<(
         String,
         voiceremote_core::protocol::CaptureState,
@@ -151,11 +165,13 @@ async fn serve_with_sampler(
                 use voiceremote_core::protocol::{CaptureState, CaptureControl, CaptureControlKind};
                 let desired = if capture == Some(CaptureState::Off) { CaptureState::Continuous } else { CaptureState::Off };
                 let id = voiceremote_core::relay::new_room_id();
+                request_sequence += 1;
                 let ttl_ms = request.expires.saturating_duration_since(tokio::time::Instant::now()).as_millis().clamp(1, 2000) as u64;
                 let report = InnerMessage::CaptureControl(CaptureControl {
                     kind: CaptureControlKind::CaptureControl,
                     account_id: local.account_id.clone(), request_id: id.clone(),
-                    target_device_id: session.peer().info.device_id.clone(), capture_state: desired.clone(), ttl_ms,
+                    target_device_id: session.peer().info.device_id.clone(), capture_state: desired.clone(), ttl_ms, request_sequence,
+                    expires_at: voiceremote_core::pairing::Clock::now_ms(&voiceremote_core::pairing::SystemClock)?.saturating_add(ttl_ms),
                 });
                 tokio::time::timeout(Duration::from_secs(2), session.send(transport, &report)).await??;
                 pending_toggle = Some((id, desired, request));
@@ -165,7 +181,7 @@ async fn serve_with_sampler(
                 let sampler = sampler.clone();
                 let (focused, activity, age) = tokio::task::spawn_blocking(move || sampler()).await?;
                 let now = started.elapsed().as_millis() as u64;
-                if !focus_report_due(previous, (focused, activity), now) { continue; }
+                if !focus_report_due(previous, (focused, age), now) { continue; }
                 let report = InnerMessage::FocusReport(FocusReport { activity_age_ms: age,
                     kind: FocusReportKind::FocusReport,
                     account_id: local.account_id.clone(), device_id: local.device_id.clone(),
@@ -174,7 +190,7 @@ async fn serve_with_sampler(
                 let registry = session.registry().clone();
                 let peer = session.peer().clone();
                 guarded(session.send(transport, &report), &registry, &peer, stop.clone()).await?;
-                previous = Some(((focused, activity), now));
+                previous = Some(((focused, age), now));
             },
             packet=transport.recv()=>{
                 let registry = session.registry().clone();
@@ -205,7 +221,7 @@ async fn serve_with_sampler(
                         }
                         InnerMessage::ModeState(report) if report.device_id == peer.info.device_id => h.status.mode = Some(report.mode.clone()),
                         InnerMessage::CaptureControlResult(report) if report.device_id == peer.info.device_id => {
-                            if pending_toggle.as_ref().is_some_and(|(id, desired, request)| *id == report.request_id && *desired == report.capture_state && request.expires > tokio::time::Instant::now()) {
+                            if pending_toggle.as_ref().is_some_and(|(id, desired, request)| *id == report.request_id && (report.outcome != voiceremote_core::protocol::CaptureControlResultOutcome::Applied || *desired == report.capture_state) && request.expires > tokio::time::Instant::now()) {
                                 let (_, _, request) = pending_toggle.take().unwrap();
                                 let _ = request.reply.send(report.outcome == voiceremote_core::protocol::CaptureControlResultOutcome::Applied);
                             }
@@ -385,6 +401,21 @@ pub async fn run_relay(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn idle_age_advances_without_wall_clock_jitter_triggering_reports() {
+        let mut previous = None;
+        let mut reports = 0;
+        for now in (0..=61_000).step_by(1000) {
+            // Reconstructed wall time jitters at each sample; input never changes.
+            let current = (true, Some(100_000 + now + (now / 1000) % 3));
+            if super::focus_report_due(previous, current, now) {
+                previous = Some((current, now));
+                reports += 1;
+            }
+        }
+        assert_eq!(reports, 3);
+    }
+
     use super::*;
     use std::{
         collections::HashMap,
@@ -512,7 +543,14 @@ mod tests {
         let peer = ds.peer().id.clone();
         let focused = Arc::new(AtomicBool::new(true));
         let sample = focused.clone();
-        let sampler: Sampler = Arc::new(move || (sample.load(Ordering::SeqCst), 1234, Some(0)));
+        let activity_clock = std::time::Instant::now();
+        let sampler: Sampler = Arc::new(move || {
+            (
+                sample.load(Ordering::SeqCst),
+                1234,
+                Some(activity_clock.elapsed().as_millis() as u64),
+            )
+        });
         let inserted = Arc::new(Mutex::new(Vec::new()));
         let injected = inserted.clone();
         let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -576,12 +614,18 @@ mod tests {
                 account_id: "synthetic-account".into(),
                 device_id: "phone".into(),
                 request_id: request.request_id,
-                capture_state: CaptureState::Continuous,
-                outcome: voiceremote_core::protocol::CaptureControlResultOutcome::Applied,
+                capture_state: CaptureState::Off,
+                outcome: voiceremote_core::protocol::CaptureControlResultOutcome::Unavailable,
             }),
         )
         .await?;
-        toggle.await??;
+        // A refusal reports actual OFF, not the desired Continuous selection.
+        // It must reach the requester immediately rather than timing out.
+        assert!(
+            tokio::time::timeout(Duration::from_millis(500), toggle)
+                .await??
+                .is_err()
+        );
         ps.send(
             &mut phone,
             &InnerMessage::CaptureStateReport(CaptureStateReport {

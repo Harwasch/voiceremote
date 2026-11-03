@@ -118,11 +118,36 @@ public enum PreferredConnection {
     public static func connect<T: Sendable>(lan: @Sendable () async throws -> T,
         relay: (@Sendable () async throws -> T)?) async throws -> T {
         do { return try await lan() }
-        catch is CancellationError { throw CancellationError() }
         catch {
             try Task.checkCancellation()
-            guard let relay else { throw error }
+            guard let relay else {
+                if error is CancellationError { throw PairingError.noMessage }
+                throw error
+            }
             return try await relay()
         }
     }
+    /// Discovery can yield several same-room advertisements. Authentication,
+    /// rather than advertisement order, selects the peer. Failed attempts must
+    /// close their transports before returning (pairing/resume already do).
+    public static func tryLAN<Candidate: Sendable, Value: Sendable>(
+        candidates: AsyncThrowingStream<Candidate, Error>,
+        attempt: @Sendable (Candidate) async throws -> Value
+    ) async throws -> Value {
+        var lastError: any Error = PairingError.noMessage
+        do {
+            for try await candidate in candidates {
+                try Task.checkCancellation()
+                do { return try await attempt(candidate) }
+                catch { try Task.checkCancellation(); lastError = error }
+            }
+        } catch {
+            try Task.checkCancellation()
+            if !(error is CancellationError) { lastError = error }
+        }
+        try Task.checkCancellation()
+        if lastError is CancellationError { throw PairingError.noMessage }
+        throw lastError
+    }
+
 }

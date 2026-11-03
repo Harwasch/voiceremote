@@ -122,15 +122,20 @@ try:
                 children.append(receiver)
             phone.send('resume')
             receiver.wait_line(lambda label, line: line == 'E2E_INSERTED')
+            receiver.wait_line(lambda label, line: line == 'E2E_INSERTED')
             phone.wait_line(lambda label, line: line == 'RESUMED')
             phone.wait_line(lambda label, line: line == 'AUTO_ACTIVITY_AGE_CLOCK_SKEW')
             phone.send('revoke')
             phone.wait_line(lambda label, line: line == 'REVOKED_NEXT_MESSAGE_REJECTED')
             phone.success(); receiver.success()
             if mode == 'preferred' and phone.paths != ['PATH_LAN', 'RESUME_RELAY']: raise RuntimeError('LAN preference / relay fallback was not exercised')
-            if receiver.insertions != (1 if mode != 'lan' else 2): raise RuntimeError('unexpected insertion count after resume')
+            if receiver.insertions != (2 if mode != 'lan' else 3): raise RuntimeError('unexpected insertion count after resume')
             if mode == 'relay' and queued_frames(storage, 'desktop') != 0: raise RuntimeError('replayed queue not drained')
-            print(f'PASS {mode}: XX, display-ready, max Unicode, positive insertion ACK, failure ACK, query/restart, Auto activity age + clock skew, revoke' + ('; real room create/redeem, persisted stale queue, permanent 403' if mode == 'relay' else '; LAN preferred then real relay fallback' if mode == 'preferred' else ''), flush=True)
+            claims = 'XX, CLI readiness hook (auto-true; no tray render), max Unicode, success/failure ACK, same-ID dedup, durable never-claimed query, Auto age/skew, revoke'
+            if mode == 'lan': claims += '; fresh TCP resume (no process restart)'
+            elif mode == 'relay': claims += '; process restart, persisted stale queue, permanent 403'
+            else: claims += '; LAN → relay after closed-port failure, same segment across both paths, process restart'
+            print(f'PASS {mode}: {claims}; no mDNS/capture-control/native GUI claim', flush=True)
         cloud = Child(['node', 'SYS/tests/e2e/relay.mjs', str(Path(temp)/'cloud'), 'proxy']); children.append(cloud)
         cloud_origin = cloud.wait_line(lambda label, line: label == 'out' and line.startswith('http://127.0.0.1:'))
         invitation = cloud.wait_line(lambda label, line: label == 'out' and line.startswith('PROXY_INVITE:')).split(':', 1)[1]

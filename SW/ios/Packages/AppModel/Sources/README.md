@@ -27,4 +27,4 @@ flowchart LR
 Start with `VoiceAppModel`. Purpose/inputs/verification and REQ trace: [package map](../README.md).
 
 BenchmarkRecorder adds optional measured stage offsets, battery cohort and clipping annotations, in-memory WAV playback, and 50-command import/export using recorded STT input. Command exports include speech results and proposal-only Brain results. Missing field acknowledgements remain TBD.
-Delivery now persists authenticated positive outcomes; unconfirmed Send taps query before any resend. Capture requests are correlated, bounded, expiring and cancel-safe; continuous capture confirms only after source start. REQ-16–18/21/27.
+Delivery now persists authenticated positive outcomes; unconfirmed Send taps query before any resend. Remote capture is stop-only, with correlated refusals, bounded request ledgers, sequence checks and absolute/monotonic expiry. A remote start never opens the microphone. Unconfirmed Send remains visible unless a durable never-claimed query permits the same segment to send on that tap. REQ-16–18/21/27.

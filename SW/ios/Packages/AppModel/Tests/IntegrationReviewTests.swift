@@ -74,31 +74,42 @@ import VoiceRemoteProtocol
     #expect(await history.deliveryStates()[entry.segmentID] == .delivered)
 }
 
-@Test @MainActor func captureControlCorrelatesExpiresAndNeverReplaysOrEnablesAI() async throws {
+@Test @MainActor func remoteCaptureOnlyStopsAndRejectsStaleSequenceOrExpiry() async throws {
     let rig = try Rig(), connection = UUID()
-    func request(_ id: String, state: CaptureState = .continuous) -> CaptureControl {
-        CaptureControl(account_id: "fixture", request_id: id, target_device_id: "phone", capture_state: state, ttl_ms: 2000)
+    func request(_ id: String, _ sequence: Int64, state: CaptureState = .off) -> CaptureControl {
+        CaptureControl(account_id: "fixture", request_id: id, target_device_id: "phone", capture_state: state, ttl_ms: 2000, request_sequence: sequence, expires_at: 1_002_000)
     }
-    let expired = await rig.model.captureControl(request("expired"), connectionID: connection, receivedAt: .now - .seconds(3))
-    #expect(expired.outcome == .expired); #expect(rig.capture.starts == 0)
-    let started = await rig.model.captureControl(request("start"), connectionID: connection)
-    #expect(started.outcome == .applied); #expect(started.request_id == "start"); #expect(rig.model.isRecording)
-    rig.model.stop()
-    let replay = await rig.model.captureControl(request("start"), connectionID: connection)
-    #expect(replay.outcome == .cancelled); #expect(rig.capture.starts == 1)
+    rig.model.setCapture(.continuous); try await rig.until { rig.model.isRecording }
+    let stopped = await rig.model.captureControl(request("stop", 2), connectionID: connection)
+    #expect(stopped.outcome == .applied); #expect(!rig.model.isRecording)
+    let stale = await rig.model.captureControl(request("stale", 1), connectionID: connection)
+    #expect(stale.outcome == .cancelled)
+    let expired = await rig.model.captureControl(request("expired", 3), connectionID: connection, receivedAt: .now - .seconds(3))
+    #expect(expired.outcome == .expired)
+    let lateStart = await rig.model.captureControl(request("late", 4, state: .continuous), connectionID: connection, receivedAt: .now - .seconds(3))
+    #expect(lateStart.outcome == .expired); #expect(!rig.model.isRecording)
     rig.model.setMode(.ai_control)
-    let denied = await rig.model.captureControl(request("ai"), connectionID: connection)
-    #expect(denied.outcome == .unavailable); #expect(!rig.model.isRecording)
+    let start = await rig.model.captureControl(request("ai", 5, state: .continuous), connectionID: connection)
+    #expect(start.outcome == .unavailable)
+    #expect(rig.capture.starts == 1)
 }
 
-@Test @MainActor func captureControlReportsUnavailableAndCancellationDuringPreparation() async throws {
-    let failed = try Rig(); failed.capture.failStart = true
-    let request = CaptureControl(account_id: "fixture", request_id: "failure", target_device_id: "phone", capture_state: .continuous, ttl_ms: 2000)
-    let refused = await failed.model.captureControl(request, connectionID: UUID())
-    #expect(refused.outcome == .unavailable); #expect(!failed.model.isRecording)
-    let slow = try Rig(captureFactory: { try await Task.sleep(for: .seconds(1)); return Capture() })
-    let task = Task { await slow.model.captureControl(request, connectionID: UUID()) }
-    try await Task.sleep(for: .milliseconds(20)); slow.model.stop()
-    let result = await task.value
-    #expect(result.outcome == .cancelled); #expect(!slow.model.isRecording)
+@Test @MainActor func remoteRequestFromOffNeverOpensMicrophone() async throws {
+    let rig = try Rig()
+    let request = CaptureControl(account_id: "fixture", request_id: "remote-start", target_device_id: "phone", capture_state: .continuous, ttl_ms: 2000, request_sequence: 1, expires_at: 1_002_000)
+    let reply = await rig.model.captureControl(request, connectionID: UUID())
+    #expect(reply.outcome == .unavailable)
+    #expect(rig.model.controls.capture == .off)
+    #expect(!rig.model.isRecording)
+    #expect(rig.capture.starts == 0)
+}
+
+@Test @MainActor func frameAlreadyExpiredInTransitCannotEvenStopCapture() async throws {
+    let rig = try Rig()
+    rig.model.setCapture(.continuous); try await rig.until { rig.model.isRecording }
+    let request = CaptureControl(account_id: "fixture", request_id: "late-stop", target_device_id: "phone", capture_state: .off,
+        ttl_ms: 2000, request_sequence: 1, expires_at: 999_999)
+    let reply = await rig.model.captureControl(request, connectionID: UUID())
+    #expect(reply.outcome == .expired); #expect(rig.model.isRecording)
+    rig.model.stop()
 }

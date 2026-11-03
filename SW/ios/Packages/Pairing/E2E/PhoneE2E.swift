@@ -103,6 +103,13 @@ private actor CapturedTransport: PairingTransport {
         guard try await connection.reconcile(segmentID: "initial").outcome == .inserted else { throw PairingError.invalidMessage }
         emit("RECONCILED_WITHOUT_INSERTION")
         try await connection.prepare()
+        // Deliberate adversarial replay of a known-inserted segment: the receiver
+        // must answer from its durable claim even when LAN switched to relay.
+        guard try await connection.insert(text("initial")).outcome == .inserted else { throw PairingError.invalidMessage }
+        emit("SAME_SEGMENT_DEDUPLICATED")
+        guard try await connection.reconcile(segmentID: "never-arrived").outcome == .unavailable else { throw PairingError.invalidMessage }
+        guard try await connection.insert(text("never-arrived")).outcome == .inserted else { throw PairingError.invalidMessage }
+        emit("NEVER_CLAIMED_SENT_ONCE")
         guard try await connection.insert(text("resumed")).outcome == .inserted else { throw PairingError.invalidMessage }
         emit("RESUMED")
         // Real phone Auto logic + generated wire decoding. Peer epochs differ by

@@ -1278,3 +1278,71 @@ async fn relay_keepalive_detects_half_open_websocket() -> Result<()> {
     worker.abort();
     Ok(())
 }
+
+#[tokio::test]
+async fn never_claimed_query_allows_same_identity_once_and_survives_reopen() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    let keys = Arc::new(FileKeyStore::new(directory.path().join("state"))?);
+    let dr = Registry::new(keys.clone());
+    let (mut p, mut d) = lan().await?;
+    let (mut ps, mut ds, ..) = enroll(p.as_mut(), d.as_mut(), registry(), dr).await?;
+    let query = InnerMessage::DictationQuery(DictationQuery {
+        kind: DictationQueryKind::DictationQuery,
+        account_id: "synthetic-account".into(),
+        segment_id: "synthetic-segment".into(),
+        target_device_id: "desktop".into(),
+    });
+    let mut injector = Injector::default();
+    ds.deliver(d.as_mut(), query.clone(), &mut injector).await?;
+    assert!(matches!(
+        ps.receive(p.as_mut()).await?,
+        InnerMessage::DictationOutcome(DictationOutcome {
+            outcome: DictationOutcomeOutcome::Unavailable,
+            ..
+        })
+    ));
+    let reopened_before_send = Registry::new(keys.clone());
+    assert_eq!(
+        reopened_before_send.segment_disposition(ds.peer(), "synthetic-segment")?,
+        None
+    );
+    assert!(
+        std::fs::read_dir(directory.path().join("state"))?
+            .filter_map(|e| e.ok())
+            .any(|e| e
+                .file_name()
+                .to_string_lossy()
+                .starts_with("never-claimed-"))
+    );
+    assert_eq!(
+        ds.deliver(d.as_mut(), dictation("Synthetic."), &mut injector)
+            .await?,
+        Delivery::Inserted
+    );
+    let _ = ps.receive(p.as_mut()).await?;
+    assert_eq!(
+        ds.deliver(d.as_mut(), dictation("Synthetic."), &mut injector)
+            .await?,
+        Delivery::Duplicate
+    );
+    let _ = ps.receive(p.as_mut()).await?;
+    ds.deliver(d.as_mut(), query, &mut injector).await?;
+    assert!(matches!(
+        ps.receive(p.as_mut()).await?,
+        InnerMessage::DictationOutcome(DictationOutcome {
+            outcome: DictationOutcomeOutcome::Inserted,
+            ..
+        })
+    ));
+    assert_eq!(injector.0.len(), 1);
+    // A crash after reservation is never negative evidence.
+    assert!(reopened_before_send.claim_segment(ds.peer(), "crashed-segment")?);
+    let reopened = Registry::new(keys);
+    assert_eq!(
+        reopened.segment_disposition(ds.peer(), "crashed-segment")?,
+        Some(false)
+    );
+    assert!(!reopened.claim_segment(ds.peer(), "crashed-segment")?);
+    assert!(reopened.segment_inserted(ds.peer(), "synthetic-segment")?);
+    Ok(())
+}

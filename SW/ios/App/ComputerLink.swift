@@ -137,10 +137,12 @@ import VoiceRemoteProtocol
             let keyData = try SecureStore.loadOrCreateKey("noise-static")
             let key = try Curve25519.KeyAgreement.PrivateKey(rawRepresentation: keyData)
             let (transport, confirmation, viaRelay) = try await PreferredConnection.connect(lan: { [self] in
-                let transport = try await LANTransport(stream: NetworkLANStream(endpoint: discover(room: invitation.payload.relay_room_id)))
-                let confirmation = try await PairingConnection.initiate(invitation: invitation, staticKey: key,
-                    clock: SystemPairingClock(), transport: transport, timeout: .seconds(5))
-                return (transport as any PairingTransport, confirmation, false)
+                return try await PreferredConnection.tryLAN(candidates: await discover(room: invitation.payload.relay_room_id)) { endpoint in
+                    let transport = try await LANTransport(stream: NetworkLANStream(endpoint: endpoint))
+                    let confirmation = try await PairingConnection.initiate(invitation: invitation, staticKey: key,
+                        clock: SystemPairingClock(), transport: transport, timeout: .seconds(5))
+                    return (transport as any PairingTransport, confirmation, false)
+                }
             }, relay: client.map { client in { @Sendable in
                 try await client.redeem(invitation)
                 let transport = try await client.connect()
@@ -232,13 +234,11 @@ import VoiceRemoteProtocol
                         await runtime?.model.dictationOutcome(outcome, from: id)
                     case .captureControl(let request):
                         let received = ContinuousClock.now
-                        Task { @MainActor [weak self] in
-                            guard let self, peers[id]?.0.session === peer.session, let runtime else { return }
-                            let result = await runtime.model.captureControl(request, connectionID: peer.epoch, receivedAt: received)
-                            guard peers[id]?.0.session === peer.session else { return }
-                            try? await peer.connection.send(.captureControlResult(result))
-                            synchronizeState()
-                        }
+                        guard let runtime else { continue }
+                        let result = await runtime.model.captureControl(request, connectionID: peer.epoch, receivedAt: received)
+                        guard peers[id]?.0.session === peer.session else { return }
+                        try await peer.connection.send(.captureControlResult(result))
+                        synchronizeState()
                     case .taskStatus(let status):
                         await runtime?.model.insertionStatus(status, from: id)
                     case .revoke:
@@ -286,10 +286,12 @@ import VoiceRemoteProtocol
             let key = try Curve25519.KeyAgreement.PrivateKey(rawRepresentation: localKey)
             let client = try record.relayOrigin.map { try relay(room: record.roomID, origin: $0) }
             let (transport, session) = try await PreferredConnection.connect(lan: { [self] in
-                let transport = try await LANTransport(stream: NetworkLANStream(endpoint: discover(room: record.roomID)))
-                let session = try await SessionResume.initiate(staticKey: key, registry: peerRegistry,
-                    peer: enrollment, localDeviceID: phoneID, transport: transport, timeout: .seconds(5))
-                return (transport as any PairingTransport, session)
+                return try await PreferredConnection.tryLAN(candidates: await discover(room: record.roomID)) { endpoint in
+                    let transport = try await LANTransport(stream: NetworkLANStream(endpoint: endpoint))
+                    let session = try await SessionResume.initiate(staticKey: key, registry: peerRegistry,
+                        peer: enrollment, localDeviceID: phoneID, transport: transport, timeout: .seconds(5))
+                    return (transport as any PairingTransport, session)
+                }
             }, relay: client.map { client in { @Sendable [self] in
                 let transport = try await client.connect()
                 let session = try await SessionResume.initiate(staticKey: key, registry: peerRegistry,
@@ -406,41 +408,35 @@ import VoiceRemoteProtocol
         case .unconfirmed: throw DictationDeliveryError.unconfirmed
         }
     }
-    private func discover(room: String) async throws -> NWEndpoint {
+    private func discover(room: String) -> AsyncThrowingStream<NWEndpoint, Error> {
         let browser = NWBrowser(for: .bonjourWithTXTRecord(type: "_voiceremote._tcp", domain: nil), using: .tcp)
-        defer { browser.cancel() }
-        return try await withThrowingTaskGroup(of: NWEndpoint.self) { group in
-            group.addTask {
-                try await withTaskCancellationHandler {
-                    try await withCheckedThrowingContinuation { continuation in
-                        let once = DiscoveryResult(continuation)
-                        browser.browseResultsChangedHandler = { @Sendable results, _ in
-                            for result in results {
-                                if case .bonjour(let record) = result.metadata,
-                                   record.dictionary["room"] == room { once.complete(.success(result.endpoint)); return }
-                            }
-                        }
-                        browser.stateUpdateHandler = { @Sendable state in
-                            if case .failed(let error) = state { once.complete(.failure(error)) }
-                            if case .cancelled = state { once.complete(.failure(CancellationError())) }
-                        }
-                        browser.start(queue: DispatchQueue(label: "VoiceRemote.Discovery"))
+        return AsyncThrowingStream(bufferingPolicy: .bufferingOldest(64)) { output in
+            let seen = DiscoveryResults()
+            browser.browseResultsChangedHandler = { @Sendable results, _ in
+                for result in results {
+                    if case .bonjour(let record) = result.metadata,
+                       record.dictionary["room"] == room, seen.insert(result.endpoint) {
+                        if case .dropped = output.yield(result.endpoint) { output.finish(throwing: PairingError.messageTooLarge) }
                     }
-                } onCancel: { browser.cancel() }
+                }
             }
-            group.addTask { try await Task.sleep(for: .seconds(2)); browser.cancel(); throw PairingError.noMessage }
-            defer { group.cancelAll() }
-            guard let endpoint = try await group.next() else { throw PairingError.noMessage }
-            return endpoint
+            browser.stateUpdateHandler = { @Sendable state in
+                if case .failed(let error) = state { output.finish(throwing: error) }
+                // Browser cancellation is not task cancellation. Deadline closure
+                // and browser callbacks must never manufacture CancellationError.
+                if case .cancelled = state { output.finish() }
+            }
+            let deadline = Task {
+                do { try await Task.sleep(for: .seconds(2)) } catch { return }
+                output.finish(); browser.cancel()
+            }
+            output.onTermination = { @Sendable _ in deadline.cancel(); browser.cancel() }
+            browser.start(queue: DispatchQueue(label: "VoiceRemote.Discovery"))
         }
     }
 }
-private final class DiscoveryResult: @unchecked Sendable {
+private final class DiscoveryResults: @unchecked Sendable {
     private let lock = NSLock()
-    private var continuation: CheckedContinuation<NWEndpoint, Error>?
-    init(_ continuation: CheckedContinuation<NWEndpoint, Error>) { self.continuation = continuation }
-    func complete(_ result: Result<NWEndpoint, Error>) {
-        lock.lock(); let value = continuation; continuation = nil; lock.unlock()
-        value?.resume(with: result)
-    }
+    private var seen = Set<NWEndpoint>()
+    func insert(_ endpoint: NWEndpoint) -> Bool { lock.withLock { seen.insert(endpoint).inserted } }
 }

@@ -1350,7 +1350,9 @@
         "request_id": "fixture-request",
         "target_device_id": "fixture-phone",
         "capture_state": "off",
-        "ttl_ms": 2000
+        "ttl_ms": 2000,
+        "request_sequence": 1,
+        "expires_at": 2000
       }
     },
     {
@@ -1362,7 +1364,9 @@
         "request_id": "fixture-request",
         "target_device_id": "fixture-phone",
         "capture_state": "off",
-        "ttl_ms": 2000
+        "ttl_ms": 2000,
+        "request_sequence": 1,
+        "expires_at": 2000
       }
     },
     {
@@ -4016,7 +4020,9 @@
         "target_device_id": "fixture-phone",
         "capture_state": "off",
         "ttl_ms": 2000,
-        "unexpected": true
+        "unexpected": true,
+        "request_sequence": 1,
+        "expires_at": 2000
       }
     },
     {
@@ -4041,7 +4047,9 @@
         "request_id": "fixture-request",
         "target_device_id": "fixture-phone",
         "capture_state": "off",
-        "ttl_ms": 0
+        "ttl_ms": 0,
+        "request_sequence": 1,
+        "expires_at": 2000
       }
     },
     {
@@ -4053,7 +4061,9 @@
         "request_id": "fixture-request",
         "target_device_id": "fixture-phone",
         "capture_state": "off",
-        "ttl_ms": 2001
+        "ttl_ms": 2001,
+        "request_sequence": 1,
+        "expires_at": 2000
       }
     },
     {
@@ -4078,6 +4088,32 @@
         "last_activity_at": 0,
         "text_field_focused": true,
         "activity_age_ms": 9007199254740992
+      }
+    },
+    {
+      "schema": "CaptureControl",
+      "name": "capture request requires sequence",
+      "value": {
+        "kind": "capture_control",
+        "account_id": "fixture-account",
+        "request_id": "fixture-request",
+        "target_device_id": "fixture-phone",
+        "capture_state": "off",
+        "ttl_ms": 2000,
+        "expires_at": 2000
+      }
+    },
+    {
+      "schema": "CaptureControl",
+      "name": "capture request requires absolute deadline",
+      "value": {
+        "kind": "capture_control",
+        "account_id": "fixture-account",
+        "request_id": "fixture-request",
+        "target_device_id": "fixture-phone",
+        "capture_state": "off",
+        "ttl_ms": 2000,
+        "request_sequence": 1
       }
     }
   ],

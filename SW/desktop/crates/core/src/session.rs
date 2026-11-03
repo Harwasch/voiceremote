@@ -264,16 +264,16 @@ impl Session {
                     query.target_device_id == self.local_device,
                     "wrong query target"
                 );
-                let inserted = self
+                let disposition = self
                     .registry
-                    .segment_inserted(&self.peer, &query.segment_id)?;
+                    .segment_disposition(&self.peer, &query.segment_id)?;
                 self.report_insertion(
                     transport,
                     &query.segment_id,
-                    if inserted {
-                        None
-                    } else {
-                        Some(crate::InsertionFailure::Unconfirmed)
+                    match disposition {
+                        Some(true) => None,
+                        Some(false) => Some(crate::InsertionFailure::Unconfirmed),
+                        None => Some(crate::InsertionFailure::NotStarted),
                     },
                 )
                 .await?;

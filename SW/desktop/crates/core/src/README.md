@@ -23,4 +23,4 @@ Start at `pairing::accept` / `initiate`, then `PendingPair::finish` and
 `Session::receive` / `deliver`. [Exact protocol](../../../../../SYS/protocol/noise.md).
 REQ-16/22–25/27/34/60/61. No command adapter is executed in this phase.
 
-`session.rs` persists successful segment outcomes, answers read-only reconciliation queries and requires the production driver’s presentation token before insertion. Unknown/partial insertion stays unconfirmed; no automatic retry.
+`session.rs` persists successful segment outcomes, answers text-free reconciliation queries with durable never-claimed evidence and requires the production driver’s presentation token before insertion. Reserved/partial insertion stays unconfirmed; never-claimed identities return unavailable and retain atomic at-most-once claims when sent later. No automatic retry.

@@ -22,4 +22,4 @@ integration are **unverified** future work.
 
 Strict parsing rejects duplicate keys and invalid Unicode; lexical integer paths feed the private Ajv integer check.
 
-Generated Records now include delivery/readiness/control variants and activity-age/listening metadata. Shared-vector tests validate against the original schemas; relay execution and room APIs are unchanged.
+Generated Records now include delivery/readiness/control variants (capture requests require sequence and absolute expiry) and activity-age/listening metadata. Shared-vector tests validate against the original schemas; relay execution and room APIs are unchanged.

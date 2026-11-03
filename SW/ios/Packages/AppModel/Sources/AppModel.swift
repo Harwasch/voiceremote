@@ -424,8 +424,10 @@ public struct ApprovalCard: Identifiable, Sendable {
         suggestions.removeAll { $0.id == card.id }
     }
     private var captureRequests: [UUID: Set<String>] = [:]
-    /// Only the authenticated connection calls this. Expiry is measured from
-    /// receipt on the phone's monotonic clock; peer wall clocks are irrelevant.
+    private var captureSequences: [UUID: Int64] = [:]
+    /// Authenticated remote control is stop-only. Sequence and absolute expiry
+    /// reject stale frames; a monotonic receipt deadline also bounds processing.
+    /// Clock disagreement fails closed rather than extending the sender deadline.
     public func captureControl(_ request: CaptureControl, connectionID: UUID,
         receivedAt: ContinuousClock.Instant = .now) async -> CaptureControlResult {
         func result(_ outcome: CaptureControlResultOutcome) -> CaptureControlResult {
@@ -433,24 +435,24 @@ public struct ApprovalCard: Identifiable, Sendable {
                 device_id: phoneID, capture_state: controls.capture, outcome: outcome)
         }
         guard request.account_id == accountID, request.target_device_id == phoneID,
-              (try? ProtocolCodec.encode(request)) != nil, controls.mode == .dictation else { return result(.unavailable) }
+              (try? ProtocolCodec.encode(request)) != nil else { return result(.unavailable) }
+        guard request.request_sequence > captureSequences[connectionID, default: -1] else { return result(.cancelled) }
         guard captureRequests[connectionID, default: []].count < 256, captureRequests.count < 5 else { return result(.unavailable) }
+        captureSequences[connectionID] = request.request_sequence
         guard captureRequests[connectionID, default: []].insert(request.request_id).inserted else { return result(.cancelled) }
-        let deadline = receivedAt + .milliseconds(request.ttl_ms)
-        guard ContinuousClock.now < deadline else { return result(.expired) }
-        setCapture(request.capture_state)
-        let token = epoch
-        if request.capture_state != .continuous { return result(.applied) }
-        while ContinuousClock.now < deadline {
-            guard !Task.isCancelled, epoch == token else { return result(.cancelled) }
-            if isRecording { return result(.applied) }
-            if worker == nil { stop(); return result(.unavailable) }
-            try? await Task.sleep(for: .milliseconds(10))
-        }
-        if epoch == token { stop() }
-        return result(.expired)
+        let remaining = request.expires_at - now()
+        guard remaining > 0, remaining <= request.ttl_ms,
+              ContinuousClock.now < receivedAt + .milliseconds(request.ttl_ms) else { return result(.expired) }
+        // Paired computers have no authority to activate the phone microphone.
+        // Refuse starts in every lifecycle/lock/mode state. A user can start
+        // capture using the phone's own controls; remote requests only stop.
+        guard request.capture_state == .off else { return result(.unavailable) }
+        stop()
+        return result(.applied)
     }
-    public func forgetCaptureConnection(_ id: UUID) { captureRequests.removeValue(forKey: id) }
+    public func forgetCaptureConnection(_ id: UUID) {
+        captureRequests.removeValue(forKey: id); captureSequences.removeValue(forKey: id)
+    }
     public func dictationOutcome(_ outcome: DictationOutcome, from deviceID: String) async {
         do { try await historyStore.dictationOutcome(outcome, from: deviceID, accountID: accountID); await refresh() }
         catch { message = "Delivery outcome could not be saved. Check the computer before resending." }

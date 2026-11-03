@@ -19,7 +19,7 @@ flowchart LR
 | [NoiseRelayTests.swift](NoiseRelayTests.swift) | Signed join/challenge/connect/revoke, clock skew, lost-response recovery, permanent refusals retain enrollment, exact proxy body/canonical-query hashes, complete-code parsing, wrong-route rejection, hostile responses, dropped count, retry cap/cancel, frame routing, ping deadline | ✅ Linux independent fake |
 | [NoiseLANTests.swift](NoiseLANTests.swift) | Split/coalesced TCP frames, max packet, EOF/invalid lengths, private IP policy | ✅ Linux |
 | [NoiseURLSessionTests.swift](NoiseURLSessionTests.swift) | Real loopback HTTP, streaming/declared response caps, redirect refusal, timeout and cancellation | ✅ Linux; Python 3 helper in test |
-| [PairingTests.swift](PairingTests.swift) | QR/clock/profile; trusted confirmation gate and cancellation | ✅ Linux |
+| [PairingTests.swift](PairingTests.swift) | QR/clock/profile; trusted confirmation gate, cancellation and actual Noise impostor followed by the valid pinned peer | ✅ Linux |
 | [Fixtures/](Fixtures/README.md) | Published synthetic Cacophony and desktop snow vectors | ✅ Bundled |
 
 Start with `NoiseTests.swift`. [Commands](../README.md).
@@ -30,4 +30,4 @@ All inputs are public test secrets or synthetic values generated in memory.
 
 [Real local gate](../../../../../SYS/tests/e2e/README.md) runs the production Worker, Rust CLI and Swift client over sockets, including persisted queue replay.
 
-[PhoneConnectionTests.swift](PhoneConnectionTests.swift) covers production readiness/outcome correlation, query without replay, state heartbeat with actual mic state, LAN preference and cancellation without relay fallback. Rust interop now reads the positive insertion outcome before its text echo.
+[PhoneConnectionTests.swift](PhoneConnectionTests.swift) covers production readiness/outcome correlation, query without replay, state heartbeat with actual mic state, LAN preference, multiple candidates, browser-origin CancellationError fallback, and actual task cancellation without relay fallback. Rust interop now reads the positive insertion outcome before its text echo.

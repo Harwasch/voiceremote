@@ -15,4 +15,4 @@ Rust. Trace: product §4/§7; [REQ-59](../../../../../SYS/requirements.md#extens
 
 A strict recursive parser retains integer token kinds and rejects duplicate decoded keys at every object depth.
 
-Generated delivery contract includes target prepare/ready, dictation outcome/query, expiring capture-control/result, optional activity age and actual listening state. Edit SYS schema, then regenerate.
+Generated delivery contract includes target prepare/ready, dictation outcome/query, sequenced capture-control with absolute expiry/result, optional activity age and actual listening state. Edit SYS schema, then regenerate.

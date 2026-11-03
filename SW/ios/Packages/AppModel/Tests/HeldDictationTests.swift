@@ -16,6 +16,12 @@ import VoiceRemoteProtocol
 }
 
 private actor HeldTarget: DictationAvailability, DeviceRevocationHandler {
+    var neverClaimed = false
+    func certifyNeverClaimed() { neverClaimed = true }
+    func reconcile(segmentID: String, deviceID: String) throws -> DictationOutcome {
+        guard neverClaimed else { throw DictationDeliveryError.unconfirmed }
+        return DictationOutcome(account_id: "fixture", segment_id: segmentID, target_device_id: deviceID, outcome: .unavailable)
+    }
     var online = false
     var epoch = UUID()
     var outcome: DictationDeliveryError?
@@ -144,4 +150,18 @@ private actor BlockingTapTarget: DictationTarget, DeviceRevocationHandler {
     await #expect(throws: DictationDeliveryError.unconfirmed) { try await pipeline.sendHeld(id: "uncertain-tap", now: 1001) }
     #expect(await target.inserted.count == 1)
     #expect(await history.deliveryStates()["uncertain-tap"] == .unconfirmed)
+}
+
+@Test func unconfirmedTapResendsSameIdentityOnlyAfterNeverClaimedAnswer() async throws {
+    let target = HeldTarget(); await target.setOnline(true); await target.certifyNeverClaimed()
+    let registry = DeviceRegistry(accountID: "fixture", revocation: target)
+    try await registry.register(DeviceInfo(account_id: "fixture", device_id: "desktop", display_name: "Synthetic", platform: .linux, role: .text_receiver, capabilities: [.receive_text]))
+    let history = try AppHistoryStore(now: 1000)
+    try await history.saveText(HistoryEntry(segmentID: "never-arrived", targetID: "desktop", text: "Synthetic.", createdAt: 1000), state: .unconfirmed, now: 1000)
+    let pipeline = HeldDictationPipeline(history: history, target: target, registry: registry, accountID: "fixture", phoneID: "phone")
+    try await pipeline.sendHeld(id: "never-arrived", now: 1000)
+    #expect(await target.inserted.map(\.segment_id) == ["never-arrived"])
+    #expect(await history.deliveryStates()["never-arrived"] == .delivered)
+    await #expect(throws: (any Error).self) { try await pipeline.sendHeld(id: "never-arrived", now: 1000) }
+    #expect(await target.inserted.count == 1)
 }
