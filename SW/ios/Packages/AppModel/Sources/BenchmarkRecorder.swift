@@ -119,6 +119,18 @@ public struct RecorderPrompt: Decodable, Identifiable, Sendable {
         // Clean abandoned recordings on launch unless user explicitly kept them.
         for url in try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
             where url.pathExtension == "pcm" { try FileManager.default.removeItem(at: url) }
+        try maintain()
+    }
+    /// Locally staged exports contain benchmark transcripts. Explicitly kept
+    /// benchmark audio is a separate opt-in and is not part of default retention.
+    public func maintain(now: Date = Date()) throws {
+        for url in try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.contentModificationDateKey])
+            where url.pathExtension == "json" {
+            let date = try url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+            if date == nil || date! > now || now.timeIntervalSince(date!) >= 604_800 {
+                try FileManager.default.removeItem(at: url)
+            }
+        }
     }
     public func start(source: any CaptureSession, first: any SttEngine, second: any SttEngine,
                       vocabulary: Vocabulary, device: String, captureKind: ABRunner.Capture,

@@ -23,6 +23,7 @@ import VoiceRemoteProtocol
     let link: ComputerLink
     let pairing: PairingFlow
     let model: VoiceAppModel
+    let historyStore: AppHistoryStore
     let offlineSync: RemoteOfflineSync
     let recorder: BenchmarkRecorder
     let remote = RemoteBLELink()
@@ -36,6 +37,7 @@ import VoiceRemoteProtocol
     private let keyboard: QueueWriter
     private let activity = ListeningActivity()
     private let network = NetworkStatus()
+    private let taskStore: RetainedTaskStore
     private let router: TaskRouter
     private var maintenance: Task<Void, Never>?
     private var preparation: Task<Void, Error>?
@@ -48,7 +50,7 @@ import VoiceRemoteProtocol
         let phoneID = defaults.string(forKey: "phoneID") ?? UUID().uuidString
         defaults.set(phoneID, forKey: "phoneID")
         // Local account until authenticated account enrollment is supplied by Pairing.
-        let account = defaults.string(forKey: "accountID") ?? "owner-local"
+        let account = try SecureStore.fixedAccount(defaults: defaults)
         let root = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
             appropriateFor: nil, create: true).appendingPathComponent("VoiceRemote", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -66,10 +68,12 @@ import VoiceRemoteProtocol
         registry = DeviceRegistry(accountID: account, revocation: link)
         pairing = PairingFlow(backend: link)
         let history = try AppHistoryStore(url: root.appendingPathComponent("history.json"), now: Int64(Date().timeIntervalSince1970 * 1000))
+        historyStore = history
         let audit = try AuditLog(journal: FileAuditJournal(url: root.appendingPathComponent("audit.jsonl")),
             checkpoints: KeychainCheckpoint(), retention: AuditRetention())
         let policy = try PolicyGate(audit: audit, biometric: LocalAuthenticationBiometric())
-        router = try TaskRouter(store: FileTaskQueueStore(url: root.appendingPathComponent("tasks.json")), policy: policy)
+        taskStore = try RetainedTaskStore(url: root.appendingPathComponent("tasks.json"), accountID: account)
+        router = try TaskRouter(store: taskStore, policy: policy)
         guard let phrases = Bundle.main.url(forResource: "phrases", withExtension: "json") else { throw SttFailure.invalidResponse }
         recorder = try BenchmarkRecorder(prompts: RecorderPrompt.load(Data(contentsOf: phrases)), directory: root.appendingPathComponent("Recorder"))
         // Resolve self only after every stored property is initialized.
@@ -131,7 +135,7 @@ import VoiceRemoteProtocol
             while !Task.isCancelled {
                 await self?.model.refresh()
                 await self?.reconcileKeyboard()
-                if let self { try? keyboard.maintain(listening: model.isRecording) }
+                if let self { do { try await offlineSync.maintain(); try taskStore.maintain(); try recorder.maintain(); try keyboard.maintain(listening: model.isRecording) } catch { self.error = "Private storage maintenance failed." } }
                 try? await Task.sleep(for: .seconds(60))
             }
         }

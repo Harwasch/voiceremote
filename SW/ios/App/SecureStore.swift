@@ -2,9 +2,19 @@ import Foundation
 import Security
 import Crypto
 import Policy
+import Core
 
 /// ThisDeviceOnly credentials never enter UserDefaults, files, logs or exports.
 @MainActor enum SecureStore {
+    /// One-time migration keeps the existing local account and all its stores.
+    /// A changed defaults value fails closed before any shared data is opened.
+    static func fixedAccount(defaults: UserDefaults) throws -> String {
+        let pinned = try load("installation-account").map { String(decoding: $0, as: UTF8.self) }
+        let account = try InstallationAccount.resolve(requested: defaults.string(forKey: "accountID"), pinned: pinned)
+        if pinned == nil { try save(Data(account.utf8), key: "installation-account") }
+        defaults.set(account, forKey: "accountID")
+        return account
+    }
     static func load(_ key: String) throws -> Data? {
         var query = base(key); query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne

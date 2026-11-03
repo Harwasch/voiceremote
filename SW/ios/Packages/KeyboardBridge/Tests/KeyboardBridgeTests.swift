@@ -213,3 +213,15 @@ extension KeyboardBridgeTests {
         }
     }
 }
+
+extension KeyboardBridgeTests {
+    func testDormantQueuePurgedFromDiskByRelaunchedWriter() throws {
+        let (_, shared, _) = try directories()
+        let fixture = segment("Synthetic dormant text")
+        try QueueWriter(sharedDirectory: shared).enqueue(fixture, listening: false, now: now)
+        let expired = now.addingTimeInterval(BridgePolicy.retention)
+        try QueueWriter(sharedDirectory: shared).maintain(listening: false, now: expired)
+        let bytes = try Data(contentsOf: shared.appendingPathComponent(BridgePolicy.queueFilename))
+        XCTAssertFalse(String(decoding: bytes, as: UTF8.self).contains(fixture.text))
+    }
+}

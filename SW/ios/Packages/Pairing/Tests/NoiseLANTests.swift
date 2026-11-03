@@ -31,27 +31,31 @@ final class NoiseLANTests: XCTestCase, @unchecked Sendable {
         }
     }
     func testTCPFrameSplitsCoalescingAndMaximum() async throws {
-        let frames = [Data([1, 2, 3]), Data(repeating: 7, count: 65_535)]
-        let wire = frames.reduce(Data()) { $0 + SessionWire.u32($1.count) + $1 }
-        let stream = ByteStream(wire, chunk: 3); let transport = LANTransport(stream: stream)
-        for frame in frames {
-            let decoded = try await transport.receive(); XCTAssertEqual(decoded, frame)
-            try await transport.send(frame)
+        try await testDeadline(seconds: 20) { [self] in
+            let frames = [Data([1, 2, 3]), Data(repeating: 7, count: 65_535)]
+            let wire = frames.reduce(Data()) { $0 + SessionWire.u32($1.count) + $1 }
+            let stream = ByteStream(wire, chunk: 3); let transport = LANTransport(stream: stream)
+            for frame in frames {
+                let decoded = try await transport.receive(); XCTAssertEqual(decoded, frame)
+                try await transport.send(frame)
+            }
+            let output = await stream.output; XCTAssertEqual(output, wire)
+            await transport.close()
         }
-        let output = await stream.output; XCTAssertEqual(output, wire)
-        await transport.close()
     }
     func testZeroOversizeTruncatedFramesAndDisconnectClose() async throws {
-        for bytes in [SessionWire.u32(0), SessionWire.u32(65_536), Data([0, 0]), SessionWire.u32(3) + Data([1])] {
-            let stream = ByteStream(bytes); let transport = LANTransport(stream: stream)
-            do { _ = try await transport.receive(); XCTFail() } catch {}
-            let closed = await stream.closed; XCTAssertTrue(closed)
-            do { try await transport.send(Data([1])); XCTFail() } catch {}
-        }
-        for frame in [Data(), Data(repeating: 0, count: 65_536)] {
-            let stream = ByteStream(Data()); let transport = LANTransport(stream: stream)
-            do { try await transport.send(frame); XCTFail() } catch {}
-            let closed = await stream.closed; XCTAssertTrue(closed)
+        try await testDeadline(seconds: 20) { [self] in
+            for bytes in [SessionWire.u32(0), SessionWire.u32(65_536), Data([0, 0]), SessionWire.u32(3) + Data([1])] {
+                let stream = ByteStream(bytes); let transport = LANTransport(stream: stream)
+                do { _ = try await transport.receive(); XCTFail() } catch {}
+                let closed = await stream.closed; XCTAssertTrue(closed)
+                do { try await transport.send(Data([1])); XCTFail() } catch {}
+            }
+            for frame in [Data(), Data(repeating: 0, count: 65_536)] {
+                let stream = ByteStream(Data()); let transport = LANTransport(stream: stream)
+                do { try await transport.send(frame); XCTFail() } catch {}
+                let closed = await stream.closed; XCTAssertTrue(closed)
+            }
         }
     }
 }

@@ -502,3 +502,13 @@ extension LogicTests {
         }
     }
 }
+
+final class InstallationAccountTests: XCTestCase {
+    func testRejectsSwitchAcrossRelaunch() throws {
+        let first = try InstallationAccount.resolve(requested: "synthetic-owner", pinned: nil)
+        XCTAssertEqual(try InstallationAccount.resolve(requested: "synthetic-owner", pinned: first), first)
+        XCTAssertThrowsError(try InstallationAccount.resolve(requested: "other", pinned: first))
+        XCTAssertThrowsError(try InstallationAccount.resolve(requested: nil, pinned: first))
+        XCTAssertEqual(try InstallationAccount.resolve(requested: nil, pinned: nil), "owner-local")
+    }
+}

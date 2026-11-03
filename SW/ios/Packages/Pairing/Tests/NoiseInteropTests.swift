@@ -18,7 +18,10 @@ private final class RustPeer: PairingTransport, @unchecked Sendable {
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["cargo", "run", "--quiet", "--manifest-path", root.appendingPathComponent("SW/desktop/Cargo.toml").path,
+        // A helper owns/reaps the complete cargo process group. SIGTERM may
+        // be inherited blocked from Swift's worker threads; unblock it before
+        // spawning. A stuck cargo/peer cannot retain stdout for hours.
+        process.arguments = ["python3", "-u", "-c", boundedPeerProcessScript, "cargo", "run", "--quiet", "--manifest-path", root.appendingPathComponent("SW/desktop/Cargo.toml").path,
                               "-j4", "-p", "voiceremote-core", "--example", "phone_interop", "--"] + (fromPhone ? ["--revoke-from-phone"] : [])
         process.standardInput = input; process.standardOutput = output
         try process.run()
@@ -108,7 +111,7 @@ final class NoiseInteropTests: XCTestCase, @unchecked Sendable {
         }
         try await rust.waitForSuccess()
     }
-    func testRustSwiftExchangeAndDesktopRevoke() async throws { try await exchange(fromPhone: false) }
-    func testRustSwiftExchangeAndPhoneRevoke() async throws { try await exchange(fromPhone: true) }
+    func testRustSwiftExchangeAndDesktopRevoke() async throws { try await testDeadline(seconds: 120) { [self] in try await exchange(fromPhone: false) } }
+    func testRustSwiftExchangeAndPhoneRevoke() async throws { try await testDeadline(seconds: 120) { [self] in try await exchange(fromPhone: true) } }
 }
 #endif

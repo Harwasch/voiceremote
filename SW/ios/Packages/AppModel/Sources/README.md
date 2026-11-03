@@ -28,3 +28,9 @@ Start with `VoiceAppModel`. Purpose/inputs/verification and REQ trace: [package 
 
 BenchmarkRecorder adds optional measured stage offsets, battery cohort and clipping annotations, in-memory WAV playback, and 50-command import/export using recorded STT input. Command exports include speech results and proposal-only Brain results. Missing field acknowledgements remain TBD.
 Delivery now persists authenticated positive outcomes; unconfirmed Send taps query before any resend. Remote capture is stop-only, with correlated refusals, bounded request ledgers, sequence checks and absolute/monotonic expiry. A remote start never opens the microphone. Unconfirmed Send remains visible unless a durable never-claimed query permits the same segment to send on that tap. REQ-16–18/21/27.
+
+| Privacy store | Rule | Status |
+|---|---|---|
+| [RetainedTaskStore.swift](RetainedTaskStore.swift) | Seven-day disk payload/preview expiry; hashed command/idempotency tombstones; account validation; existing queue migration | ✅ Portable tests; Apple host **unverified** |
+| [AppHistoryStore.swift](AppHistoryStore.swift) | Seven days; expired held text requires durable Keep/Delete; warning state blocks Send | ✅ Relaunch/dormant/choice tests |
+| [RemoteOfflineSync.swift](RemoteOfflineSync.swift) | No transcript copy after history save; pending text expires; audio survives until STT | ✅ Synthetic recovery tests |

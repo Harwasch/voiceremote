@@ -17,3 +17,5 @@ CRLF, embedded CRLF and controls followed by combining marks exercise the existi
 sanitation path. No Core source change was needed. Apple behavior is **unverified** pending CI.
 
 Auto regressions compare two devices with extreme peer-clock skew, idle heartbeats beyond 60 seconds, unknown age and disconnect clearing. No physical focus sample is claimed.
+
+`LogicTests.InstallationAccountTests` covers legacy/default resolution, relaunch and refusal of changed/missing account settings after pinning (REQ-56). No real account credentials.

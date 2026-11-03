@@ -3,7 +3,7 @@ import Core
 import VoiceRemoteProtocol
 
 /// App adapter reports only literal delivery outcomes, never command authority.
-public enum DictationDeliveryError: Error, Equatable, Sendable { case unreachable, failed, unconfirmed }
+public enum DictationDeliveryError: Error, Equatable, Sendable { case unreachable, failed, unconfirmed, retentionChoiceRequired }
 public protocol DictationAvailability: DictationTarget {
     func isReachable(_ deviceID: String) async -> Bool
     func reconcile(segmentID: String, deviceID: String) async throws -> DictationOutcome
@@ -110,6 +110,7 @@ public actor HeldDictationPipeline {
     public func sendHeld(id: String, now: Int64) async throws {
         guard !sending.contains(id) else { throw CoreError.unknownSegment }
         sending.insert(id); defer { sending.remove(id) }
+        guard try await !history.retentionWarnings(now: now).contains(where: { $0.segmentID == id }) else { throw DictationDeliveryError.retentionChoiceRequired }
         guard let entry = try await history.entries(now: now).first(where: { $0.segmentID == id }),
               let state = await history.deliveryStates()[id], [.held, .failed, .unconfirmed].contains(state) else { throw CoreError.unknownSegment }
         if state == .unconfirmed {

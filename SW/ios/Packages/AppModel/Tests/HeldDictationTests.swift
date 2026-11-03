@@ -55,6 +55,8 @@ private actor HeldTarget: DictationAvailability, DeviceRevocationHandler {
     await target.setOnline(true)
     let second = HeldDictationPipeline(history: reopened, target: target, registry: registry, accountID: "fixture", phoneID: "phone")
     #expect(await target.inserted.isEmpty)
+    await #expect(throws: DictationDeliveryError.retentionChoiceRequired) { try await second.sendHeld(id: "held-synthetic", now: 700_000_000) }
+    try await reopened.resolveRetention(id: "held-synthetic", keep: true, now: 700_000_000)
     try await second.sendHeld(id: "held-synthetic", now: 700_000_000)
     #expect(await target.inserted.count == 1)
     #expect(await target.inserted.first?.text == "Invented text.")

@@ -79,6 +79,7 @@ private actor OfflineResult {
     await #expect(throws: (any Error).self) { try await run(second) }
     #expect(await remote.offsets == [0, 496, 496])
     #expect(await second.pendingAudioBytes() == 0)
+    #expect(!String(decoding: try Data(contentsOf: url), as: UTF8.self).contains("Invented offline fixture."))
     #expect(await result.stt == 1); #expect(await result.text.count == 1)
     let third = try RemoteOfflineSync(url: url)
     try await run(third)
@@ -319,4 +320,47 @@ private actor YieldingSTT {
     #expect(await sync.pendingAudioBytes() == 0)
     #expect(try Data(contentsOf: url).count < 2000)
     #expect(try FileManager.default.contentsOfDirectory(atPath: url.appendingPathExtension("audio").path).isEmpty)
+}
+
+@Test func dormantPendingOfflineTranscriptExpiresWithoutDeletingRemoteSource() async throws {
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer {
+        try? FileManager.default.removeItem(at: url)
+        try? FileManager.default.removeItem(at: url.appendingPathExtension("audio"))
+    }
+    let remote = try OfflineRemote(frames: 15), result = OfflineResult()
+    let clock = OfflineExpiryClock()
+    let sync = try RemoteOfflineSync(url: url, now: { clock.read() })
+    await #expect(throws: (any Error).self) {
+        try await sync.synchronize(remote: "fixture", info: info(), enrolled: true, progress: progress(), utcMilliseconds: 1000,
+            request: { try await remote.send($0) }, transcribe: { try await result.transcribe($0) },
+            saveText: { _, _ in throw RemoteContractError.loss })
+    }
+    #expect(String(decoding: try Data(contentsOf: url), as: UTF8.self).contains("Invented offline fixture."))
+    #expect(await sync.pendingAudioBytes() == 0)
+    clock.expire()
+    try await sync.maintain()
+    let reopened = try RemoteOfflineSync(url: url, now: { clock.read() })
+    #expect(!String(decoding: try Data(contentsOf: url), as: UTF8.self).contains("Invented offline fixture."))
+    #expect(await remote.deletes == 0)
+    #expect(await reopened.issues(remote: "fixture").first?.reason.contains("expired") == true)
+}
+
+@Test func abandonedPhoneAudioWithoutARecordIsRemovedOnRelaunch() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let url = root.appendingPathComponent("offline.json"), audio = root.appendingPathComponent("offline.json.audio")
+    try FileManager.default.createDirectory(at: audio, withIntermediateDirectories: true)
+    try Data([0, 0]).write(to: audio.appendingPathComponent("abandoned-synthetic"))
+    let sync = try RemoteOfflineSync(url: url)
+    #expect(await sync.pendingAudioBytes() == 0)
+    #expect(try FileManager.default.contentsOfDirectory(at: audio, includingPropertiesForKeys: nil).isEmpty)
+}
+
+private final class OfflineExpiryClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var time: Int64 = 1000
+    func read() -> Int64 { lock.withLock { time } }
+    func expire() { lock.withLock { time += 604_800_000 } }
 }

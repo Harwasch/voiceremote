@@ -14,14 +14,16 @@ private actor CleanupSpy {
 }
 final class RelayCleanupTests: XCTestCase, @unchecked Sendable {
     func testPeer403DoesNotSkipSelfRevokeOrHideItsFailure() async throws {
-        for fail in [false, true] {
-            let spy = CleanupSpy(failLocal: fail)
-            do {
-                try await RelayMembershipCleanup.perform(peer: "desktop", local: "phone") { try await spy.revoke($0) }
-                XCTAssertFalse(fail)
-            } catch { XCTAssertTrue(fail) }
-            let attempted = await spy.attempted
-            XCTAssertEqual(attempted, ["desktop", "phone"])
+        try await testDeadline(seconds: 20) { [self] in
+            for fail in [false, true] {
+                let spy = CleanupSpy(failLocal: fail)
+                do {
+                    try await RelayMembershipCleanup.perform(peer: "desktop", local: "phone") { try await spy.revoke($0) }
+                    XCTAssertFalse(fail)
+                } catch { XCTAssertTrue(fail) }
+                let attempted = await spy.attempted
+                XCTAssertEqual(attempted, ["desktop", "phone"])
+            }
         }
     }
 }
