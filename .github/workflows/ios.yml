@@ -25,10 +25,17 @@ jobs:
       release: ${{ steps.release.outputs.enabled }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Test CI guards
         run: python3 -m unittest discover -s SW/ios/ci -p 'test_*.py'
       - name: Validate release version
         run: python3 SW/ios/ci/checks.py version "$GITHUB_REF_NAME"
+      - name: Require release commit accepted on main
+        if: startsWith(github.ref, 'refs/tags/ios-v')
+        run: |
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          python3 SW/ios/ci/checks.py accepted-main "$GITHUB_REF_NAME" "$GITHUB_SHA"
       - name: Check release credentials without exposing them
         id: release
         env:

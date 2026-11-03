@@ -16,7 +16,7 @@ flowchart LR
 | [codec.test.ts](codec.test.ts) | Worker adapter agreement with generated codec, shared vectors and variant/field mutations | ✅ |
 | [protocol.test.ts](protocol.test.ts) / [protocol-README.md](protocol-README.md) | Existing generated contract/vector suite | ✅ unchanged |
 | [apns.test.ts](apns.test.ts) | Absent/partial/invalid credentials disable or contain wake without sensitive logs | ✅ |
-| [ci.test.ts](ci.test.ts) | Release version, trigger scope and deploy secret/tag gates | ✅ local guards; hosted CI unverified |
+| [ci.test.ts](ci.test.ts) | Negative release version and actual workflow ancestry checks in disposable local git history; trigger scope and deploy secret/tag gates | ✅ local guards; hosted CI unverified |
 | [mutations.ts](mutations.ts) / [../ci/check-mutations.mjs](../ci/check-mutations.mjs) | Remove membership, generation, queue purge, closed fields, payload-safe logging or cloud revoke in test bundles; require assertion failures | ✅ five room probes; cloud-revoke assertion probe |
 
 Start with `npm --prefix SW/relay test`. Synthetic keys are generated in memory;
