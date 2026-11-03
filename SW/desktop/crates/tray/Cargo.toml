@@ -30,6 +30,7 @@ socket2 = { version = "0.6", features = ["all"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "io-util"] }
 tokio-tungstenite = { version = "0.28", features = ["rustls-tls-webpki-roots"] }
 voiceremote-core = { path = "../core" }
+voiceremote-agents = { path = "../agents" }
 tauri = { version = "2", optional = true, features = ["tray-icon"] }
 tauri-plugin-autostart = { version = "2", optional = true }
 

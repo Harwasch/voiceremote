@@ -29,6 +29,7 @@ sequenceDiagram
 
 | File | Purpose / inputs | Status |
 |---|---|---|
+| [agents.py](agents.py) | Production phone AppModel/STT/Brain, real Policy with fake biometric, Router, actual relay/Noise and agent node; fake Claude/Codex and systemd controls | ✅ Synthetic Linux path; live providers/Windows unverified |
 | [run.sh](run.sh) | Sequential builds, four workers maximum, then local real-client exchange | ✅ Linux |
 | [run.py](run.py) | Coordinate privately; verify ACK success/failure, durable query/same-ID dedup, relay process restart, max Unicode, Auto age/skew, LAN preference/closed-port relay fallback, stale queue and revoke | ✅ WS + LAN + preferred/fallback |
 | [Package.resolved](Package.resolved) | Pinned Crypto/ASN.1 for production Swift clients | ✅ Linux resolved |
@@ -58,6 +59,12 @@ reaped, including on failure. Only generated synthetic material is used. This is
 local interoperability evidence; physical iPhone, Apple Keychain/Network/native
 WebSocket, WAN/TLS deployment and human phrase-comparison time are **unverified**.
 
+Queue observations read private copies of the SQLite database and WAL, closing
+each inspection connection without touching Workerd's live shared-memory state.
+
 Cloud gate: a separate local production Worker uses explicit synthetic provisioning/provider markers and conservative test policy. The trusted Node provisioner creates/invites; Swift receives only the invitation and redeems with its own Ed25519 key. CloudEngine signs both speech queries (apostrophe, literal plus, Unicode, repeated terms); ClaudeBrain signs its exact final body with the configured model/version. Synthetic upstreams check vocabulary/credential injection and return invented responses. No SW/relay source changes, vendor requests or real keys/transcripts/audio.
 
 The preferred-path case pairs over LAN with relay configured, then restarts the desktop with only relay. The phone proves closed-port LAN failure precedes fresh signed relay resume, queries and explicitly resends the same segment ID across paths without reinsertion. Each path queries a never-arrived ID, then sends that same ID exactly once. LAN-only resumes TCP without restarting the desktop; relay and preferred cases restart the process. Auto compares two synthetic focused devices by activity age despite extreme peer-clock skew and expires idle heartbeats. Display readiness uses the CLI auto-true presentation hook. mDNS discovery, impostor handling and capture control are outside this socket gate; portable unit tests cover candidate authentication/control policy. Native tray rendering and real mDNS remain **unverified**.
+
+
+The agent path proves explicit capability refusal, named sessions, tier 1 review/tap, tier 3 biometric challenge, offline node hold/restart/release, status query, escaped-child cancel, authority-field rejection and hybrid fast path. Test containment controls are fake; process trees are real. Runtime Job Objects require Windows acceptance.

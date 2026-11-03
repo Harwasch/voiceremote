@@ -64,6 +64,9 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     Pair {
+        /// Explicitly enroll this computer for agent commands; role alone grants nothing.
+        #[arg(long)]
+        allow_agents: bool,
         #[arg(long, conflicts_with = "code", required_unless_present = "code")]
         qr: bool,
         #[arg(long, conflicts_with = "qr")]
@@ -254,6 +257,18 @@ fn info(account: &str, device: &str) -> DeviceInfo {
         capabilities: vec![Capability::ReceiveText],
     }
 }
+fn agent_info(account: &str, device: &str, allow: bool) -> DeviceInfo {
+    let mut device = info(account, device);
+    if allow {
+        device.role = DeviceInfoRole::Both;
+        device.capabilities.extend([
+            Capability::DelegateTask,
+            Capability::CancelTask,
+            Capability::OpenResource,
+        ]);
+    }
+    device
+}
 fn pairing_id(registry: &Registry, requested: Option<String>) -> Result<String> {
     if registry.local_info()?.is_some() {
         return registry.local_id(requested.as_deref());
@@ -403,6 +418,7 @@ async fn main() -> Result<()> {
             println!("Relay room created");
         }
         Command::Pair {
+            allow_agents,
             qr,
             code: _,
             account,
@@ -492,7 +508,7 @@ async fn main() -> Result<()> {
             eprintln!("Compare on both devices: {phrase}\nType the entire phrase to confirm:");
             let entered = read_confirmation(stop.clone()).await?;
             pending
-                .confirm_local(transport.as_mut(), &entered, info(&account, &device))
+                .confirm_local(transport.as_mut(), &entered, agent_info(&account, &device, allow_agents))
                 .await?;
             tokio::select! {result=tokio::time::timeout(Duration::from_secs(120),pending.receive_confirmation(transport.as_mut()))=>result??,_=receiver::stopped(stop.clone())=>bail!("pairing stopped")};
             if let Some(expected) = phone_device.as_deref() {

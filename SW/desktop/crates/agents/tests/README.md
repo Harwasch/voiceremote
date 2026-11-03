@@ -41,3 +41,5 @@ stops the local tree; persisted launch receipts remain unknown after restart.
 The argv/environment test launches an isolated copy of itself with synthetic
 secret variables populated, verifies those inputs exist, then checks their names
 are absent from both fake provider environments. No global test environment is changed.
+
+`authenticated_inventory_and_resource_handoff_bind_preview_and_query_without_resend` covers paired inventory, changed workspace refusal, retained bytes, CLI resource handoff, expired retry and status-only query. Windows-only Job tests require a Windows runner; Linux relay coverage is in SYS/tests/e2e.

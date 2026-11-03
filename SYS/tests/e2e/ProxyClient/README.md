@@ -17,3 +17,5 @@ trusted test provisioner; no provisioning or provider credential enters the phon
 process. Verification: real relay accepts production Swift signing bytes, including
 apostrophe, literal plus, Unicode and repeated vocabulary terms. Local HTTP is a
 test-only adapter; deployed TLS/providers and Apple WebSocket remain **unverified**.
+
+[AgentE2E.swift](AgentE2E.swift) composes the production phone packages. Its only fakes are synthetic capture/STT/Brain output, biometric and private queue/checkpoint stores. Dispatch/status go through production PhoneConnection, Noise, relay and agent receiver.

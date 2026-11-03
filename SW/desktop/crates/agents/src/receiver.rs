@@ -65,6 +65,24 @@ pub async fn serve(
                 };
                 idle.as_mut().reset(tokio::time::Instant::now()+receiver::IDLE_TIMEOUT);
                 match message {
+                    InnerMessage::AgentInventoryRequest(request)=>{
+                        let reply = node.inventory(&session, &request)?;
+                        session.send(transport, &InnerMessage::AgentInventory(reply)).await?;
+                    },
+                    InnerMessage::AgentTaskQuery(request)=>{
+                        if let Ok(status) = node.query(&session, &request) {
+                            session.send(transport, &InnerMessage::TaskStatus(status)).await?;
+                        }
+                    },
+                    InnerMessage::AgentDispatch(dispatch)=>{
+                        let admission=node.accept_dispatch(&session,dispatch);
+                        let status=admission.result.status;
+                        if let Some(work)=admission.work {
+                            let worker=node.clone();let id=status.command_id.clone();owned.insert(id.clone());
+                            jobs.spawn(async move {(id,worker.run(work).await)});
+                        }
+                        if let Err(error)=session.send(transport,&InnerMessage::TaskStatus(status)).await {break Err(error);}
+                    },
                     InnerMessage::AuthorizedCommand(command)=>{
                         let admission=node.accept(&session,command);
                         let status=admission.result.status;

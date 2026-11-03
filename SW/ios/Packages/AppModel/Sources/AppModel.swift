@@ -61,6 +61,15 @@ public struct ApprovalCard: Identifiable, Sendable {
     public let preview: Preview
     public let destination: DeviceInfo
     public let session: InputSession
+    public var route: Destination? = nil
+    public var routeDescription: String? {
+        guard let route else { return nil }
+        return "\(route.session.provider) / \(route.session.host) / \(route.session.workspace) / \(route.session.providerSessionID) / \(route.session.capabilityProfile)\n" + (route.session.executionWorkspace ?? "")
+    }
+    public var suggestionID: UUID? = nil
+    public var suggestionRevision: Int = 0
+    public var dependencies: [String] = []
+    public var replacingCommandID: String? = nil
     public var exactAction: String {
         switch preview.tool {
         case .selectTargetTool(let tool): "Select destination: " + tool.device_id
@@ -109,6 +118,13 @@ public struct ApprovalCard: Identifiable, Sendable {
     public var canRetryQueue: Bool { approval.map { pendingPermits[$0.id] != nil } ?? false }
     public let accountID: String
     public let phoneID: String
+    public let agentControl: AgentControl?
+    public private(set) var grants: [GrantEvidence] = []
+    public var wakeArmed = false
+    private var localPTT = false
+    private var suggestionActivations: [UUID: InputActivation] = [:]
+    private var authorizedSuggestions: [UUID: String] = [:]
+    private var taskSuggestions: [String: UUID] = [:]
     private let registry: DeviceRegistry
     private let historyStore: AppHistoryStore
     private let pipeline: HeldDictationPipeline
@@ -139,7 +155,9 @@ public struct ApprovalCard: Identifiable, Sendable {
                 online: @escaping @MainActor () -> Bool = { true },
                 power: @escaping @MainActor () -> (hot: Bool, lowBattery: Bool) = { (false, false) },
                 now: @escaping @MainActor () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1000) },
+                agentControl: AgentControl? = nil,
                 deliver: @escaping @MainActor (ExecutionPermit) throws -> [QueuedTask]) {
+        self.agentControl = agentControl
         self.accountID = accountID; self.phoneID = phoneID; self.actorID = actorID
         self.registry = registry; historyStore = history; self.policy = policy
         pipeline = HeldDictationPipeline(history: history, target: target, registry: registry, accountID: accountID, phoneID: phoneID)
@@ -149,6 +167,7 @@ public struct ApprovalCard: Identifiable, Sendable {
     }
     public func refresh() async {
         devices = await registry.all()
+        if let agentControl { tasks = agentControl.router.snapshot() }
         do { history = try await historyStore.entries(now: now()); deliveryStates = await historyStore.deliveryStates(); offlineOrigins = await historyStore.offlineOrigins() }
         catch { message = "History is unavailable." }
     }
@@ -170,6 +189,7 @@ public struct ApprovalCard: Identifiable, Sendable {
     }
     public func press(at milliseconds: Int64) {
         guard controls.capture != .off else { return }
+        localPTT = true
         trigger.press(at: milliseconds)
     }
     public func advanceTrigger(to milliseconds: Int64) {
@@ -187,6 +207,7 @@ public struct ApprovalCard: Identifiable, Sendable {
     /// Immediate hardware stop, including while permission/target/engine setup awaits.
     /// Cancelled utterances cannot commit late text or late proposals.
     public func stop() {
+        localPTT = false
         epoch = UUID(); trigger.stop(); controls.setCapture(.off)
         capture?.interrupt(); capture = nil; worker?.cancel(); worker = nil
         partial = ""; cloudInUse = false; listening = .idle
@@ -217,6 +238,7 @@ public struct ApprovalCard: Identifiable, Sendable {
         guard controls.capture != .off, worker == nil else { return }
         let token = UUID(); epoch = token
         let segmentID = UUID().uuidString, state = controls, snapshot = settings
+        let activation: InputActivation = localPTT ? .ptt : .inferred
         listening = .preparing; partial = ""; message = nil
         worker = Task {
             do {
@@ -246,6 +268,8 @@ public struct ApprovalCard: Identifiable, Sendable {
                 var currentSegment = segmentID
                 let slices = CaptureSegmenter().slices(from: source)
                 var firstSlice = true
+                var commandText = ""
+                var commandRevision = 0
                 for await slice in slices {
                     guard epoch == token, !Task.isCancelled else { break }
                     if !firstSlice {
@@ -255,7 +279,7 @@ public struct ApprovalCard: Identifiable, Sendable {
                         currentSegment = UUID().uuidString
                         if state.mode == .dictation {
                             selected = try await pipeline.prepare(segmentID: currentSegment, state: state, picker: picker, now: now())
-                        } else { selected = try picker.resolve(devices: await registry.all()) }
+                        } // AI command keeps its original destination for the whole utterance.
                         guard epoch == token, !Task.isCancelled else { await pipeline.cancel(segmentID: currentSegment); return }
                         if destination?.device_id != selected.device_id {
                             suggestionEngine = nil; suggestions = []; suggestionTargets = [:]
@@ -283,7 +307,13 @@ public struct ApprovalCard: Identifiable, Sendable {
                         } else {
                             // Brain work is independent of the capture producer; it cannot
                             // authorize or stop capture. Bounded slice buffering fails closed.
-                            try await propose(text, segmentID: UUID().uuidString, selected: selected, token: token, settings: snapshot)
+                            commandText += (commandText.isEmpty ? "" : " ") + text
+                            guard commandText.count <= 16_384 else { throw BrainError.invalidResponse }
+                            // A time/silence slice is not an utterance boundary. Retain
+                            // revisions so a later correction replaces the same input.
+                            commandRevision += 1
+                            try await propose(commandText, segmentID: segmentID, revision: commandRevision,
+                                complete: false, activation: activation, selected: selected, token: token, settings: snapshot)
                         }
                         await refresh()
                         guard epoch == token, !Task.isCancelled else { return }
@@ -293,6 +323,11 @@ public struct ApprovalCard: Identifiable, Sendable {
                 }
                 await pipeline.cancel(segmentID: currentSegment)
                 guard epoch == token, !Task.isCancelled else { return }
+                if state.mode == .ai_control, !failed, !commandText.isEmpty {
+                    commandRevision += 1
+                    try await propose(commandText, segmentID: segmentID, revision: commandRevision,
+                        complete: true, activation: activation, selected: selected, token: token, settings: snapshot)
+                }
                 source.finish(); capture = nil
                 await refresh()
                 guard epoch == token, !Task.isCancelled else { return }
@@ -310,26 +345,29 @@ public struct ApprovalCard: Identifiable, Sendable {
             }
         }
     }
-    private func propose(_ text: String, segmentID: String, selected: DeviceInfo, token: UUID, settings: AppSettings) async throws {
+    private func propose(_ text: String, segmentID: String, revision: Int, complete: Bool, activation: InputActivation, selected: DeviceInfo, token: UUID, settings: AppSettings) async throws {
         if suggestionEngine == nil {
+            let registryContext = (devices + [picker.phone]).map { "\($0.device_id): \($0.display_name) [\($0.role.rawValue)]" }.joined(separator: "; ")
+            let sessionContext = agentControl?.destinations.map { "\($0.session.provider) / \($0.id) / project=\($0.session.workspace) / session=\($0.session.providerSessionID)" }.joined(separator: "; ") ?? "none"
+            let context = "Selected destination: \(selected.device_id). Registered destinations: " + registryContext + "; Authenticated agent inventory: " + sessionContext
             suggestionEngine = SuggestionEngine(brain: brain(settings), accountID: accountID,
-                context: "Selected destination: \(selected.device_id). Registered destinations: " +
-                    (devices + [picker.phone]).map { "\($0.device_id): \($0.display_name) [\($0.role.rawValue)]" }.joined(separator: "; "), configuration: try SuggestionConfiguration())
+                context: context, configuration: try SuggestionConfiguration())
         }
         guard let engine = suggestionEngine else { return }
         await engine.setMutedDuringMeeting(muted)
-        let update = await engine.ingest(TranscriptSegment(id: segmentID, revision: 0, text: text,
-            isFinal: true, isComplete: true, contextID: selected.device_id), now: Date(timeIntervalSince1970: Double(now()) / 1000))
+        let update = await engine.ingest(TranscriptSegment(id: segmentID, revision: revision, text: text,
+            isFinal: true, isComplete: complete, contextID: selected.device_id, commandContext: activation == .ptt || wakeArmed), now: Date(timeIntervalSince1970: Double(now()) / 1000))
         guard epoch == token else { return }
         suggestions = update.cards
         for card in suggestions where suggestionTargets[card.id] == nil {
+            suggestionActivations[card.id] = wakeArmed && WakePhraseDetector().detect(text) != .none ? .wakeWord : activation
             let proposedID: String
             switch card.proposal.tool {
             case .selectTargetTool(let tool): proposedID = tool.device_id
             case .openResourceTool(let tool): proposedID = tool.device_id
             case .delegateTaskTool(let tool): proposedID = tool.device_id
             case .prepareSendTool(let tool): proposedID = tool.device_id
-            case .cancelTaskTool: proposedID = selected.device_id
+            case .cancelTaskTool(let tool): proposedID = tasks.first(where: { $0.command.command_id == tool.command_id && $0.command.account_id == accountID })?.command.destination_id ?? selected.device_id
             }
             // Untrusted destination hints resolve only through the trusted registry.
             suggestionTargets[card.id] = (devices + [picker.phone]).first { $0.device_id == proposedID && $0.account_id == accountID }
@@ -350,14 +388,63 @@ public struct ApprovalCard: Identifiable, Sendable {
         if case .selectTargetTool = tapped.proposal.tool, !selected.capabilities.contains(.receive_text) {
             message = "This destination cannot receive text."; return
         }
-        let session = input.session(account: accountID, actor: actorID, session: UUID().uuidString,
-            device: selected.device_id, project: "default", destinationKind: .software)
-        let activation = input.activation(session: session, kind: .inferred, expiresAt: now() + 120_000)
+        let tool: ToolCall
+        let project: String
+        var reviewedRoute: Destination?
         do {
-            let decision = policy.submit(try ProtocolCodec.encode(tapped.proposal.tool), input: activation)
+            if case .delegateTaskTool(let proposed) = tapped.proposal.tool, let agentControl {
+                let route = try agentControl.resolve(device: selected.device_id, project: proposed.project_id, providerSession: proposed.provider_session_id)
+                guard route.capabilities.contains(.delegate_task) else { throw AppRoutingError.unavailableDestination }
+                project = route.session.workspace; reviewedRoute = route
+                tool = .delegateTaskTool(DelegateTaskTool(account_id: accountID, device_id: selected.device_id,
+                    project_id: project, provider_session_id: route.session.providerSessionID, instruction: proposed.instruction))
+            } else {
+                tool = tapped.proposal.tool
+                if case .delegateTaskTool(let proposed) = tool { project = proposed.project_id }
+                else if case .cancelTaskTool(let proposed) = tool,
+                        let task = tasks.first(where: { $0.command.command_id == proposed.command_id && $0.command.destination_id == selected.device_id }) { project = task.rules.project }
+                else { project = agentControl?.selected?.workspace ?? "default" }
+                if agentControl != nil {
+                    switch tool {
+                    case .prepareSendTool: message = "Prepare Send has no installed executor. Nothing was started."; return
+                    case .openResourceTool:
+                        guard let route = agentControl?.selected, route.host == selected.device_id else {
+                            message = "Choose the enrolled project, provider and session to receive this resource request."; return
+                        }
+                        reviewedRoute = try agentControl?.resolve(device: selected.device_id, project: route.workspace, providerSession: route.providerSessionID)
+                    default: break
+                    }
+                }
+            }
+        } catch { message = "Choose the exact enrolled project, provider and session before reviewing."; return }
+        let dependencies = tapped.dependsOn.compactMap { authorizedSuggestions[$0] }
+        guard dependencies.count == tapped.dependsOn.count,
+              dependencies.allSatisfy({ id in tasks.contains { $0.command.command_id == id && $0.state == .succeeded && $0.outcome == .ok } }) else {
+            message = "Waiting for an authorized predecessor to succeed."; return
+        }
+        let session = input.session(account: accountID, actor: actorID, session: UUID().uuidString,
+            device: selected.device_id, project: project, destinationKind: .software)
+        let kind = suggestionActivations[card.id] ?? .inferred
+        let activation = input.activation(session: session, kind: kind, ambiguousMeetingWake: kind == .wakeWord, expiresAt: now() + 120_000)
+        do {
+            var decision = policy.submit(try ProtocolCodec.encode(tool), input: activation)
+            // Without a matching scoped grant a low-risk explicit input still
+            // gets a review. It cannot silently acquire a remembered permission.
+            if case .denied(.missingGrant) = decision {
+                decision = policy.submit(try ProtocolCodec.encode(tool), input: input.activation(session: session, kind: .inferred, expiresAt: now() + 120_000))
+            }
             switch decision {
             case .suggestion(let preview), .authenticationRequired(let preview):
-                approval = ApprovalCard(preview: preview, destination: selected, session: session)
+                approval = ApprovalCard(preview: preview, destination: selected, session: session, route: reviewedRoute, suggestionID: card.id, suggestionRevision: card.revision, dependencies: dependencies)
+            case .queued(let permit):
+                if case .selectTargetTool(let target) = permit.command.immutable_task_payload {
+                    if let id = UUID(uuidString: permit.command.candidate_id) {
+                        _ = policy.transition(requestID: id, to: .dispatched)
+                        _ = policy.transition(requestID: id, to: .running)
+                        _ = policy.transition(requestID: id, to: .succeeded)
+                    }
+                    setTarget(.device(target.device_id))
+                }
             default: message = "Action is unavailable for this destination."
             }
         } catch { message = "Invalid action. Nothing was started." }
@@ -370,7 +457,7 @@ public struct ApprovalCard: Identifiable, Sendable {
         if let permit = pendingPermits[card.id] {
             do {
                 _ = try policy.verifyExecution(command: permit.command, immutablePreview: permit.immutablePreview, expiresAt: permit.expiresAt)
-                try queue(permit, card: card)
+                try await queue(permit, card: card)
             } catch { message = "Queue confirmation failed. Check task status before retrying or denying." }
             return
         }
@@ -388,20 +475,31 @@ public struct ApprovalCard: Identifiable, Sendable {
                 return
             }
             pendingPermits[card.id] = permit
-            do { try queue(permit, card: card) }
+            do { try await queue(permit, card: card) }
             catch { message = "Queue confirmation failed. Check task status before retrying or denying." }
         case .denied: message = "Approval denied or expired. Nothing was started."
         default: message = "Action needs review."
         }
     }
-    private func queue(_ permit: ExecutionPermit, card: ApprovalCard) throws {
-        tasks = try deliver(permit)
+    private func queue(_ permit: ExecutionPermit, card: ApprovalCard) async throws {
+        if let suggestionID = card.suggestionID {
+            await suggestionEngine?.authorized(cardID: suggestionID, revision: card.suggestionRevision, now: Date(timeIntervalSince1970: Double(now()) / 1000))
+            authorizedSuggestions[suggestionID] = permit.command.command_id
+            taskSuggestions[permit.command.command_id] = suggestionID
+        }
+        if let agentControl {
+            tasks = try agentControl.enqueue(permit, dependencies: card.dependencies, replacingCommandID: card.replacingCommandID, expectedRoute: card.route)
+        } else { tasks = try deliver(permit) }
+
         pendingPermits.removeValue(forKey: card.id); approval = nil
     }
     public func dismissApproval() {
         if let approval {
             let next: ProposalState = pendingPermits.removeValue(forKey: approval.id) == nil ? .dismissed : .cancelled
             _ = policy.transition(requestID: approval.id, to: next)
+        }
+        if let id = approval?.suggestionID {
+            Task { await suggestionEngine?.dismiss(cardID: id, now: Date(timeIntervalSince1970: Double(now()) / 1000)) }
         }
         approval = nil
     }
@@ -485,8 +583,56 @@ public struct ApprovalCard: Identifiable, Sendable {
         do { try await historyStore.delete(id: id, now: now()); await refresh() }
         catch { message = "Unable to delete history." }
     }
+    public func refreshTasks() async {
+        guard let agentControl else { return }
+        tasks = agentControl.router.snapshot()
+        for task in tasks {
+            guard let id = taskSuggestions[task.command.command_id] else { continue }
+            if task.state == .succeeded || task.state == .failed || task.state == .cancelled {
+                await suggestionEngine?.completed(cardID: id, succeeded: task.state == .succeeded && task.outcome == .ok,
+                    now: Date(timeIntervalSince1970: Double(now()) / 1000))
+            }
+        }
+        suggestions = await suggestionEngine?.cards(now: Date(timeIntervalSince1970: Double(now()) / 1000)) ?? suggestions
+    }
+    public func cancelTask(_ task: QueuedTask) async {
+        do { try await agentControl?.cancel(task); await refreshTasks() }
+        catch { message = "Cancellation is pending. Reconnect and check the computer." }
+    }
+    public func reviewRestoredTask(_ task: QueuedTask) {
+        guard task.state == .queued, task.hold == .reapprovalRequired,
+              let device = devices.first(where: { $0.device_id == task.command.destination_id }),
+              let agentControl,
+              agentControl.router.snapshot().contains(where: { $0.command == task.command }) else { return }
+        do {
+            let route = try agentControl.resolve(device: device.device_id, project: task.rules.project, providerSession: task.command.provider_session_id)
+            guard route.session == task.permittedDestinations.first?.session else { throw RouterError.invalidAuthorization }
+            let session = input.session(account: accountID, actor: actorID, session: UUID().uuidString,
+                device: device.device_id, project: task.rules.project, destinationKind: .software)
+            let decision = policy.submit(try ProtocolCodec.encode(task.command.immutable_task_payload),
+                input: input.activation(session: session, kind: .inferred, expiresAt: now() + 120_000))
+            if case .suggestion(let preview) = decision {
+                approval = ApprovalCard(preview: preview, destination: device, session: session, route: route,
+                    dependencies: task.rules.dependencies ?? [], replacingCommandID: task.command.command_id)
+            }
+        } catch { message = "The original session is unavailable. Choose and review a new action." }
+    }
+    /// Settings event only. A voice request can never install or extend a grant.
+    public func grantTargetSelection(device: DeviceInfo, project: String) {
+        guard (devices + [picker.phone]).contains(device), device.capabilities.contains(.receive_text) else { return }
+        let session = input.session(account: accountID, actor: actorID, session: UUID().uuidString,
+            device: device.device_id, project: project, destinationKind: .software)
+        let grant = input.grant(session: session, capability: .receive_text, risk: .read_display, expiresAt: now() + 900_000)
+        if policy.installGrant(grant) { grants.append(grant) }
+        else { message = "Permission could not be saved." }
+    }
+    public func revokeGrant(_ grant: GrantEvidence) {
+        if policy.revokeGrant(grant.id, session: grant.session) { grants.removeAll { $0.id == grant.id } }
+    }
     public func revoke(_ id: String) async {
         stop(); dismissApproval()
+        agentControl?.revoked(id)
+        for grant in grants where grant.session.device == id { revokeGrant(grant) }
         let removed = Set(suggestionTargets.filter { $0.value.device_id == id }.map(\.key))
         suggestions.removeAll { removed.contains($0.id) }
         for cardID in removed { suggestionTargets.removeValue(forKey: cardID) }

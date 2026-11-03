@@ -12,6 +12,11 @@ struct DevicesView: View {
         @Bindable var pairing = host.pairing
         @Bindable var remote = host.remote
         List {
+            Section("This phone") {
+                Text("Account: " + host.model.accountID).font(.caption).textSelection(.enabled)
+                Text("Phone: " + host.model.phoneID).font(.caption).textSelection(.enabled)
+                Text("Use this account and phone identity when enrolling agent access on your computer.").font(.footnote)
+            }
             Section("Computers") {
                 if let notice = host.link.notice { Text(notice).foregroundStyle(.secondary) }
                 ForEach(host.model.devices, id: \.device_id) { device in
@@ -32,6 +37,9 @@ struct DevicesView: View {
                     Text("Agent executor").tag(DeviceInfoRole.agent)
                     Text("Both").tag(DeviceInfoRole.both)
                 }
+                Toggle("Allow this phone to dispatch agent commands", isOn: $pairing.allowAgentCommands)
+                    .disabled(pairing.role == .text_receiver)
+                Text("Agent access is separate from the role label. Only explicitly enabled capabilities confirmed by this computer are enrolled.").font(.footnote)
                 Button("Scan QR code", systemImage: "qrcode.viewfinder") { scan = true }
                 TextField("Pairing code or QR payload", text: $pairing.code, axis: .vertical)
                     .textInputAutocapitalization(.never).autocorrectionDisabled().privacySensitive()

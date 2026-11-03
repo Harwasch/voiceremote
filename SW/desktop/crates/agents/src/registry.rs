@@ -18,7 +18,7 @@ pub enum CapabilityProfile {
     WorkspaceWrite,
 }
 impl CapabilityProfile {
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     pub(crate) fn sandbox(self) -> &'static str {
         match self {
             Self::ReadOnly => "read-only",

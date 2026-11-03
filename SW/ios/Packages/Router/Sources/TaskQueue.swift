@@ -48,6 +48,12 @@ public struct QueuedTask: Codable, Equatable, Sendable {
 public protocol TaskQueueStore: Sendable {
     func load() throws -> [QueuedTask]
     func save(_ tasks: [QueuedTask], replacing previous: [QueuedTask]) throws
+    /// App retention can hide retired payloads from in-memory routing snapshots
+    /// without changing the compare-and-swap snapshot used by persistence.
+    func retainedTasks(_ tasks: [QueuedTask]) -> [QueuedTask]
+}
+public extension TaskQueueStore {
+    func retainedTasks(_ tasks: [QueuedTask]) -> [QueuedTask] { tasks }
 }
 
 /// Exclusive process-lifetime lease, private files, atomic rename and fsync.
@@ -102,6 +108,7 @@ public final class FileTaskQueueStore: TaskQueueStore, @unchecked Sendable {
     private let store: any TaskQueueStore
     private var tasks: [QueuedTask]
     private var storageUncertain = false
+    private var confirmedSuccesses = Set<String>()
 
     public init(store: any TaskQueueStore, policy: PolicyGate) throws {
         self.policy = policy
@@ -113,7 +120,10 @@ public final class FileTaskQueueStore: TaskQueueStore, @unchecked Sendable {
         for index in tasks.indices {
             let task = tasks[index]
             do { try verify(task) }
-            catch { tasks[index].hold = .reapprovalRequired }
+            catch {
+                if task.state == .queued { tasks[index].hold = .reapprovalRequired }
+                else if task.state == .running || task.state == .dispatched { tasks[index].hold = .deliveryUnknown }
+            }
             guard keys.insert(Self.key(task.command)).inserted,
                   commands.insert([task.command.account_id, task.command.command_id]).inserted else {
                 throw RouterError.conflictingKey
@@ -165,7 +175,7 @@ public final class FileTaskQueueStore: TaskQueueStore, @unchecked Sendable {
     }
 
     @discardableResult
-    public func enqueue(_ permit: ExecutionPermit, rules: RoutingRules, destinations allowed: [Destination]) throws -> QueuedTask {
+    public func enqueue(_ permit: ExecutionPermit, rules: RoutingRules, destinations allowed: [Destination], replacingCommandID: String? = nil) throws -> QueuedTask {
         let c = permit.command
         _ = try policy.verifyExecution(command: c, immutablePreview: permit.immutablePreview, expiresAt: permit.expiresAt)
         try Self.validate(c, rules, allowed)
@@ -177,11 +187,22 @@ public final class FileTaskQueueStore: TaskQueueStore, @unchecked Sendable {
             return task
         }
         let task = QueuedTask(command: c, immutablePreview: permit.immutablePreview, permitExpiresAt: permit.expiresAt, rules: rules, permittedDestinations: allowed, updatedAt: c.updated_at)
-        try persist(tasks + [task])
+        var next = tasks
+        if let replacing = replacingCommandID {
+            guard let index = next.firstIndex(where: { $0.command.command_id == replacing }),
+                  next[index].state == .queued, next[index].hold == .reapprovalRequired,
+                  next[index].command.account_id == c.account_id,
+                  next[index].command.authenticated_actor == c.authenticated_actor,
+                  next[index].command.destination_id == c.destination_id,
+                  next[index].command.immutable_task_payload == c.immutable_task_payload else { throw RouterError.invalidAuthorization }
+            next[index].state = .cancelled; next[index].hold = nil; next[index].cancellationRequested = true
+        }
+        next.append(task)
+        try persist(next)
         return task
     }
 
-    public func snapshot() -> [QueuedTask] { tasks }
+    public func snapshot() -> [QueuedTask] { store.retainedTasks(tasks) }
 
     private func persist(_ next: [QueuedTask]) throws {
         guard !storageUncertain else { throw RouterError.persistence }
@@ -204,6 +225,14 @@ public final class FileTaskQueueStore: TaskQueueStore, @unchecked Sendable {
             do { try verify(task) }
             catch {
                 var held = tasks; held[index].hold = .reapprovalRequired
+                try persist(held); continue
+            }
+            if let dependencies = task.rules.dependencies, !dependencies.allSatisfy({ id in
+                tasks.contains { $0.command.command_id == id && $0.command.account_id == task.command.account_id &&
+                    $0.command.authenticated_actor == task.command.authenticated_actor && $0.state == .succeeded &&
+                    $0.outcome == .ok && !$0.cancellationRequested && confirmedSuccesses.contains(id) }
+            }) {
+                var held = tasks; held[index].hold = .predecessorRequired
                 try persist(held); continue
             }
             let requested = task.rules.explicitTarget ?? task.rules.selectedTarget ??
@@ -255,6 +284,22 @@ public final class FileTaskQueueStore: TaskQueueStore, @unchecked Sendable {
         }
     }
 
+    /// A fresh, sealed cancellation permit remains usable when the original task
+    /// expired or was restored under a new gate. Never restore execution authority.
+    public func recordCancellation(_ permit: ExecutionPermit) throws {
+        _ = try policy.verifyExecution(command: permit.command, immutablePreview: permit.immutablePreview, expiresAt: permit.expiresAt)
+        let c = permit.command
+        guard case .cancelTaskTool(let tool) = c.immutable_task_payload,
+              let index = tasks.firstIndex(where: { $0.command.command_id == tool.command_id &&
+                $0.command.account_id == c.account_id && $0.command.authenticated_actor == c.authenticated_actor &&
+                $0.command.destination_id == c.destination_id }) else { throw RouterError.invalidAuthorization }
+        guard !Self.terminal(tasks[index].state) else { return }
+        var next = tasks; next[index].cancellationRequested = true
+        if next[index].state == .queued { next[index].state = .cancelled; next[index].hold = nil }
+        else { next[index].hold = .cancellationPending }
+        try persist(next)
+    }
+
     /// The app authenticates the caller. Cancellation is not proof physical work stopped.
     public func cancel(accountID: String, commandID: String, targets: [any Target]) throws {
         guard let index = tasks.firstIndex(where: { $0.command.account_id == accountID && $0.command.command_id == commandID }) else { return }
@@ -289,7 +334,10 @@ public final class FileTaskQueueStore: TaskQueueStore, @unchecked Sendable {
               tasks[i].route?.destination.session == session else { throw RouterError.invalidStatus }
         let old = tasks[i].state
         let new = status.execution_state
-        if old == new && Self.terminal(old) { return }
+        if old == new && Self.terminal(old) {
+            if new == .succeeded, status.outcome == .ok { confirmedSuccesses.insert(status.command_id) }
+            return
+        }
         guard !Self.terminal(old), old != .queued, new != .queued,
               !(old == .running && new == .dispatched),
               new != .succeeded || status.outcome == .ok else { throw RouterError.invalidStatus }
@@ -299,6 +347,7 @@ public final class FileTaskQueueStore: TaskQueueStore, @unchecked Sendable {
         next[i].updatedAt = status.updated_at
         next[i].hold = next[i].cancellationRequested && !Self.terminal(new) ? .cancellationPending : nil
         try persist(next)
+        if new == .succeeded, status.outcome == .ok { confirmedSuccesses.insert(status.command_id) }
     }
 
     private static func terminal(_ state: ExecutionState) -> Bool {

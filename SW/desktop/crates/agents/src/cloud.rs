@@ -129,7 +129,7 @@ pub(crate) fn result(session: &SessionIdentity, finish: Finish) -> ProcessResult
     });
     result
 }
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn task_id(provider: CloudProvider, text: &str) -> Option<String> {
     let id = match provider {
         CloudProvider::Codex => text
@@ -159,7 +159,7 @@ fn task_id(provider: CloudProvider, text: &str) -> Option<String> {
     }
     Some(id.into())
 }
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 pub(crate) fn submitted(session: &SessionIdentity, bytes: &[u8], exit_ok: bool) -> ProcessResult {
     let mut result = result(
         session,
@@ -196,7 +196,7 @@ pub(crate) fn submitted(session: &SessionIdentity, bytes: &[u8], exit_ok: bool) 
     result
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 impl crate::CliAdapter {
     pub(crate) async fn cloud_repository(&self, session: &SessionIdentity) -> bool {
         let Some(config) = &session.cloud else {

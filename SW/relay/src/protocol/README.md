@@ -23,3 +23,5 @@ integration are **unverified** future work.
 Strict parsing rejects duplicate keys and invalid Unicode; lexical integer paths feed the private Ajv integer check.
 
 Generated Records now include delivery/readiness/control variants (capture requests require sequence and absolute expiry) and activity-age/listening metadata. Shared-vector tests validate against the original schemas; relay execution and room APIs are unchanged.
+
+Paired agent inventory, exact-session retained-preview dispatch and durable task queries are generated from SYS/protocol. Shared vectors cover the new typed records and reject added authority fields.

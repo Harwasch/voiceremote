@@ -9,6 +9,7 @@ flowchart LR
 
 | File | What | Status |
 |---|---|---|
+| [windows_job.rs](windows_job.rs) | Suspended start, kill-on-close Job Object, zero-active-process cleanup confirmation | 🟡 Windows cross-compile; runtime unverified |
 | [lib.rs](lib.rs) | Private command admission; role/capability checks and durable replay receipts | ✅ synthetic tests |
 | [registry.rs](registry.rs) | Strict owner TOML, exact workspace/session identity, bounded owner metadata discovery | ✅ synthetic tests |
 | [process.rs](process.rs) | `AgentAdapter`, opt-in cloud handoff, subprocess exit/JSON checks, cleanup exit-status retention regression, opt-in smoke | ✅ fake CLIs; live providers unverified |
@@ -18,3 +19,6 @@ flowchart LR
 
 Start at `receiver::serve`; REQ-34/41/44/60.
 See [boundaries](../README.md) before embedding.
+
+
+Inventory, retained-preview dispatch and durable status queries enter only through the paired receiver. HTTPS resource actions hand off to the selected CLI. See [supported entry points](../README.md#supported-command-entry-points-checked-2026-11-02).

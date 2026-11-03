@@ -19,3 +19,5 @@ exposed to JavaScript. The overlay has no script and is configured nonfocusable;
 remains **unverified**.
 
 Camera-free entry copies the full one-use invitation. Provisioning password input is cleared before the invoke and is absent from saved settings. Listening comes from the phone’s actual `listening` report; a requested selection is not a live mic indicator.
+
+The agent allowlist path is a separate explicit enrollment choice. Agent/Both without that path adds no execution capability. GUI acceptance remains **unverified**.

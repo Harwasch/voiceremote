@@ -8,8 +8,15 @@ import VoiceRemoteProtocol
 /// Apple transport/Keychain adapters own discovery, code lookup and persistence.
 @MainActor public protocol ComputerPairing {
     func begin(_ invitationOrCode: String, role: DeviceInfoRole) async throws -> String
+    func begin(_ invitationOrCode: String, role: DeviceInfoRole, allowAgentCommands: Bool) async throws -> String
     func confirm(_ phrase: String) async throws -> DeviceInfo
     func cancel() async
+}
+public extension ComputerPairing {
+    func begin(_ invitationOrCode: String, role: DeviceInfoRole, allowAgentCommands: Bool) async throws -> String {
+        guard !allowAgentCommands else { throw PairingError.invalidState }
+        return try await begin(invitationOrCode, role: role)
+    }
 }
 #if canImport(Darwin)
 @Observable
@@ -20,6 +27,7 @@ import VoiceRemoteProtocol
     public private(set) var error: String?
     public var code = ""
     public var role: DeviceInfoRole = .text_receiver
+    public var allowAgentCommands = false
     private let backend: any ComputerPairing
     private var epoch = UUID()
     public init(backend: any ComputerPairing) { self.backend = backend }
@@ -27,7 +35,7 @@ import VoiceRemoteProtocol
         guard !busy else { return }
         let token = UUID(); epoch = token; busy = true; error = nil; phrase = nil
         do {
-            let result = try await backend.begin(value ?? code, role: role)
+            let result = try await backend.begin(value ?? code, role: role, allowAgentCommands: allowAgentCommands)
             guard epoch == token else { return }; phrase = result
         } catch { if epoch == token { self.error = "Unable to pair. Check the code, network and expiry." } }
         if epoch == token { busy = false }

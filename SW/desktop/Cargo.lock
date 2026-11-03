@@ -5358,6 +5358,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-tungstenite 0.28.0",
+ "voiceremote-agents",
  "voiceremote-core",
  "voiceremote-inject-linux",
  "voiceremote-inject-windows",

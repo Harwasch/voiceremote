@@ -20,3 +20,5 @@ cryptography remain in core. Capture requests use the existing capture-state
 record; phone interpretation and Auto pre-insertion announcements are unverified.
 
 `backend.rs` owns dual-path pairing/resume and transient provisioning; `control.rs` correlates phone requests, presentation readiness and revocation notices. `main.rs` acknowledges only successful tray/overlay presentation calls. Stalled-presentation ordering has an encrypted session regression.
+
+`backend::Settings.agents_config` is explicit owner opt-in. It validates account/host against the owner allowlist before enrollment and launches the same agents receiver as the headless CLI.

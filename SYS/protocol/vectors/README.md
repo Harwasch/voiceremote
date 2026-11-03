@@ -32,3 +32,5 @@ after any edit. Trace: [REQ-59](../../requirements.md#extensibility),
 remain **unverified**.
 
 Delivery vectors include prepared dictation, all outcome/control-result variants, actual listening independent of selection, invalid capture TTL, required request sequence/absolute expiry and out-of-range activity age.
+
+AgentSession, AgentInventoryRequest, AgentInventory, AgentDispatch and AgentTaskQuery have typed valid vectors and closed-object rejection vectors across all three codecs.

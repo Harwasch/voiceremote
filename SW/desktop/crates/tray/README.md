@@ -37,3 +37,5 @@ Linux. Tauri's [tray](https://v2.tauri.app/learn/system-tray/) and
 No Hex/Handy/VoiceInk code was copied.
 
 Pairing now offers QR plus a complete copyable invitation; the dead display hash is removed. Optional room-provisioning input is transient. Private LAN stays available with relay fallback; GUI readiness gates insertion (native GUI **unverified**).
+
+Agent/Both plus an explicit owner allowlist path enables paired agent capabilities and the shared bounded agent receiver. Role selection alone grants none. Pairing hands off via a fresh pinned resume; native GUI behavior remains **unverified**.

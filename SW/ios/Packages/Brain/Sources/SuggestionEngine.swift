@@ -1,6 +1,6 @@
 import Foundation
 
-public enum SuggestionState: String, Sendable { case suggested, edited, approved, dismissed, expired }
+public enum SuggestionState: String, Sendable { case suggested, edited, reviewing, approved, succeeded, failed, dismissed, expired }
 
 public struct TranscriptSegment: Sendable {
     public let id: String
@@ -10,9 +10,11 @@ public struct TranscriptSegment: Sendable {
     public let isComplete: Bool
     /// Change this when conversation, target or speaker scope changes.
     public let contextID: String
-    public init(id: String, revision: Int, text: String, isFinal: Bool, isComplete: Bool, contextID: String) {
+    /// Supplied by the capture composition root, never inferred from model output.
+    public let commandContext: Bool
+    public init(id: String, revision: Int, text: String, isFinal: Bool, isComplete: Bool, contextID: String, commandContext: Bool = false) {
         self.id = id; self.revision = revision; self.text = text; self.isFinal = isFinal
-        self.isComplete = isComplete; self.contextID = contextID
+        self.isComplete = isComplete; self.contextID = contextID; self.commandContext = commandContext
     }
 }
 
@@ -158,7 +160,7 @@ public actor SuggestionEngine {
         defer { inFlightTokens.remove(token) }
         let linked = isLinkedPlan(segment.text)
         let request = BrainRequest(accountID: accountID, transcript: segment.text, context: context,
-                                   workload: linked ? .multiStep : .ambient)
+                                   workload: linked ? .multiStep : (segment.commandContext ? .automatic : .ambient))
         let response: BrainResponse
         do { response = try await brain.propose(request) }
         catch {
@@ -206,23 +208,38 @@ public actor SuggestionEngine {
         return storage[index]
     }
 
-    /// The only transition to Approved. Policy authenticates input and computes risk/scope/credentials.
+    /// Opening a review is not approval. Only completed authorized predecessors unblock a plan.
     public func tap(_ event: SuggestionTap, now: Date) -> TappedSuggestion? {
         advance(now)
         guard !muted, let index = storage.firstIndex(where: { $0.id == event.cardID }),
               storage[index].reviewable, storage[index].revision == event.previewRevision,
               storage[index].dependsOn.allSatisfy({ dependency in
-                  storage.contains { $0.id == dependency && $0.state == .approved }
+                  storage.contains { $0.id == dependency && $0.state == .succeeded }
               }) else { return nil }
-        replace(index, state: .approved)
+        replace(index, state: .reviewing)
         let card = storage[index]
         return TappedSuggestion(cardID: card.id, previewRevision: card.revision,
                                 proposal: card.proposal, dependsOn: card.dependsOn)
     }
 
+    /// Called by the phone only after Policy issues a permit; still no execution authority here.
+    public func authorized(cardID: UUID, revision: Int, now: Date) {
+        advance(now)
+        guard let index = storage.firstIndex(where: { $0.id == cardID }),
+              storage[index].revision == revision, storage[index].state == .reviewing else { return }
+        replace(index, state: .approved)
+    }
+    /// Authenticated executor outcomes, never proposal/card state, release dependencies.
+    public func completed(cardID: UUID, succeeded: Bool, now: Date) {
+        advance(now)
+        guard let index = storage.firstIndex(where: { $0.id == cardID }), storage[index].state == .approved else { return }
+        replace(index, state: succeeded ? .succeeded : .failed)
+        if !succeeded { expireDependents(of: cardID) }
+    }
+
     public func dismiss(cardID: UUID, now: Date) {
         advance(now)
-        if let index = storage.firstIndex(where: { $0.id == cardID }), storage[index].reviewable {
+        if let index = storage.firstIndex(where: { $0.id == cardID }), (storage[index].reviewable || storage[index].state == .reviewing) {
             replace(index, state: .dismissed); expireDependents(of: cardID)
         }
     }
@@ -235,7 +252,7 @@ public actor SuggestionEngine {
     private func cancelInPlan(_ planID: UUID, ordinal: Int) {
         guard let order = plans[planID], ordinal > 0, ordinal <= order.count else { return }
         let id = order[ordinal - 1]
-        if let index = storage.firstIndex(where: { $0.id == id }), storage[index].reviewable {
+        if let index = storage.firstIndex(where: { $0.id == id }), (storage[index].reviewable || storage[index].state == .reviewing) {
             replace(index, state: .dismissed); expireDependents(of: id)
         }
     }
@@ -252,13 +269,13 @@ public actor SuggestionEngine {
     }
 
     private func expireSegment(_ id: String) {
-        for index in storage.indices where storage[index].segmentID == id && storage[index].reviewable {
+        for index in storage.indices where storage[index].segmentID == id && (storage[index].reviewable || storage[index].state == .reviewing) {
             let cardID = storage[index].id; replace(index, state: .expired); expireDependents(of: cardID)
         }
     }
     private func expireDependents(of id: UUID) {
         var unavailable: Set<UUID> = [id]
-        for index in storage.indices where storage[index].reviewable {
+        for index in storage.indices where storage[index].reviewable || storage[index].state == .reviewing {
             if storage[index].dependsOn.contains(where: unavailable.contains) {
                 unavailable.insert(storage[index].id); replace(index, state: .expired)
             }

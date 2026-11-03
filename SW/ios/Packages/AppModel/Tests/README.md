@@ -31,3 +31,6 @@ Delivery regressions cover positive outcome authentication/restart, remote-start
 | [PrivacyRetentionTests.swift](PrivacyRetentionTests.swift) | Legacy history migration, dormant/relaunch expiry, durable held-text review, task payload expiry/replay tombstones, consent withdrawal, benchmark-export expiry | ✅ Portable synthetic tests; REQ-56 |
 
 OfflineSyncTests additionally checks pending transcript expiry, removal of the duplicate text before remote deletion acknowledgement, and retention of source on failed STT/cancellation. HeldDictationTests verifies that expired Send requires a retention choice.
+[AgentControlTests.swift](AgentControlTests.swift) covers actor/request/connection spoofing, explicit capabilities, exact workspace/profile, offline release, authenticated status, changed profile holds, predecessor refusal, restart review and revoked old permits. AppModelTests covers correction text across silence slices without early inference.
+
+AgentControl retention regression uses the real RetainedTaskStore, expires an offline task, reconnects, and verifies that neither disk payload restoration nor agent dispatch occurs.

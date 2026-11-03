@@ -27,3 +27,5 @@ Start with the interface; [integration contract](../INTEGRATION.md). Trace: REQ-
 The host selects a model/API version matching relay deployment settings. Proofs add no vendor credential and grant no action authority.
 
 ClaudeBrain bounds HTTP accumulation per response/chunk (1 MiB, 60-second resource timeout), retaining redirect refusal. BrainBenchmark loads the reviewed 50-command set and exports recognized spoken input separately from expected reading prompts. Missing measurements remain TBD; native/provider performance **unverified**.
+
+SuggestionEngine separates review, authorization and successful completion. Command context is supplied by the phone. BrainRouter tolerates terminal sentence punctuation for simple commands while linked/multi-step content still takes the complex route.

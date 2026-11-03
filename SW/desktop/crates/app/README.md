@@ -30,3 +30,5 @@ request delivery, not a microphone transition. Phone interpretation is **unverif
 `bash SYS/tests/e2e/run.sh` verifies actual Worker/Swift WebSocket and LAN
 exchanges with the opt-in fixed synthetic TextInjector, including resume/revoke
 and a real persisted stale queue.
+
+Agent enrollment is an explicit `pair --allow-agents` choice, separate from text pairing. Run the paired node with `run --headless --agents-config <owner.toml>`; see [agent entry points and platform limits](../agents/README.md).

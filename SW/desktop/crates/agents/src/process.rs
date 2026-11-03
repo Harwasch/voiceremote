@@ -1,15 +1,15 @@
 //! Bounded subprocess execution. Transcript bytes never enter argv or diagnostics.
 use crate::registry::{Provider, SessionIdentity};
-#[cfg(any(unix, test))]
+#[cfg(any(unix, windows, test))]
 use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 use serde_json::Value;
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 use std::process::{ExitStatus, Stdio};
 use std::{collections::BTreeMap, ffi::OsString, time::Duration};
 use tokio::sync::watch;
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWriteExt},
     process::Command,
@@ -46,6 +46,22 @@ impl Default for CliAdapter {
     }
 }
 impl CliAdapter {
+    fn executable(&self, name: &str) -> OsString {
+        #[cfg(windows)]
+        if let Some(path) = self.environment.get(std::ffi::OsStr::new("PATH")) {
+            // Native installs and npm's installed command shim are supported.
+            // Prompt bytes stay on stdin; session IDs and all argv flags are closed.
+            for directory in std::env::split_paths(path) {
+                for extension in ["exe", "cmd"] {
+                    let file = directory.join(format!("{name}.{extension}"));
+                    if file.is_file() {
+                        return file.into_os_string();
+                    }
+                }
+            }
+        }
+        name.into()
+    }
     /// Trusted launcher environment (same allowlist as Default); useful for fake CLIs.
     pub fn with_path(path: OsString) -> Self {
         let mut adapter = Self::default();
@@ -135,7 +151,7 @@ impl Drop for ProcessTree {
         }
     }
 }
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 impl CliAdapter {
     pub(crate) async fn cloud_capture(
         &self,
@@ -144,7 +160,7 @@ impl CliAdapter {
         session: &SessionIdentity,
         limit: usize,
     ) -> Option<(bool, Vec<u8>)> {
-        let mut command = Command::new(executable);
+        let mut command = Command::new(self.executable(executable));
         command
             .args(args)
             .current_dir(&session.workspace)
@@ -155,18 +171,35 @@ impl CliAdapter {
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .kill_on_drop(true);
+        #[cfg(windows)]
+        command.creation_flags(4);
         tokio::time::timeout(Duration::from_secs(2), async {
+            #[cfg(windows)]
+            let job = crate::windows_job::Job::new().ok()?;
             let mut child = command.spawn().ok()?;
+            #[cfg(windows)]
+            if job
+                .assign_and_resume(child.raw_handle()?, child.id()?)
+                .is_err()
+            {
+                let _ = child.kill().await;
+                return None;
+            }
             let stdout = child.stdout.take()?;
             let (out, status) = tokio::try_join!(bounded(stdout, limit), async {
                 child.wait().await.map_err(anyhow::Error::from)
             })
             .ok()?;
+            #[cfg(windows)]
+            if !job.terminate().await {
+                return None;
+            }
             Some((status.success(), out))
         })
         .await
         .ok()?
     }
+    #[cfg(unix)]
     async fn control(&self, args: &[&str]) -> Option<std::process::Output> {
         let mut command = Command::new("systemctl");
         command
@@ -194,11 +227,13 @@ impl CliAdapter {
         .ok()?
     }
 
+    #[cfg(unix)]
     async fn user_bus(&self) -> bool {
         self.control(&["--user", "show", "--property=Version", "--value"])
             .await
             .is_some_and(|o| o.status.success())
     }
+    #[cfg(unix)]
     async fn stop_scope(&self, unit: &str) -> bool {
         let _ = self
             .control(&["--user", "kill", "--kill-whom=all", "--signal=KILL", unit])
@@ -225,14 +260,14 @@ impl CliAdapter {
         })
     }
 }
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 async fn bounded(input: impl AsyncRead + Unpin, limit: usize) -> Result<Vec<u8>> {
     let mut bytes = Vec::new();
     input.take(limit as u64 + 1).read_to_end(&mut bytes).await?;
     ensure!(bytes.len() <= limit, "output bound");
     Ok(bytes)
 }
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn structured_success(provider: Provider, bytes: &[u8], session: &str) -> bool {
     match provider {
         Provider::Claude => serde_json::from_slice::<Value>(bytes).is_ok_and(|v| {
@@ -293,9 +328,8 @@ impl CliAdapter {
         {
             return crate::cloud::result(session, Finish::UnsupportedAction);
         }
-        // The headless node in task 12 is Linux. Refuse rather than start an
-        // uncontained Windows child until a suspended-start Job Object exists.
-        #[cfg(not(unix))]
+        // Other platforms fail closed before spawning.
+        #[cfg(not(any(unix, windows)))]
         {
             let _ = (instruction, timeout, output_limit, cancel);
             return if cloud {
@@ -304,7 +338,7 @@ impl CliAdapter {
                 ProcessResult::no_process(Finish::UnsupportedPlatform)
             };
         }
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         {
             let executable = match session.provider {
                 Provider::Claude => "claude",
@@ -324,7 +358,10 @@ impl CliAdapter {
             if cloud && !self.cloud_repository(session).await {
                 return crate::cloud::result(session, Finish::NotConfigured);
             }
+            #[cfg(unix)]
             let has_bus = self.user_bus().await;
+            #[cfg(windows)]
+            let has_bus = false;
             if *cancel.borrow() {
                 return if cloud {
                     crate::cloud::result(session, Finish::Cancelled)
@@ -368,7 +405,7 @@ impl CliAdapter {
                 ]);
                 command
             } else {
-                Command::new(executable)
+                Command::new(self.executable(executable))
             };
             match session.provider {
                 Provider::Claude => {
@@ -436,7 +473,15 @@ impl CliAdapter {
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .kill_on_drop(true);
+            #[cfg(unix)]
             command.process_group(0);
+            #[cfg(windows)]
+            command.creation_flags(4); // CREATE_SUSPENDED
+            #[cfg(windows)]
+            let job = match crate::windows_job::Job::new() {
+                Ok(job) => job,
+                Err(_) => return ProcessResult::no_process(Finish::SpawnFailed),
+            };
             let Ok(mut child) = command.spawn() else {
                 return if cloud {
                     crate::cloud::result(session, Finish::SpawnFailed)
@@ -444,6 +489,15 @@ impl CliAdapter {
                     ProcessResult::no_process(Finish::SpawnFailed)
                 };
             };
+            #[cfg(windows)]
+            if job
+                .assign_and_resume(child.raw_handle().unwrap(), child.id().unwrap())
+                .is_err()
+            {
+                let _ = child.kill().await;
+                return ProcessResult::no_process(Finish::SpawnFailed);
+            }
+            #[cfg(unix)]
             let mut tree = ProcessTree {
                 pid: child.id().expect("fresh process") as i32,
                 unit: unit.clone(),
@@ -477,22 +531,28 @@ impl CliAdapter {
             };
             // A process group is only best effort: real tool processes can
             // setsid/setpgid. Only an inactive systemd scope confirms cleanup.
+            #[cfg(unix)]
             unsafe {
                 libc::kill(-tree.pid, libc::SIGKILL);
             }
+            #[cfg(unix)]
             let termination_confirmed = if let Some(unit) = &unit {
                 self.stop_scope(unit).await
             } else {
                 false
             };
-            tree.armed = false;
+            #[cfg(unix)]
+            {
+                tree.armed = false;
+            }
+            #[cfg(windows)]
+            let termination_confirmed = job.terminate().await;
             match result {
                 Ok((out, status)) => {
-                    use std::os::unix::process::ExitStatusExt;
                     if cloud {
                         let mut result = crate::cloud::submitted(session, &out, status.success());
                         result.exit_code = status.code();
-                        result.signal = status.signal();
+                        result.signal = exit_signal(&status);
                         result.termination_confirmed = termination_confirmed;
                         result.scope_unit = unit;
                         if result.finish == Finish::CloudSubmitted {
@@ -520,7 +580,7 @@ impl CliAdapter {
                             Finish::InvalidOutput
                         },
                         exit_code: status.code(),
-                        signal: status.signal(),
+                        signal: exit_signal(&status),
                         success: !unconfirmed && status.success() && valid,
                         termination_confirmed,
                         scope_unit: unit.clone(),
@@ -532,7 +592,7 @@ impl CliAdapter {
                         .await
                         .ok()
                         .and_then(Result::ok);
-                    use std::os::unix::process::ExitStatusExt;
+
                     ProcessResult {
                         finish: if cloud {
                             Finish::Unconfirmed
@@ -542,7 +602,7 @@ impl CliAdapter {
                             Finish::Unconfirmed
                         },
                         exit_code: status.as_ref().and_then(ExitStatus::code),
-                        signal: status.as_ref().and_then(ExitStatusExt::signal),
+                        signal: status.as_ref().and_then(exit_signal),
                         success: false,
                         termination_confirmed,
                         scope_unit: unit.clone(),
@@ -689,5 +749,19 @@ mod tests {
         assert_eq!(result.signal, Some(9));
         assert!(!result.success);
         Ok(())
+    }
+}
+
+#[cfg(any(unix, windows))]
+fn exit_signal(status: &ExitStatus) -> Option<i32> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        status.signal()
+    }
+    #[cfg(windows)]
+    {
+        let _ = status;
+        None
     }
 }

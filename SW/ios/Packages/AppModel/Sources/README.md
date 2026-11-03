@@ -8,6 +8,7 @@ flowchart LR
 
 | File | What | Status |
 |---|---|---|
+| [AgentControl.swift](AgentControl.swift) | Paired inventory/identity, live Router targets, retained preview dispatch, status/query/cancel and revocation | ✅ Synthetic tests; Apple UI unverified |
 | [AppLifecycle.swift](AppLifecycle.swift) | Portable route policy and shared cold-start runtime bootstrap | ✅ Linux regressions |
 | [RegisteredRouting.swift](RegisteredRouting.swift) | Real paired-registry destinations, durable Router holds; no fabricated provider sessions | ✅ Real Router integration tests |
 | [PeerStore.swift](PeerStore.swift) | Private enrollment/tombstone and synchronous settings persistence; restore into Core | ✅ Linux reopen tests; iOS Data Protection **unverified** |
@@ -34,3 +35,9 @@ Delivery now persists authenticated positive outcomes; unconfirmed Send taps que
 | [RetainedTaskStore.swift](RetainedTaskStore.swift) | Seven-day disk payload/preview expiry; hashed command/idempotency tombstones; account validation; existing queue migration | ✅ Portable tests; Apple host **unverified** |
 | [AppHistoryStore.swift](AppHistoryStore.swift) | Seven days; expired held text requires durable Keep/Delete; warning state blocks Send | ✅ Relaunch/dormant/choice tests |
 | [RemoteOfflineSync.swift](RemoteOfflineSync.swift) | No transcript copy after history save; pending text expires; audio survives until STT | ✅ Synthetic recovery tests |
+
+PairingFlow requires a separate explicit agent-access choice. AppModel retains command text across slices, carries linked dependencies, exposes restored review and exact scoped target-selection grant/revoke controls.
+
+AgentControl uses a temporary immutable preview lookup per routing pass; task payload persistence remains with the host’s RetainedTaskStore.
+
+RetainedTaskStore also filters live Router snapshots; an expired task cannot be selected from a stale queue to restore its text through a new approval.

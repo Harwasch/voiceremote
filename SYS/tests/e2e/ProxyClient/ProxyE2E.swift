@@ -11,6 +11,7 @@ import Brain
 /// provisioning marker and vendor credentials never enter this phone process.
 @main struct ProxyE2E {
     static func main() async throws {
+        if CommandLine.arguments.dropFirst().first == "agents" { try await AgentE2E.run(); return }
         guard CommandLine.arguments.count == 2, let line = readLine(),
               let origin = URL(string: CommandLine.arguments[1]) else { throw PairingError.invalidState }
         let invitation = try PairingInvitation(code: line, expectedAccount: "proxy-e2e", clock: SystemPairingClock())

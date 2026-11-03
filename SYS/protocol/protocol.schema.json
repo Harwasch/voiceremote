@@ -984,6 +984,18 @@
         },
         {
           "$ref": "#/$defs/CaptureControlResult"
+        },
+        {
+          "$ref": "#/$defs/AgentInventoryRequest"
+        },
+        {
+          "$ref": "#/$defs/AgentInventory"
+        },
+        {
+          "$ref": "#/$defs/AgentDispatch"
+        },
+        {
+          "$ref": "#/$defs/AgentTaskQuery"
         }
       ]
     },
@@ -1327,6 +1339,169 @@
         "revision"
       ],
       "additionalProperties": false
+    },
+    "AgentSession": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "account_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "device_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "project_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "workspace": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "provider": {
+          "type": "string",
+          "enum": [
+            "claude",
+            "codex",
+            "cloud"
+          ]
+        },
+        "provider_session_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "capability_profile": {
+          "type": "string",
+          "enum": [
+            "read_only",
+            "workspace_write"
+          ]
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Capability"
+          },
+          "maxItems": 16
+        }
+      },
+      "required": [
+        "account_id",
+        "device_id",
+        "project_id",
+        "workspace",
+        "provider",
+        "provider_session_id",
+        "capability_profile",
+        "capabilities"
+      ]
+    },
+    "AgentInventoryRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "agent_inventory_request"
+        },
+        "account_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        }
+      },
+      "required": [
+        "kind",
+        "account_id",
+        "request_id"
+      ]
+    },
+    "AgentInventory": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "agent_inventory"
+        },
+        "account_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "device_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "authenticated_actor": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "sessions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AgentSession"
+          },
+          "maxItems": 256
+        }
+      },
+      "required": [
+        "kind",
+        "account_id",
+        "device_id",
+        "request_id",
+        "authenticated_actor",
+        "sessions"
+      ]
+    },
+    "AgentDispatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "agent_dispatch"
+        },
+        "account_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "command": {
+          "$ref": "#/$defs/AuthorizedCommand"
+        },
+        "session": {
+          "$ref": "#/$defs/AgentSession"
+        },
+        "immutable_preview": {
+          "$ref": "#/$defs/Base64"
+        },
+        "expires_at": {
+          "$ref": "#/$defs/Timestamp"
+        }
+      },
+      "required": [
+        "kind",
+        "account_id",
+        "command",
+        "session",
+        "immutable_preview",
+        "expires_at"
+      ]
+    },
+    "AgentTaskQuery": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "agent_task_query"
+        },
+        "account_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "command_id": {
+          "$ref": "#/$defs/Identifier"
+        }
+      },
+      "required": [
+        "kind",
+        "account_id",
+        "command_id"
+      ]
     }
   }
 }

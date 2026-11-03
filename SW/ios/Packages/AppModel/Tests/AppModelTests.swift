@@ -31,11 +31,12 @@ actor TargetSpy: DictationTarget, DeviceRevocationHandler {
 }
 actor BrainSpy: LlmBrain {
     var calls = 0
+    var requests: [BrainRequest] = []
     let sensitive: Bool
     let fixtureTool: ToolCall?
     init(sensitive: Bool = false, tool: ToolCall? = nil) { self.sensitive = sensitive; fixtureTool = tool }
     func propose(_ request: BrainRequest) throws -> BrainResponse {
-        calls += 1
+        calls += 1; requests.append(request)
         let tool: ToolCall = fixtureTool ?? (sensitive
             ? .prepareSendTool(PrepareSendTool(account_id: "fixture", device_id: "phone", recipient: "fixture-recipient", content: "invented content"))
             : .selectTargetTool(SelectTargetTool(account_id: "fixture", device_id: "phone")))
@@ -351,4 +352,22 @@ actor BrainSpy: LlmBrain {
     fail = false; await rig.model.approve()
     #expect(router?.snapshot().count == 1)
     #expect(rig.model.approval == nil)
+}
+
+@Test @MainActor func commandCorrectionsAcrossSilenceSlicesWaitForUtteranceCompletion() async throws {
+    let rig = try Rig(script: [.final("synthetic correction")])
+    rig.model.setMode(.ai_control); rig.model.setCapture(.continuous)
+    try await rig.until { rig.model.isRecording }
+    rig.capture.channel.continuation.yield(.frame(try AudioFrame(samples: [1000], timestamp: 0)))
+    rig.capture.channel.continuation.yield(.frame(try AudioFrame(samples: Array(repeating: 0, count: 12_800), timestamp: 0.1)))
+    try await Task.sleep(for: .milliseconds(30))
+    #expect(await rig.brain.calls == 0)
+    #expect(rig.model.suggestions.isEmpty)
+    rig.capture.channel.continuation.yield(.frame(try AudioFrame(samples: [1000], timestamp: 1)))
+    rig.model.finishUtterance()
+    try await rig.until { rig.model.listening == .idle }
+    #expect(await rig.brain.calls == 1)
+    let transcript = await rig.brain.requests.first?.transcript
+    #expect(transcript == "Synthetic correction. Synthetic correction.")
+    #expect(rig.execution.permits.isEmpty)
 }

@@ -8,12 +8,13 @@ public struct SessionIdentity: Codable, Equatable, Hashable, Sendable {
     public let host: String
     public let workspace: String
     public let providerSessionID: String
+    public let executionWorkspace: String?
     public let capabilityProfile: String
 
     public init(provider: String, account: String, host: String, workspace: String,
-                providerSessionID: String, capabilityProfile: String) {
+                providerSessionID: String, capabilityProfile: String, executionWorkspace: String? = nil) {
         self.provider = provider; self.account = account; self.host = host
-        self.workspace = workspace; self.providerSessionID = providerSessionID
+        self.workspace = workspace; self.providerSessionID = providerSessionID; self.executionWorkspace = executionWorkspace
         self.capabilityProfile = capabilityProfile
     }
 }
@@ -42,6 +43,7 @@ public struct RoutingRules: Codable, Equatable, Sendable {
     public var selectedTarget: String?
     public var activeTextField: String?
     public var defaultTarget: String?
+    public var dependencies: [String]?
     public var project: String
     public var mode: Mode = .ai_control
     public var capability: Capability = .delegate_task
@@ -57,7 +59,7 @@ public struct RoutingRules: Codable, Equatable, Sendable {
 
 public enum HoldReason: String, Codable, Sendable {
     case unavailable, ambiguous, machineRequired, noAuthorizedDestination
-    case deliveryUnknown, cancellationPending, reapprovalRequired
+    case deliveryUnknown, cancellationPending, reapprovalRequired, predecessorRequired
 }
 
 public struct RouteChoice: Codable, Equatable, Sendable {

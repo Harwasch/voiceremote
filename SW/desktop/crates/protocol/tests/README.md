@@ -15,3 +15,5 @@ compile time. Trace: product §4/§7; [REQ-59](../../../../../SYS/requirements.m
 Raw invalid fixtures exercise original JSON token strings without reparsing or normalization.
 
 Typed round trips cover every new delivery/control record and optional preparation/activity/listening fields through the shared SYS vectors.
+
+Paired agent inventory, exact-session retained-preview dispatch and durable task queries are generated from SYS/protocol. Shared vectors cover the new typed records and reject added authority fields.

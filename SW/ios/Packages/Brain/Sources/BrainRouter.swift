@@ -71,10 +71,12 @@ public struct BrainRouter: LlmBrain {
 
     private static func isSimple(_ request: BrainRequest) -> Bool {
         if request.workload == .ambient || request.workload == .multiStep { return false }
-        let words = request.transcript.lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init)
+        let body = request.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: ".!?"))
+        let words = body.lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init)
         // Even a caller's simple hint cannot send a linked utterance through the fast path.
         guard !words.contains(where: { ["and", "then", "after", "ask", "summarize", "compare"].contains($0) }),
-              !request.transcript.contains(where: { ".;!?".contains($0) }) else { return false }
+              !body.contains(where: { ".;!?".contains($0) }) else { return false }
         return words.first.map { ["open", "switch", "select"].contains($0) } ?? false
     }
 }

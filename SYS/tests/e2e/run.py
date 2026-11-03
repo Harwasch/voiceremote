@@ -3,10 +3,14 @@ Inputs: local production Worker and compiled Rust/Swift binaries. run.sh verifie
 QRs and keys stay in memory or private temporary storage, never in output.
 """
 import json
+from contextlib import closing
+import sys
+sys.dont_write_bytecode = True
 import os
 from pathlib import Path
 import queue
 import signal
+import shutil
 import sqlite3
 import subprocess
 import tempfile
@@ -19,19 +23,24 @@ signal.signal(signal.SIGTERM, terminate)
 signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGTERM, signal.SIGINT})
 
 class Child:
-    def __init__(self, args):
+    def __init__(self, args, extra_environment=None):
         environment = os.environ.copy()
         for name in ['VOICEREMOTE_RELAY_URL', 'VOICEREMOTE_ACCOUNT', 'VOICEREMOTE_RELAY_BOOTSTRAP_SECRET']:
             environment.pop(name, None)
+        environment.update(extra_environment or {})
         self.process = subprocess.Popen(args, cwd=ROOT, env=environment, stdin=subprocess.PIPE,
                                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
         self.events = queue.Queue()
         self.insertions = 0
         self.paths = []
+        self.failure_location = "unknown"
+        self.stage = "startup"
         for label, stream in [('out', self.process.stdout), ('err', self.process.stderr)]:
             def read(stream=stream, label=label):
                 for line in stream:
                     if line.rstrip() == 'E2E_INSERTED': self.insertions += 1
+                    if line.startswith('AGENT_'): self.stage = line.strip()
+                    if 'Fatal error:' in line: self.failure_location = line.split('Fatal error:', 1)[0].strip()
                     if line.startswith(('PATH_', 'RESUME_')): self.paths.append(line.rstrip())
                     self.events.put((label, line.rstrip()))
                 self.events.put((label, None))
@@ -43,7 +52,7 @@ class Child:
             except queue.Empty: break
             if line is not None and predicate(label, line): return line
             if self.process.poll() is not None and self.events.empty():
-                raise RuntimeError(f'child exited ({self.process.returncode}); payload omitted')
+                raise RuntimeError(f'child exited ({self.process.returncode}) at {self.failure_location}, stage {self.stage}; payload omitted')
         raise RuntimeError('timed out waiting for client event; payload omitted')
     def send(self, line):
         self.process.stdin.write(line + '\n'); self.process.stdin.flush()
@@ -58,10 +67,19 @@ class Child:
 def queued_frames(storage, target):
     for path in storage.rglob('*.sqlite'):
         try:
-            with sqlite3.connect(f'file:{path}?mode=ro', uri=True, timeout=.1) as db:
-                if db.execute("SELECT count(*) FROM sqlite_master WHERE name='frames'").fetchone()[0]:
-                    return db.execute('SELECT count(*) FROM frames WHERE target=?', (target,)).fetchone()[0]
-        except sqlite3.Error: pass
+            # Workerd owns its WAL/shared-memory lifecycle. Even a read-only
+            # external SQLite connection can alter shared-memory/last-close
+            # state, breaking room deletion. Inspect a private snapshot instead;
+            # concurrent checkpoint copies are retried by the caller.
+            with tempfile.TemporaryDirectory(prefix='voiceremote-queue-check-') as temp:
+                snapshot = Path(temp) / 'queue.sqlite'
+                shutil.copyfile(path, snapshot)
+                wal = path.with_name(path.name + '-wal')
+                if wal.exists(): shutil.copyfile(wal, snapshot.with_name(snapshot.name + '-wal'))
+                with closing(sqlite3.connect(f'file:{snapshot}?mode=ro', uri=True, timeout=.1)) as db:
+                    if db.execute("SELECT count(*) FROM sqlite_master WHERE name='frames'").fetchone()[0]:
+                        return db.execute('SELECT count(*) FROM frames WHERE target=?', (target,)).fetchone()[0]
+        except (OSError, sqlite3.Error): pass
     return 0
 
 children = []
@@ -71,7 +89,7 @@ try:
         origin = relay.wait_line(lambda label, line: label == 'out' and line.startswith('http://127.0.0.1:'))
         swift = ROOT / 'SW/ios/Packages/Pairing/.build/debug/phone-e2e'
         desktop = ROOT / 'SW/desktop/target/debug/voiceremote'
-        for mode in ['relay', 'lan', 'preferred']:
+        for mode in ([] if '--agents-only' in sys.argv else ['relay', 'lan', 'preferred']):
             args = [str(desktop), '--state-dir', str(Path(temp)/mode), '--e2e-injector',
                     'pair', '--code', '--account', 'synthetic-e2e', '--device', 'desktop']
             args += ['--listen', '127.0.0.1:0'] if mode != 'relay' else []
@@ -136,6 +154,10 @@ try:
             elif mode == 'relay': claims += '; process restart, persisted stale queue, permanent 403'
             else: claims += '; LAN → relay after closed-port failure, same segment across both paths, process restart'
             print(f'PASS {mode}: {claims}; no mDNS/capture-control/native GUI claim', flush=True)
+        from agents import run_agents
+        run_agents(Child, ROOT, origin, temp, children)
+        if '--agents-only' in sys.argv:
+            raise SystemExit(0)
         cloud = Child(['node', 'SYS/tests/e2e/relay.mjs', str(Path(temp)/'cloud'), 'proxy']); children.append(cloud)
         cloud_origin = cloud.wait_line(lambda label, line: label == 'out' and line.startswith('http://127.0.0.1:'))
         invitation = cloud.wait_line(lambda label, line: label == 'out' and line.startswith('PROXY_INVITE:')).split(':', 1)[1]
