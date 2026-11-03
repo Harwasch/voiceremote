@@ -121,7 +121,7 @@ max_output_bytes = 1048576
 [[projects]]
 project = "arm-design"
 workspace = "/absolute/owner/project"
-provider = "claude" # claude | codex | cloud (not configured)
+provider = "claude" # claude | codex | cloud
 account = "ACCOUNT"
 host = "hwgeekom"
 capability_profile = "read-only" # safest default if omitted; workspace-write enables edits
@@ -129,6 +129,40 @@ sessions = ["EXACT_PROVIDER_SESSION_ID"]
 # Optional owner-exported metadata file, outside all agent workspaces:
 # discovery_file = "/absolute/owner/config/arm-sessions.toml"
 ```
+
+Cloud tasks use a **separate** allowlisted project entry. They never continue the
+local session. Disabled by default; the owner explicitly enables a provider and its
+repository environment, with existing CLI login. Example (replace placeholders):
+
+```toml
+[[projects]]
+project = "cloud-research"
+capability_profile = "workspace-write" # cloud environment permissions apply
+workspace = "/absolute/owner/repository"
+provider = "cloud"
+account = "ACCOUNT"
+host = "hwgeekom"
+sessions = ["new-cloud-task"] # routing selector only; never passed as a session ID
+[projects.cloud]
+enabled = true # omitted/false disables cloud execution
+# For a read-only route only: allow_read_only_override = true explicitly permits
+# provider-environment permissions; the receipt labels that override.
+provider = "codex" # codex | claude
+# Codex environment ID, or Claude self-hosted ccpool_… environment ID:
+environment = "OWNER_ENVIRONMENT_ID"
+repository = "https://github.com/OWNER/REPOSITORY.git"
+branch = "OWNER_BRANCH"
+```
+
+Origin and checked-out branch must match exactly. Provider environment permissions
+apply remotely. Claude may upload repository history/tracked changes if its GitHub
+app cannot clone it; enable only for a repository approved for that behavior.
+Local cloud receipts carry the provider task ID/status, `cloud` label, no local
+session continuity, and explicit unsupported cancellation. Submission never reports
+task completion. The existing wire status lacks label/task-ID fields; phone display
+and settings are a later task. Windows computer-use actions are explicitly
+unsupported. [CLI findings and boundaries](crates/agents/README.md) record installed
+versions and official sources; live owner-account behavior remains **unverified**.
 
 Each discovery entry has `[[sessions]]`, `provider_session_id`, and an absolute
 `workspace` equal to this project's allowed directory. Unknown projects/sessions,

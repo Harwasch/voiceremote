@@ -89,6 +89,23 @@ if text == 'stderr-flood':
     while True: os.write(2,b'x'*4096)
 if text == 'nonzero': sys.exit(7)
 if text == 'malformed': print('not-json'); sys.exit(0)
+if args[:2] == ['cloud', 'status']:
+    try:
+        with open('cloud-status') as f: status=f.read()
+    except FileNotFoundError: status='PENDING'
+    print('['+status+'] synthetic title')
+    sys.exit(0 if status == 'READY' else 1)
+if args[:2] == ['cloud', 'exec'] or '--cloud' in args:
+    if text == 'wrong-session':
+        print('https://chatgpt.com/codex/tasks/test-session'); sys.exit(0)
+    if text == 'empty-success': sys.exit(0)
+    if text == 'claude-json': print(json.dumps({'ok':True,'session_id':'session_fake'})); sys.exit(0)
+    if '--cloud' in args:
+        print('Created cloud session: '+('session_title' if text == 'id-shaped-title' else 'Synthetic task title'))
+        if text != 'id-shaped-title': print('Session ID: session_fake')
+        if text == 'duplicate-id': print('Session ID: session_other')
+    else: print('https://chatgpt.com/codex/tasks/task_fake')
+    sys.exit(0)
 if '--resume' in args:
     session=args[args.index('--resume')+1]
     print(json.dumps({'type':'result','subtype':'success','is_error':False,'session_id':session if text != 'wrong-session' else 'other'}))
@@ -171,6 +188,7 @@ if '--property=ActiveState' in args:
                 capability_profile: CapabilityProfile::ReadOnly,
                 sessions: vec!["test-session".into()],
                 discovery_file: None,
+                cloud: None,
             }],
         };
         Ok(Self {
@@ -893,7 +911,9 @@ async fn timeout_kills_setsid_child_and_no_bus_or_failed_stop_never_claims_cance
 {
     for mode in ["contained", "no-user-bus", "fail-control", "linger-tasks"] {
         let mut f = Fixture::new(Provider::Claude)?;
-        f.config.timeout_ms = 200;
+        // Allow Python/launcher startup under capped concurrent tests before
+        // asserting timeout cleanup of the deliberately escaped child.
+        f.config.timeout_ms = 1500;
         if mode != "contained" {
             fs::write(f.root.path().join(mode), "")?;
         }
@@ -1297,6 +1317,457 @@ async fn codex_failed_turn_and_error_without_completion_fail() -> Result<()> {
         let status = f.call(f.node()?, command(text, text)).await?;
         assert_eq!(status.execution_state, ExecutionState::Failed);
         assert_eq!(status.outcome, Some(TaskStatusOutcome::Error));
+    }
+    Ok(())
+}
+
+fn cloud_fixture(provider: CloudProvider) -> Result<Fixture> {
+    use std::os::unix::fs::PermissionsExt;
+    let mut f = Fixture::new(Provider::Cloud)?;
+    f.config.projects[0].cloud = Some(CloudConfig {
+        enabled: true,
+        allow_read_only_override: false,
+        provider,
+        environment: "env_fake".into(),
+        repository: "https://github.com/synthetic/project.git".into(),
+        branch: "test-branch".into(),
+    });
+    f.config.projects[0].capability_profile = CapabilityProfile::WorkspaceWrite;
+    let git = f.root.path().join("bin/git");
+    fs::write(
+        &git,
+        r##"#!/usr/bin/python3
+import sys,os
+if os.path.exists('wrong-repo'): print('https://github.com/other/repo.git')
+elif sys.argv[1] == 'config': print('https://github.com/synthetic/project.git')
+else: print('test-branch')
+"##,
+    )?;
+    fs::set_permissions(git, fs::Permissions::from_mode(0o700))?;
+    Ok(f)
+}
+
+#[tokio::test]
+async fn cloud_handoffs_are_separate_labelled_allowlisted_and_not_completion() -> Result<()> {
+    // Run in an isolated child so actual populated secrets reach adapter construction
+    // without process-global environment mutations racing other Rust tests.
+    const SECRETS: &[&str] = &[
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "CODEX_HOME",
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "LD_PRELOAD",
+        "SSH_AUTH_SOCK",
+        "HTTP_PROXY",
+    ];
+    if std::env::var("VR_TEST_POPULATED_ENV").as_deref() != Ok("1") {
+        let mut child = std::process::Command::new(std::env::current_exe()?);
+        child
+            .args([
+                "--exact",
+                "cloud_handoffs_are_separate_labelled_allowlisted_and_not_completion",
+                "--nocapture",
+            ])
+            .env("VR_TEST_POPULATED_ENV", "1");
+        for key in SECRETS {
+            child.env(key, "synthetic-scrub-sentinel");
+        }
+        assert!(child.status()?.success());
+        return Ok(());
+    }
+    for key in SECRETS {
+        assert_eq!(std::env::var(key)?.as_str(), "synthetic-scrub-sentinel");
+    }
+    for provider in [CloudProvider::Codex, CloudProvider::Claude] {
+        let f = cloud_fixture(provider)?;
+        let node = f.node()?;
+        let prompt = "synthetic ; $(no-shell) --resume local-session";
+        let status = f
+            .call(node.clone(), command("cloud-handoff", prompt))
+            .await?;
+        assert_eq!(status.execution_state, ExecutionState::Running);
+        assert_eq!(status.outcome, Some(TaskStatusOutcome::Unavailable));
+        let results = node.recent_results();
+        let result = results.last().unwrap().process.as_ref().unwrap();
+        assert_eq!(result.finish, Finish::CloudSubmitted);
+        assert!(!result.success);
+        let receipt = result.cloud.as_ref().unwrap();
+        assert_eq!(receipt.label, "cloud");
+        assert_eq!(receipt.provider, Some(provider));
+        assert!(!receipt.continues_local_session);
+        assert!(!receipt.cancellation_supported);
+        assert_eq!(
+            receipt.task_id.as_deref(),
+            Some(if provider == CloudProvider::Codex {
+                "task_fake"
+            } else {
+                "session_fake"
+            })
+        );
+        assert_eq!(
+            receipt.state,
+            if provider == CloudProvider::Codex {
+                CloudState::Pending
+            } else {
+                CloudState::Submitted
+            }
+        );
+        let calls = f.calls();
+        let submit = calls.iter().find(|c| c["data"] == prompt).unwrap();
+        let args = submit["argv"].as_array().unwrap();
+        assert!(
+            !args.iter().any(|a| a == prompt
+                || a == "test-session"
+                || a == "--resume"
+                || a == "--continue")
+        );
+        assert!(args.iter().any(|a| a == "env_fake"));
+        let env = submit["env"].as_array().unwrap();
+        for key in [
+            "OPENAI_API_KEY",
+            "ANTHROPIC_API_KEY",
+            "CODEX_HOME",
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            "LD_PRELOAD",
+            "SSH_AUTH_SOCK",
+            "HTTP_PROXY",
+        ] {
+            assert!(!env.iter().any(|v| v == key));
+        }
+        // Same command ID is never submitted twice, even though cloud work is nonterminal.
+        f.call(node.clone(), command("cloud-handoff", prompt))
+            .await?;
+        assert_eq!(f.calls().iter().filter(|c| c["data"] == prompt).count(), 1);
+        let mut cancel = command("cancel-cloud", "synthetic");
+        cancel.immutable_task_payload = ToolCall::CancelTaskTool(CancelTaskTool {
+            kind: CancelTaskToolKind::CancelTask,
+            account_id: "test-account".into(),
+            command_id: "cloud-handoff".into(),
+        });
+        f.call(node.clone(), cancel).await?;
+        let results = node.recent_results();
+        let cancelled = results.last().unwrap().process.as_ref().unwrap();
+        assert_eq!(cancelled.finish, Finish::CancelUnsupported);
+        assert_eq!(cancelled.cloud.as_ref().unwrap().label, "cloud");
+        assert_eq!(cancelled.cloud.as_ref().unwrap().task_id, receipt.task_id);
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn cloud_disabled_and_project_repository_allowlists_fail_before_submit() -> Result<()> {
+    let mut f = cloud_fixture(CloudProvider::Codex)?;
+    f.config.projects[0].cloud.as_mut().unwrap().enabled = false;
+    let node = f.node()?;
+    f.call(node.clone(), command("disabled-cloud", "synthetic"))
+        .await?;
+    let result = node.recent_results().pop().unwrap().process.unwrap();
+    assert_eq!(result.finish, Finish::NotConfigured);
+    assert_eq!(result.cloud.unwrap().label, "cloud");
+    assert!(f.calls().is_empty());
+    f.config.projects[0].cloud.as_mut().unwrap().enabled = true;
+    fs::write(f.root.path().join("wrong-repo"), "")?;
+    let node = f.node()?;
+    f.call(node.clone(), command("repo-denied", "synthetic"))
+        .await?;
+    assert_eq!(
+        node.recent_results().pop().unwrap().process.unwrap().finish,
+        Finish::NotConfigured
+    );
+    assert!(f.calls().is_empty());
+    fs::remove_file(f.root.path().join("wrong-repo"))?;
+    let mut unknown = command("project-denied", "synthetic");
+    if let ToolCall::DelegateTaskTool(ref mut task) = unknown.immutable_task_payload {
+        task.project_id = "unknown-project".into();
+    }
+    assert_eq!(
+        f.call(f.node()?, unknown).await?.outcome,
+        Some(TaskStatusOutcome::Denied)
+    );
+    assert!(f.calls().is_empty());
+    // enabled defaults false even when the rest of the cloud table is supplied.
+    let config: CloudConfig = toml::from_str(
+        "provider='codex'\nenvironment='env_fake'\nrepository='https://github.com/synthetic/project.git'\nbranch='main'",
+    )?;
+    assert!(!config.enabled);
+    Ok(())
+}
+
+#[tokio::test]
+async fn cloud_failures_never_invent_ids_success_or_local_continuity() -> Result<()> {
+    for provider in [CloudProvider::Claude, CloudProvider::Codex] {
+        let f = cloud_fixture(provider)?;
+        for (index, prompt) in [
+            "nonzero",
+            "malformed",
+            "empty-success",
+            "wrong-session",
+            "claude-json",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let node = f.node()?;
+            f.call(node.clone(), command(&format!("failure-{index}"), prompt))
+                .await?;
+            let result = node.recent_results().pop().unwrap().process.unwrap();
+            // claude-json is also deliberately rejected for creation; JSON documented
+            // for follow-ups does not prove a new cloud session was created.
+            assert!(!result.success);
+            let receipt = result.cloud.unwrap();
+            assert_eq!(receipt.label, "cloud");
+            assert!(receipt.task_id.is_none());
+            assert!(!receipt.continues_local_session);
+            assert!(matches!(
+                result.finish,
+                Finish::CloudFailed | Finish::Unconfirmed
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn codex_cloud_status_is_not_inferred_from_cli_exit_code() -> Result<()> {
+    let f = cloud_fixture(CloudProvider::Codex)?;
+    for (index, (marker, expected)) in [
+        ("READY", CloudState::Ready),
+        ("APPLIED", CloudState::Applied),
+        ("ERROR", CloudState::Failed),
+        ("BROKEN", CloudState::Unknown),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        fs::write(f.root.path().join("cloud-status"), marker)?;
+        let node = f.node()?;
+        f.call(
+            node.clone(),
+            command(&format!("status-{index}"), "synthetic"),
+        )
+        .await?;
+        let result = node.recent_results().pop().unwrap().process.unwrap();
+        assert_eq!(result.cloud.unwrap().state, expected);
+        assert!(!result.success); // ready/applied do not prove the delegated task's success.
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn computer_ui_action_is_explicitly_unsupported_without_spawning() -> Result<()> {
+    let f = Fixture::new(Provider::Claude)?;
+    let node = f.node()?;
+    let mut action = command("computer-use-deferred", "synthetic");
+    action.immutable_task_payload = ToolCall::OpenResourceTool(OpenResourceTool {
+        kind: OpenResourceToolKind::OpenResource,
+        account_id: "test-account".into(),
+        device_id: "test-host".into(),
+        resource_uri: "https://example.com".into(),
+    });
+    assert_eq!(
+        f.call(node.clone(), action).await?.outcome,
+        Some(TaskStatusOutcome::Unavailable)
+    );
+    assert_eq!(
+        node.recent_results().pop().unwrap().process.unwrap().finish,
+        Finish::UnsupportedAction
+    );
+    assert!(f.calls().is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+async fn cloud_timeout_and_missing_cli_remain_honest_and_labelled() -> Result<()> {
+    let mut f = cloud_fixture(CloudProvider::Codex)?;
+    f.config.timeout_ms = 200;
+    let node = f.node()?;
+    f.call(node.clone(), command("cloud-timeout", "timeout"))
+        .await?;
+    let result = node.recent_results().pop().unwrap().process.unwrap();
+    assert_eq!(result.finish, Finish::Unconfirmed);
+    let receipt = result.cloud.unwrap();
+    assert_eq!(receipt.state, CloudState::Unknown);
+    assert_eq!(receipt.label, "cloud");
+    assert!(receipt.task_id.is_none());
+    assert!(!receipt.cancellation_supported);
+    // systemd-run can start successfully even if the CLI itself is missing.
+    // Exercise direct spawn failure without the optional user bus.
+    fs::write(f.root.path().join("no-user-bus"), "")?;
+    fs::remove_file(f.root.path().join("bin/codex"))?;
+    let node = f.node()?;
+    f.call(node.clone(), command("cloud-missing-cli", "synthetic"))
+        .await?;
+    let result = node.recent_results().pop().unwrap().process.unwrap();
+    assert_eq!(result.finish, Finish::SpawnFailed);
+    assert_eq!(result.cloud.unwrap().label, "cloud");
+    assert!(!result.success);
+    Ok(())
+}
+
+#[tokio::test]
+async fn cloud_provider_id_cannot_equal_the_routing_session_id() -> Result<()> {
+    let mut f = cloud_fixture(CloudProvider::Codex)?;
+    f.config.projects[0].sessions = vec!["task_fake".into()];
+    let mut task = command("cloud-no-continuity", "synthetic");
+    task.provider_session_id = Some("task_fake".into());
+    if let ToolCall::DelegateTaskTool(ref mut payload) = task.immutable_task_payload {
+        payload.provider_session_id = task.provider_session_id.clone();
+    }
+    let node = f.node()?;
+    f.call(node.clone(), task).await?;
+    let result = node.recent_results().pop().unwrap().process.unwrap();
+    assert_eq!(result.finish, Finish::Unconfirmed);
+    assert!(result.cloud.unwrap().task_id.is_none());
+    assert!(
+        !f.calls()[0]["argv"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|v| v == "task_fake")
+    );
+    Ok(())
+}
+
+#[test]
+fn cloud_config_rejects_unsafe_environment_repository_and_local_provider() -> Result<()> {
+    let mut f = cloud_fixture(CloudProvider::Codex)?;
+    for (field, value) in [
+        ("environment", "--bad"),
+        ("repository", "https://other.example/synthetic/repo"),
+        ("branch", "--upload"),
+        ("branch", "main..other"),
+    ] {
+        let mut config = f.config.clone();
+        let cloud = config.projects[0].cloud.as_mut().unwrap();
+        match field {
+            "environment" => cloud.environment = value.into(),
+            "repository" => cloud.repository = value.into(),
+            _ => cloud.branch = value.into(),
+        }
+        assert!(
+            AgentNode::new(
+                config,
+                CliAdapter::default(),
+                Arc::new(FileKeyStore::new(f.root.path().join("config-tests"))?)
+            )
+            .is_err()
+        );
+    }
+    f.config.projects[0].provider = Provider::Codex;
+    assert!(f.node().is_err());
+    Ok(())
+}
+
+#[tokio::test]
+async fn claude_creation_uses_session_id_never_title() -> Result<()> {
+    let f = cloud_fixture(CloudProvider::Claude)?;
+    for (index, prompt) in ["id-shaped-title", "synthetic", "duplicate-id"]
+        .into_iter()
+        .enumerate()
+    {
+        let node = f.node()?;
+        f.call(node.clone(), command(&format!("claude-id-{index}"), prompt))
+            .await?;
+        let result = node.recent_results().pop().unwrap().process.unwrap();
+        let receipt = result.cloud.unwrap();
+        if prompt == "synthetic" {
+            assert_eq!(receipt.task_id.as_deref(), Some("session_fake"));
+            assert_eq!(result.finish, Finish::CloudSubmitted);
+        } else {
+            assert!(
+                receipt.task_id.is_none(),
+                "title or duplicate Session ID accepted"
+            );
+            assert_eq!(result.finish, Finish::Unconfirmed);
+        }
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn cloud_read_only_requires_explicit_permission_override() -> Result<()> {
+    for provider in [CloudProvider::Codex, CloudProvider::Claude] {
+        let mut f = cloud_fixture(provider)?;
+        f.config.projects[0].capability_profile = CapabilityProfile::ReadOnly;
+        let node = f.node()?;
+        f.call(node.clone(), command("readonly-denied", "synthetic"))
+            .await?;
+        let process = node.recent_results().pop().unwrap().process.unwrap();
+        assert_eq!(process.finish, Finish::UnsupportedAction);
+        assert_eq!(
+            serde_json::to_value(process.cloud.unwrap())?["permissions_label"],
+            "read-only refused"
+        );
+        assert!(f.calls().is_empty());
+        let provider = if provider == CloudProvider::Codex {
+            "codex"
+        } else {
+            "claude"
+        };
+        f.config.projects[0].cloud = Some(toml::from_str(&format!(
+            "enabled=true\nprovider='{provider}'\nenvironment='env_fake'\nrepository='https://github.com/synthetic/project.git'\nbranch='test-branch'\nallow_read_only_override=true"
+        ))?);
+        let node = f.node()?;
+        f.call(node.clone(), command("readonly-override", "synthetic"))
+            .await?;
+        let process = node.recent_results().pop().unwrap().process.unwrap();
+        assert_eq!(process.finish, Finish::CloudSubmitted);
+        assert_eq!(
+            serde_json::to_value(process.cloud.unwrap())?["permissions_label"],
+            "read-only override: provider environment permissions"
+        );
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn cloud_launch_cancel_signals_launcher_and_crash_receipt_is_unknown() -> Result<()> {
+    for restarted in [false, true] {
+        let mut f = cloud_fixture(CloudProvider::Codex)?;
+        f.config.timeout_ms = 10_000;
+        let node = f.node()?;
+        let (mut p, mut pt, d, mut dt) = f.pair().await?;
+        let (stop, rx) = watch::channel(false);
+        let worker = node.clone();
+        let server = tokio::spawn(async move {
+            receiver::serve(&worker, d, &mut dt, &mut NoInjection, rx).await
+        });
+        p.send(
+            pt.as_mut(),
+            &InnerMessage::AuthorizedCommand(command("cloud-launch", "wait-tree")),
+        )
+        .await?;
+        wait_file(f.root.path().join("child.pid")).await;
+        let pid: i32 = fs::read_to_string(f.root.path().join("child.pid"))?.parse()?;
+        let cancel_node = if restarted { f.node()? } else { node.clone() };
+        let mut cancel = command("cancel-cloud-launch", "synthetic");
+        cancel.immutable_task_payload = ToolCall::CancelTaskTool(CancelTaskTool {
+            kind: CancelTaskToolKind::CancelTask,
+            account_id: "test-account".into(),
+            command_id: "cloud-launch".into(),
+        });
+        f.call(cancel_node.clone(), cancel).await?;
+        let process = cancel_node.recent_results().pop().unwrap().process.unwrap();
+        assert_eq!(process.finish, Finish::CancelUnsupported);
+        assert_eq!(process.cloud.unwrap().state, CloudState::Unknown);
+        if !restarted {
+            tokio::time::timeout(Duration::from_secs(3), async {
+                loop {
+                    if let InnerMessage::TaskStatus(status) = p.receive(pt.as_mut()).await? {
+                        if status.command_id == "cloud-launch" && status.outcome.is_some() {
+                            break Ok::<_, anyhow::Error>(());
+                        }
+                    }
+                }
+            })
+            .await??;
+            assert!(
+                !process_alive(pid),
+                "cancel did not signal and stop the launcher tree"
+            );
+        }
+        stop.send(true)?;
+        server.await??;
     }
     Ok(())
 }
