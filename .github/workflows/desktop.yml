@@ -126,7 +126,7 @@ jobs:
           cargo metadata --format-version 1 --all-features > "$RUNNER_TEMP/desktop-metadata.json"
           python - "$RUNNER_TEMP/desktop-metadata.json" <<'PY'
           import json, re, sys
-          packages = json.load(open(sys.argv[1]))["packages"]
+          packages = json.load(open(sys.argv[1], encoding="utf-8"))["packages"]
           # Dual-licensed dependencies with a permissive alternative are usable.
           denied = []
           for package in packages:
