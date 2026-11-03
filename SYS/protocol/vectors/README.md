@@ -8,6 +8,8 @@ flowchart LR
 | File | What it is | Status |
 |---|---|---|
 | [golden.json](golden.json) | Shared positive/negative values and `raw_invalid` JSON strings | ✅ |
+| [.gitattributes](.gitattributes) | Disable Git text conversion recursively; deterministic Noise fixture remains byte-exact on Windows | ✅ `git check-attr text` reports unset |
+| [noise/](noise/) | Byte-exact synthetic XX/confirmation/application fixture | ✅ Linux reproduction; Windows CI rerun pending |
 
 Start with `golden.json`. All text is synthetic; base64 strings are fixture
 markers, not usable keys or credentials. Zero-filled hashes are shape fixtures,

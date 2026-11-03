@@ -98,6 +98,8 @@ async fn serve_with_sampler(
     focus.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut poll = tokio::time::interval(POLL);
     let mut idle = tokio::time::Instant::now() + IDLE_TIMEOUT;
+    let started = tokio::time::Instant::now();
+    let mut previous = None;
     loop {
         tokio::select! {
             biased;
@@ -108,6 +110,8 @@ async fn serve_with_sampler(
                 session.check_active()?;
                 let sampler = sampler.clone();
                 let (focused, activity) = tokio::task::spawn_blocking(move || sampler()).await?;
+                let now = started.elapsed().as_millis() as u64;
+                if !voiceremote_inject_windows::policy::focus_report_due(previous, (focused, activity), now) { continue; }
                 let report = InnerMessage::FocusReport(FocusReport {
                     kind: FocusReportKind::FocusReport,
                     account_id: local.account_id.clone(), device_id: local.device_id.clone(),
@@ -116,6 +120,7 @@ async fn serve_with_sampler(
                 let registry = session.registry().clone();
                 let peer = session.peer().clone();
                 guarded(session.send(transport, &report), &registry, &peer, stop.clone()).await?;
+                previous = Some(((focused, activity), now));
             },
             packet=transport.recv()=>{
                 let registry = session.registry().clone();
@@ -342,7 +347,6 @@ mod tests {
         assert_eq!(first.last_activity_at, 1234);
         assert_eq!(first.device_id, "desktop");
         assert_eq!(serde_json::to_value(&first)?.as_object().unwrap().len(), 5);
-        focused.store(false, Ordering::SeqCst);
         let literal = "Synthetic 🦀 ".repeat(1000);
         ps.send(
             &mut phone,
@@ -357,8 +361,18 @@ mod tests {
             }),
         )
         .await?;
-        let message =
-            tokio::time::timeout(Duration::from_secs(3), ps.receive(&mut phone)).await??;
+        // Keep Session::receive pinned while checking silence; cancelling and
+        // recreating it would poison the session and invalidate this test.
+        let next = ps.receive(&mut phone);
+        tokio::pin!(next);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(1200), &mut next)
+                .await
+                .is_err(),
+            "unchanged focus must not produce a one-second report"
+        );
+        focused.store(false, Ordering::SeqCst);
+        let message = tokio::time::timeout(Duration::from_secs(3), &mut next).await??;
         let InnerMessage::FocusReport(second) = message else {
             panic!("missing changed focus report")
         };

@@ -12,7 +12,7 @@ flowchart LR
 | File | What it is | Status |
 |---|---|---|
 | [main.rs](main.rs) | Pair, persisted device ID, name/ID revoke, signed relay provisioning, concurrent headless run and dictate stub | ✅ CLI tests; on-device unverified |
-| [windows_receiver.rs](windows_receiver.rs) | Windows-only bounded receiver adapter; encrypted periodic focus reports; synthetic Noise/fragmentation test on Linux | 🟡 native runtime unverified |
+| [windows_receiver.rs](windows_receiver.rs) | Windows-only bounded receiver adapter; encrypted focus changes / 30-second heartbeat; synthetic Noise/fragmentation test on Linux | 🟡 native runtime unverified |
 | [windows_transport.rs](windows_transport.rs) | Windows-only LAN/relay wire adapters retaining read progress and keepalive state across focus polls | ✅ synthetic partial-frame tests; native network unverified |
 
 Start at `Cli` and `main`. Configuration/limitations are in

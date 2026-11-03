@@ -55,8 +55,9 @@ fn native_event(event: Event) -> INPUT {
         },
     }
 }
-pub(super) fn send(events: &[Event]) -> Result<()> {
+pub(super) fn send(events: &[Event], cancel: &crate::worker::Cancellation) -> Result<()> {
     let inputs: Vec<_> = events.iter().copied().map(native_event).collect();
+    cancel.begin_input()?;
     let count = unsafe { SendInput(&inputs, size_of::<INPUT>() as i32) };
     if count as usize != inputs.len() {
         // Release only keys we attempted to press, with no new key-down events.

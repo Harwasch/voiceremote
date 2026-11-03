@@ -96,6 +96,43 @@ pub fn may_restore(published: u32, current: u32, owner_is_ours: bool, rendered: 
     owner_is_ours && (published == current || rendered)
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum PasteWait {
+    Waiting,
+    ReadSettled,
+    TimedOut,
+}
+#[derive(Debug, PartialEq, Eq)]
+pub enum ClipboardDisposition {
+    RestorePrevious,
+    KeepDictation,
+}
+pub fn clipboard_disposition(input_may_be_queued: bool) -> ClipboardDisposition {
+    if input_may_be_queued {
+        ClipboardDisposition::KeepDictation
+    } else {
+        ClipboardDisposition::RestorePrevious
+    }
+}
+/// A read is only a clipboard event, never an insertion acknowledgement.
+/// Once a read arrives it gets its full settle period, even across the deadline.
+pub fn paste_wait(elapsed_ms: u64, read_at_ms: Option<u64>) -> PasteWait {
+    match read_at_ms {
+        Some(at) if elapsed_ms.saturating_sub(at) >= 150 => PasteWait::ReadSettled,
+        Some(_) => PasteWait::Waiting,
+        None if elapsed_ms >= 30_000 => PasteWait::TimedOut,
+        None => PasteWait::Waiting,
+    }
+}
+/// Compare only the metadata actually sent. Stable focus gets a slow heartbeat.
+pub fn focus_report_due(
+    previous: Option<((bool, u64), u64)>,
+    current: (bool, u64),
+    now_ms: u64,
+) -> bool {
+    previous.is_none_or(|(old, at)| old != current || now_ms.saturating_sub(at) >= 30_000)
+}
+
 /// Only a failure before a paste chord is attempted permits Unicode fallback.
 /// A missing read receipt after a chord is ambiguous; retry could duplicate text.
 pub enum PasteAttempt {
@@ -112,11 +149,15 @@ pub fn insert(backend: &mut impl Backend, text: &str) -> Result<()> {
     if text.is_empty() {
         return Ok(());
     }
-    backend.require_target()?;
+    backend
+        .require_target()
+        .map_err(|e| e.context(voiceremote_core::InsertionFailure::NotStarted))?;
     match backend.paste(text) {
         PasteAttempt::Finished(result) => result,
         PasteAttempt::Unavailable => {
-            backend.require_target()?;
+            backend
+                .require_target()
+                .map_err(|e| e.context(voiceremote_core::InsertionFailure::NotStarted))?;
             backend.unicode(&unicode_events(text)?)
         }
     }
@@ -126,6 +167,45 @@ pub fn insert(backend: &mut impl Backend, text: &str) -> Result<()> {
 mod tests {
     use super::*;
     use voiceremote_core::bail;
+
+    #[test]
+    fn late_reads_settle_fully_and_readers_never_imply_inserted() {
+        assert_eq!(paste_wait(750, None), PasteWait::Waiting);
+        assert_eq!(paste_wait(29_999, None), PasteWait::Waiting);
+        assert_eq!(paste_wait(30_000, None), PasteWait::TimedOut);
+        assert_eq!(paste_wait(30_000, Some(29_950)), PasteWait::Waiting);
+        assert_eq!(paste_wait(30_100, Some(29_950)), PasteWait::ReadSettled);
+        assert_eq!(paste_wait(750, Some(600)), PasteWait::ReadSettled);
+    }
+    #[test]
+    fn late_target_and_untrusted_monitor_reads_never_restore_a_secret() {
+        let original = "Synthetic previous secret";
+        for read in [None, Some(1)] {
+            let mut clipboard = "Synthetic dictated text";
+            let _ = paste_wait(30_000, read);
+            match clipboard_disposition(true) {
+                ClipboardDisposition::RestorePrevious => clipboard = original,
+                ClipboardDisposition::KeepDictation => {}
+            }
+            assert_eq!(
+                clipboard, "Synthetic dictated text",
+                "queued late Ctrl+V must not paste the old clipboard"
+            );
+        }
+        assert_eq!(
+            clipboard_disposition(false),
+            ClipboardDisposition::RestorePrevious
+        );
+    }
+    #[test]
+    fn unchanged_focus_is_quiet_until_heartbeat_but_changes_send_immediately() {
+        let previous = Some(((true, 1234), 1000));
+        assert!(!focus_report_due(previous, (true, 1234), 2000));
+        assert!(!focus_report_due(previous, (true, 1234), 30_999));
+        assert!(focus_report_due(previous, (true, 1234), 31_000));
+        assert!(focus_report_due(previous, (false, 1234), 2000));
+        assert!(focus_report_due(previous, (true, 1235), 2000));
+    }
 
     #[test]
     fn every_control_and_line_separator_is_rejected_before_any_os_access() {

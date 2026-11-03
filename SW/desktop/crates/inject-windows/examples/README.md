@@ -1,7 +1,7 @@
 ```mermaid
 flowchart LR
     CI[Windows runner] --> Owned[owned multiline EDIT]
-    Owned --> Paste[paste + restoration]
+    Owned --> Paste[WM_PASTE required + retained dictation]
     Paste --> Fallback[force Unicode fallback]
     Fallback --> Readback[own HWND readback + forbidden-key observer]
     Laptop[--manual] --> Focused[owner-selected scratch field]
@@ -9,7 +9,7 @@ flowchart LR
 
 | File | What it is | Status |
 |---|---|---|
-| [desktop-smoke.rs](desktop-smoke.rs) | Automated owned-window check; `--manual` inserts a synthetic sample after 8 seconds | 🟡 cross-compiled; Windows runtime unverified |
+| [desktop-smoke.rs](desktop-smoke.rs) | Automated owned-window check with explicit WM_PASTE and exact readback; `--manual` inserts a synthetic sample after 8 seconds | 🟡 cross-compiled; Windows runtime unverified |
 
 Run `cargo run -p voiceremote-inject-windows --example desktop-smoke -j4`
 from `SW/desktop` **in an isolated test desktop**: automated mode deliberately

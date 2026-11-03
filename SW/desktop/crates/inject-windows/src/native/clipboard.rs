@@ -6,6 +6,7 @@
 // Full permission notices: DOCS/licences/{Handy,hex}-MIT.txt.
 use super::{focus::Target, input};
 use crate::policy::{self, PasteAttempt};
+use crate::worker::Cancellation;
 use std::{
     cell::{Cell, RefCell},
     mem::size_of,
@@ -32,8 +33,6 @@ use windows::{
 };
 
 const MAX_SNAPSHOT_BYTES: usize = 64 * 1024 * 1024;
-const SETTLE: Duration = Duration::from_millis(150);
-const RECEIPT_TIMEOUT: Duration = Duration::from_millis(750);
 
 struct Global(Option<HGLOBAL>);
 impl Global {
@@ -154,6 +153,23 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPAR
             }
             return LRESULT(0);
         }
+        if msg == WM_RENDERALLFORMATS {
+            let ptr = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const RenderState;
+            if let Some(state) = ptr.as_ref()
+                && !state.rendered.get()
+                && let Ok(_open) = Open::new(hwnd)
+                && GetClipboardOwner().is_ok_and(|owner| owner == hwnd)
+            {
+                let rendered = state
+                    .text
+                    .borrow_mut()
+                    .publish(CF_UNICODETEXT.0 as u32)
+                    .is_ok();
+                state.rendered.set(rendered);
+                state.failed.set(!rendered);
+            }
+            return LRESULT(0);
+        }
         DefWindowProcW(hwnd, msg, wp, lp)
     }
 }
@@ -232,6 +248,7 @@ struct Transaction {
     state: Box<RenderState>,
     saved: Vec<Saved>,
     dirty: bool,
+    queued: bool,
 }
 impl Transaction {
     fn prepare(text: &str) -> Result<Self> {
@@ -251,17 +268,18 @@ impl Transaction {
             state,
             saved: Vec::new(),
             dirty: false,
+            queued: false,
         })
     }
     fn publish(&mut self) -> Result<()> {
         let mut markers = privacy_markers()?;
         let _open = Open::new(self.window.0)?;
         self.saved = snapshot()?;
-        unsafe {
+        let result = unsafe {
             EmptyClipboard()?;
             self.dirty = true;
             // Capture the sequence even if a later publication fails.
-            let result = (|| -> Result<()> {
+            (|| -> Result<()> {
                 for marker in &mut markers {
                     marker.memory.publish(marker.format)?;
                 }
@@ -274,10 +292,36 @@ impl Transaction {
                     "cannot advertise clipboard text"
                 );
                 Ok(())
-            })();
-            self.state.sequence.set(GetClipboardSequenceNumber());
-            result
+            })()
+        };
+        // Windows can advance the sequence at CloseClipboard when publication
+        // becomes visible. Capturing it before close caused the real CI failure.
+        drop(_open);
+        self.state
+            .sequence
+            .set(unsafe { GetClipboardSequenceNumber() });
+        result
+    }
+    fn preserve_dictation(&mut self) -> Result<()> {
+        if !self.dirty {
+            return Ok(());
         }
+        let _open = Open::new(self.window.0)?;
+        unsafe {
+            if GetClipboardOwner().is_ok_and(|owner| owner == self.window.0)
+                && !self.state.rendered.get()
+            {
+                self.state
+                    .text
+                    .borrow_mut()
+                    .publish(CF_UNICODETEXT.0 as u32)?;
+                self.state.rendered.set(true);
+            }
+        }
+        // Never restore the user's old clipboard after a queued chord without
+        // a trustworthy insertion acknowledgement. A monitor is not one.
+        self.dirty = false;
+        Ok(())
     }
     fn restore(&mut self) -> Result<()> {
         if !self.dirty {
@@ -321,11 +365,18 @@ impl Transaction {
 }
 impl Drop for Transaction {
     fn drop(&mut self) {
-        let _ = self.restore();
+        match policy::clipboard_disposition(self.queued) {
+            policy::ClipboardDisposition::KeepDictation => {
+                let _ = self.preserve_dictation();
+            }
+            policy::ClipboardDisposition::RestorePrevious => {
+                let _ = self.restore();
+            }
+        }
     }
 }
 
-pub(super) fn paste(target: &Target, text: &str) -> PasteAttempt {
+pub(super) fn paste(target: &Target, cancel: &Cancellation, text: &str) -> PasteAttempt {
     let Ok(mut tx) = Transaction::prepare(text) else {
         return PasteAttempt::Unavailable;
     };
@@ -334,27 +385,37 @@ pub(super) fn paste(target: &Target, text: &str) -> PasteAttempt {
         // fallback is allowed. Never silently leave dictated text behind.
         return match tx.restore() {
             Ok(()) => PasteAttempt::Unavailable,
-            Err(error) => PasteAttempt::Finished(Err(error)),
+            Err(error) => PasteAttempt::Finished(Err(
+                error.context(voiceremote_core::InsertionFailure::NotStarted)
+            )),
         };
     }
-    let result = (|| -> Result<()> {
+    let preflight = (|| -> Result<()> {
         thread::sleep(Duration::from_millis(50));
         target.require_unchanged()?;
         input::require_no_modifiers()?;
+        cancel.require_active()?;
         // If the clipboard changed before the chord, do not paste user data.
         unsafe {
             ensure!(
-                policy::may_restore(
-                    tx.state.sequence.get(),
-                    GetClipboardSequenceNumber(),
-                    GetClipboardOwner().is_ok_and(|owner| owner == tx.window.0),
-                    tx.state.rendered.get(),
-                ),
-                "clipboard changed before paste; insertion cancelled"
+                GetClipboardOwner().is_ok_and(|owner| owner == tx.window.0),
+                "clipboard owner changed before paste; insertion cancelled"
             );
         }
-        input::send(&policy::paste_events())?;
-        let deadline = Instant::now() + RECEIPT_TIMEOUT;
+        Ok(())
+    })();
+    if let Err(error) = preflight {
+        let restored = tx.restore();
+        return PasteAttempt::Finished(
+            restored
+                .and(Err(error))
+                .map_err(|e| e.context(voiceremote_core::InsertionFailure::NotStarted)),
+        );
+    }
+    tx.queued = true; // Even a short SendInput may have queued Ctrl+V.
+    let result = (|| -> Result<()> {
+        input::send(&policy::paste_events(), cancel)?;
+        let started = Instant::now();
         let mut received_at = None;
         loop {
             pump();
@@ -363,20 +424,19 @@ pub(super) fn paste(target: &Target, text: &str) -> PasteAttempt {
                 "clipboard text could not be rendered"
             );
             if tx.state.rendered.get() && received_at.is_none() {
-                received_at = Some(Instant::now());
+                received_at = Some(started.elapsed().as_millis() as u64);
             }
-            if received_at.is_some_and(|time| Instant::now().duration_since(time) >= SETTLE) {
-                break;
+            match policy::paste_wait(started.elapsed().as_millis() as u64, received_at) {
+                policy::PasteWait::Waiting => {}
+                policy::PasteWait::ReadSettled | policy::PasteWait::TimedOut => break,
             }
-            ensure!(
-                Instant::now() < deadline,
-                "paste not confirmed by a clipboard read; delivery uncertain, do not retry automatically"
-            );
             thread::sleep(Duration::from_millis(5));
         }
         Ok(())
     })();
-    // Restore even after SendInput, focus checks, or receipt polling fail.
-    let restored = tx.restore();
-    PasteAttempt::Finished(restored.and(result))
+    let preserved = tx.preserve_dictation();
+    let uncertain = result
+        .and(preserved)
+        .and(Err(voiceremote_core::InsertionFailure::Unconfirmed.into()));
+    PasteAttempt::Finished(uncertain)
 }

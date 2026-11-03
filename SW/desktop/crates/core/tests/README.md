@@ -8,7 +8,7 @@ flowchart LR
 
 | File | Evidence | Status |
 |---|---|---|
-| [security.rs](security.rs) | Both transports, mandatory confirmation, token expiry/reuse, tamper/replay, revoke, dictation controls, deduplication, storage, virtual interfaces, delayed phone, bounded concurrency and cancellation | ✅ synthetic peers |
+| [security.rs](security.rs) | Both transports, auth, revoke, dictation controls, safe pre-input retry, non-fatal phone error and durable uncertainty on reconnect, storage and bounded lifecycle | ✅ synthetic peers |
 | [relay_contract.rs](relay_contract.rs) | Bootstrap/invite/join, signed challenge/WS, replay, max dictation, reconnect and revoke | ✅ independent auth fake |
 | [check-token-guards.py](check-token-guards.py) | Opt-in live-peer token-guard mutation proof; always restores source | ✅ baselines pass; removed guards fail at runtime |
 | [vectors.rs](vectors.rs) | Deterministic XX/confirmation/application ciphertext fixture | ✅ Rust; independent implementation unverified |

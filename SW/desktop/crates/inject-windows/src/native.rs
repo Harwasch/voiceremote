@@ -1,8 +1,9 @@
 //! The worker owns its COM apartment and message-only clipboard window.
 //! No overlay or visible window is created by the injector.
 use crate::policy::{self, Backend, Event, FocusSnapshot, PasteAttempt};
+use crate::worker::{BoundedWorker, Cancellation};
 use std::{
-    sync::{Mutex, OnceLock, mpsc},
+    sync::{OnceLock, mpsc},
     thread,
     time::Duration,
 };
@@ -12,38 +13,58 @@ mod clipboard;
 mod focus;
 mod input;
 
-static INSERTION: Mutex<()> = Mutex::new(());
+static INSERTION: BoundedWorker = BoundedWorker::new();
 
 #[derive(Default)]
 pub struct WindowsInjector;
 impl TextInjector for WindowsInjector {
     fn insert_text(&mut self, text: &str) -> Result<()> {
         // Validate before copying into the worker or consulting any OS API.
-        policy::validate_text(text)?;
+        policy::validate_text(text)
+            .map_err(|e| e.context(voiceremote_core::InsertionFailure::NotStarted))?;
         if text.is_empty() {
             return Ok(());
         }
         let text = text.to_owned();
-        let result = thread::spawn(move || {
-            let _lock = INSERTION
-                .lock()
-                .map_err(|_| anyhow!("Windows injector lock poisoned"))?;
-            let mut backend = Native {
-                target: focus::Target::capture()?,
-            };
-            policy::insert(&mut backend, &text)
-        })
-        .join()
-        .map_err(|_| anyhow!("Windows injector worker failed"))?;
+        let result = INSERTION.run(Duration::from_secs(35), move |cancel| {
+            perform(&text, cancel)
+        });
         safe_diagnostic(result)
     }
+    fn insert_text_async<'a>(
+        &'a mut self,
+        text: &'a str,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send + 'a>> {
+        Box::pin(async move {
+            policy::validate_text(text)
+                .map_err(|e| e.context(voiceremote_core::InsertionFailure::NotStarted))?;
+            if text.is_empty() {
+                return Ok(());
+            }
+            let text = text.to_owned();
+            safe_diagnostic(
+                INSERTION
+                    .run_async(Duration::from_secs(35), move |cancel| {
+                        perform(&text, cancel)
+                    })
+                    .await,
+            )
+        })
+    }
+}
+fn perform(text: &str, cancel: Cancellation) -> Result<()> {
+    let target = focus::Target::capture()
+        .map_err(|e| e.context(voiceremote_core::InsertionFailure::NotStarted))?;
+    let mut backend = Native { target, cancel };
+    policy::insert(&mut backend, text)
 }
 fn safe_diagnostic(result: Result<()>) -> Result<()> {
     result.map_err(|error| {
+        let failure = error.downcast_ref::<voiceremote_core::InsertionFailure>().copied().unwrap_or(voiceremote_core::InsertionFailure::Unconfirmed);
         // COM providers control error descriptions. Never expose them through
         // the app's diagnostics: an arbitrary description could contain text.
         if let Some(os) = error.downcast_ref::<windows::core::Error>() {
-            anyhow!("Windows API failed (HRESULT=0x{:08x}); target unavailable (possible UIA/UIPI restriction)", os.code().0 as u32)
+            anyhow!(failure).context(format!("Windows API failed (HRESULT=0x{:08x}); target unavailable (possible UIA/UIPI restriction)", os.code().0 as u32))
         } else {
             error // Our remaining errors are fixed, content-free diagnostics.
         }
@@ -51,18 +72,21 @@ fn safe_diagnostic(result: Result<()>) -> Result<()> {
 }
 struct Native {
     target: focus::Target,
+    cancel: Cancellation,
 }
 impl Backend for Native {
     fn require_target(&mut self) -> Result<()> {
         self.target.require_unchanged()?;
+        self.cancel.require_active()?;
         input::require_no_modifiers()
     }
     fn paste(&mut self, text: &str) -> PasteAttempt {
-        clipboard::paste(&self.target, text)
+        clipboard::paste(&self.target, &self.cancel, text)
     }
     fn unicode(&mut self, events: &[Event]) -> Result<()> {
-        self.require_target()?;
-        input::send(events)
+        self.require_target()
+            .map_err(|e| e.context(voiceremote_core::InsertionFailure::NotStarted))?;
+        input::send(events, &self.cancel)
     }
 }
 

@@ -20,3 +20,8 @@ Start with [pairing.rs](src/pairing.rs), [tests](tests/security.rs) and the
 OS injection, deployed relay and phone interoperability remain **unverified**.
 Embedders hold `ReceiverLease` for receiver lifetime, clone one `Registry`, and
 close the transport after a receive/pairing error. `deliver` never executes tools.
+Insertion failures are non-fatal: `TaskStatus.command_id = segment_id` with
+`failed/unavailable` permits retry after a certified pre-input failure;
+`failed/error` is uncertain and retains its durable claim across reconnects.
+Existing injectors keep their synchronous method; an optional async method lets
+Windows isolate blocking providers without changing the Linux adapter.

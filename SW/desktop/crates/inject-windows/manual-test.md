@@ -1,17 +1,17 @@
 ```mermaid
 flowchart LR
-    Build[build on laptop] --> Scratch[Notepad / Chrome / Teams scratch field]
-    Scratch --> Insert[8-second synthetic insertion]
-    Insert --> Check[exact text / no Send / clipboard restored / focus retained]
-    Check --> Protect[password / read-only / elevated / clipboard history]
+    Build --> Scratch[Notepad / Chrome / Teams]
+    Scratch --> Insert[synthetic sample / 8-second countdown]
+    Insert --> Check[no Enter / WM_PASTE smoke / retained uncertain clipboard]
+    Check --> Protect[password / read-only / UIPI / busy target]
 ```
 
 Purpose: owner acceptance for task 4, REQ-16/18–21/57.
-Inputs: this crate's synthetic sample; owner's Windows laptop and installed apps.
-Verification: **unverified** until the owner records results. No real transcripts,
-messages, credentials, audio, screenshots of private data, or keys in results.
+Inputs: synthetic sample only; owner's Windows laptop and installed apps.
+Verification: **unverified** until the owner records results. Never record real
+transcripts, messages, credentials, audio, private screenshots or keys.
 
-1. In PowerShell, from `SW/desktop`, run:
+1. From `SW/desktop` in PowerShell:
 
    ```powershell
    cargo test --workspace -j4
@@ -19,64 +19,67 @@ messages, credentials, audio, screenshots of private data, or keys in results.
    cargo build -p voiceremote-app --features os-keychain -j4
    ```
 
-2. Copy a synthetic clipboard sentinel (for example `Clipboard sentinel`).
-   Run `cargo run -p voiceremote-inject-windows --example desktop-smoke -j4 -- --manual`.
-   During its eight-second countdown, focus a blank Notepad document.
-   Expect exactly `Synthetic café 漢字 🦀`, at the caret, without a newline.
-   Confirm the caret remains in the field and the console reports `focused=true`.
-   Paste into a separate scratch field afterward: expect the original sentinel.
+2. Copy `Synthetic clipboard sentinel`, run
+   `cargo run -p voiceremote-inject-windows --example desktop-smoke -j4 -- --manual`,
+   and focus blank Notepad during the eight-second countdown. Expect exactly
+   `Synthetic café 漢字 🦀` at the caret, no newline, and focus retained.
+   Generic paste reports **UNCONFIRMED** because a clipboard reader cannot prove
+   insertion. The dictated sample stays on the clipboard with history/cloud
+   opt-outs. **Do not expect the sentinel restored after queued Ctrl+V**: a busy
+   target could otherwise paste an old clipboard secret. Verify the field
+   visually; do not automatically retry an uncertain segment.
 
-3. Repeat step 2 in Chrome with a scratch `<textarea>` / contenteditable, and
-   in Teams' **unsent draft** compose field. Use a private test chat or an
-   offline compose surface. Confirm no message is sent and no field navigation
-   occurs. Repeat at a non-default keyboard layout and with emoji.
+3. Repeat in a Chrome scratch textarea/contenteditable and Teams' **unsent draft**
+   on a test chat or offline compose surface. Confirm no Send or field navigation.
+   Repeat with a different keyboard layout and emoji. A Unicode fallback reports
+   event acceptance; still verify app behavior visually. Unsupported clipboard
+   formats (for example a native bitmap) must choose fallback and preserve that
+   original clipboard. A newer user copy must never be overwritten.
 
-4. Repeat after copying rich text, a synthetic image, and a synthetic file.
-   Check original clipboard data/formats survive. Unsupported native formats
-   deliberately choose Unicode fallback; their original clipboard stays intact.
-   Run back-to-back insertions and copy a new synthetic sentinel during paste:
-   restoration must preserve the newer user copy. Busy clipboard / held Shift,
-   Ctrl, Alt or Windows keys must give a clear error or a safe pre-chord fallback.
+4. Focus blank password and read-only controls, then repeat while holding Shift.
+   Expect rejection before input; passwords/read-only report `focused=false`.
+   No clipboard replacement or text insertion. Target elevated Notepad from an
+   ordinary receiver: expect a clear UIPI error, never false success. Use only a
+   synthetic empty password field, never a real credential.
 
-5. In Chrome, focus a blank password input, then a read-only input. Run the
-   timed manual command for each. Expect `focused=false`, an error, and no
-   insertion or clipboard replacement. Do not enter or expose a real password.
-   With an ordinary receiver terminal, target an elevated Notepad: expect a
-   clear UIPI/elevation error and no insertion. Do not elevate the receiver to
-   bypass this check.
+5. Deliberately stall a scratch target while it has keyboard focus (where safely
+   reproducible). A queued Ctrl+V without a read waits up to 30 seconds; a late
+   read gets its full 150 ms settle period. It reports unconfirmed and leaves
+   dictated text, so a resumed target cannot paste the previous sentinel/secret.
+   A clipboard monitor's early read must not produce an insertion-success claim.
+   Record any wrong-field or old-clipboard insertion as a failure.
 
-6. Enable Windows clipboard history/cloud sync if permitted on the test account.
-   After successful insertion, use Win+V: the synthetic dictated sample must not
-   appear. Check a second test device's cloud clipboard where available.
-   Record Windows version/settings and pass/fail; monitors outside Windows'
-   clipboard policy remain **unverified**.
+6. Enable clipboard history/cloud sync on a test account where permitted. Win+V
+   and a second test device must not show the dictated sample in history/cloud.
+   The active local clipboard intentionally retains uncertain dictation.
+   Windows version/settings and third-party monitor behavior remain unverified.
 
-7. With the phone paired using the desktop README flow, run
-   `cargo run -p voiceremote-app --features os-keychain -- --keychain run --headless --account ACCOUNT --peer PEER`.
-   Observe the authenticated phone's FocusReport: correct account/device,
-   boolean focus and last activity only, approximately once per second.
-   Switch between editable, password, read-only, and non-editable controls.
-   Password / unknown metadata reports false. An idle field must not get a new
-   activity timestamp just because it is polled. Dictate synthetic text to the
-   selected desktop in each of the three apps; confirm no Enter/Send.
+7. Pair using the desktop README and run:
 
-8. Change focus during the countdown and during insertion, lock the desktop,
-   and restart the receiver. Check safe failure and no false success on a
-   blocked target. Extremely close focus changes remain a Win32 race; record
-   any wrong-field insertion as a failure.
+   ```powershell
+   cargo run -p voiceremote-app --features os-keychain -- --keychain run --headless --account ACCOUNT --peer PEER
+   ```
+
+   Observe encrypted FocusReport changes: account/device, boolean, last input
+   timestamp only. Stable metadata is quiet between 30-second heartbeats;
+   focus/input changes are sampled each second. Polling must not invent activity.
+   Dictate synthetic text in each app. On password/held Shift, the phone receives
+   TaskStatus with `command_id = segment_id`, `failed/unavailable`; focus a safe
+   field/release Shift and retry **the same segment without reconnecting**.
+   Unconfirmed input reports `failed/error`, remains deduplicated even after
+   reconnect, and requires explicit visual reconciliation rather than retry.
 
 | Check | Laptop / OS / app version | Result |
 |---|---|---|
-| Notepad literal + no Enter + restore | TBD | unverified |
-| Chrome textarea/contenteditable + no Enter + restore | TBD | unverified |
-| Teams draft + no Send + restore | TBD | unverified |
-| Password / read-only / elevated denial | TBD | unverified |
-| Rich/image/file/new copy clipboard preservation | TBD | unverified |
-| History / cloud opt-out | TBD | unverified |
-| Phone encrypted focus changes / real activity time | TBD | unverified |
-| Focus retained / race / locked desktop | TBD | unverified |
+| Notepad / Chrome / Teams literal text, no Enter/Send | TBD | unverified |
+| Password/read-only/modifier/UIPI denial and retry | TBD | unverified |
+| Uncertain paste keeps dictation; late target/monitor cannot expose old clipboard | TBD | unverified |
+| Fallback preserves original clipboard; history/cloud opt-out | TBD | unverified |
+| Phone failure status, reconnect deduplication, sparse focus reports | TBD | unverified |
 
 Coordinator: manually dispatch `.github/workflows/desktop.yml` after committing.
-The owned EDIT smoke can pass or explicitly skip with runner-session reason;
-it does not verify Notepad, Chrome or Teams. Do not run automated smoke mode on
-the owner's regular clipboard: it seeds synthetic fixtures. Use `--manual`.
+Automated smoke uses an owned EDIT, requires exactly one WM_PASTE plus exact
+readback, then proves Unicode fallback with no second WM_PASTE. It checks that
+uncertain paste retains dictation and fallback preserves the sentinel. It skips
+only with a concrete unavailable-desktop reason; injection errors fail. Automated
+mode seeds synthetic clipboard fixtures: use `--manual` on the owner's laptop.

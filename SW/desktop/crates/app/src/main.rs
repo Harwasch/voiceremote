@@ -133,7 +133,7 @@ struct UnavailableInjector;
 #[cfg(not(windows))]
 impl TextInjector for UnavailableInjector {
     fn insert_text(&mut self, _: &str) -> Result<()> {
-        bail!("text injection adapter not installed")
+        Err(voiceremote_core::InsertionFailure::NotStarted.into())
     }
 }
 #[cfg(windows)]
@@ -147,9 +147,25 @@ impl voiceremote_core::TextInjector for WindowsAppInjector {
         );
         if let Err(error) = &result {
             // Native errors contain fixed diagnostics and OS error codes only.
-            eprintln!("Windows dictation insertion failed: {error}");
+            eprintln!("Windows dictation insertion failed: {error:#}");
         }
         result
+    }
+    fn insert_text_async<'a>(
+        &'a mut self,
+        text: &'a str,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send + 'a>> {
+        Box::pin(async move {
+            let result = voiceremote_core::TextInjector::insert_text_async(
+                &mut voiceremote_inject_windows::WindowsInjector,
+                text,
+            )
+            .await;
+            if let Err(error) = &result {
+                eprintln!("Windows dictation insertion failed: {error:#}");
+            }
+            result
+        })
     }
 }
 fn store(cli: &Cli) -> Result<Arc<dyn KeyStore>> {

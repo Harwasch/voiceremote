@@ -373,6 +373,34 @@ impl Registry {
         );
         self.store.reserve(&name)
     }
+    fn segment_key(peer: &Peer, id: &str) -> String {
+        format!(
+            "segment-{}-{}",
+            peer.id,
+            hex::encode(Sha256::digest(id.as_bytes()))
+        )
+    }
+    /// Only call after an adapter certifies no input was queued. No text is stored.
+    pub fn release_unstarted_segment(&self, peer: &Peer, id: &str) -> Result<()> {
+        self.store.delete(&Self::segment_key(peer, id))
+    }
+    pub fn finish_segment(&self, peer: &Peer, id: &str, inserted: bool) -> Result<()> {
+        self.store.put(
+            &Self::segment_key(peer, id),
+            if inserted {
+                b"inserted"
+            } else {
+                b"unconfirmed"
+            },
+        )
+    }
+    /// A reservation left by a crash is uncertain, never a success acknowledgement.
+    pub fn segment_inserted(&self, peer: &Peer, id: &str) -> Result<bool> {
+        Ok(self
+            .store
+            .get(&Self::segment_key(peer, id))?
+            .is_some_and(|v| v.as_slice() == b"inserted"))
+    }
 }
 
 /// Hold for the lifetime of a pairing/receiver process. CLI revoke/devices remain

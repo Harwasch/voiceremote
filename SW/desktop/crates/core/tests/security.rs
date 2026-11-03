@@ -191,6 +191,87 @@ async fn full_xx_lan_qr_pair_under_one_minute_and_literal_delivery() -> Result<(
     );
     Ok(())
 }
+
+#[tokio::test]
+async fn pre_input_failure_reports_to_phone_and_same_segment_can_retry_without_reconnect()
+-> Result<()> {
+    struct BlockedOnce(bool);
+    impl TextInjector for BlockedOnce {
+        fn insert_text(&mut self, _: &str) -> Result<()> {
+            if !self.0 {
+                self.0 = true;
+                return Err(voiceremote_core::InsertionFailure::NotStarted.into());
+            }
+            Ok(())
+        }
+    }
+    let (mut p, mut d) = lan().await?;
+    let (mut ps, mut ds, ..) = enroll(p.as_mut(), d.as_mut(), registry(), registry()).await?;
+    let mut injector = BlockedOnce(false);
+    let text = dictation("Synthetic retry");
+    assert_eq!(
+        ds.deliver(d.as_mut(), text.clone(), &mut injector).await?,
+        Delivery::InsertionNotStarted
+    );
+    let InnerMessage::TaskStatus(status) = ps.receive(p.as_mut()).await? else {
+        panic!("missing failure status")
+    };
+    assert_eq!(status.command_id, "synthetic-segment");
+    assert_eq!(status.outcome, Some(TaskStatusOutcome::Unavailable));
+    assert_eq!(
+        ds.deliver(d.as_mut(), text.clone(), &mut injector).await?,
+        Delivery::Inserted
+    );
+    assert_eq!(
+        ds.deliver(d.as_mut(), text, &mut injector).await?,
+        Delivery::Duplicate
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn unknown_or_partial_insertion_reports_uncertainty_and_deduplicates_after_reconnect()
+-> Result<()> {
+    struct Uncertain(usize);
+    impl TextInjector for Uncertain {
+        fn insert_text(&mut self, _: &str) -> Result<()> {
+            self.0 += 1;
+            anyhow::bail!("synthetic unknown delivery")
+        }
+    }
+    let (pr, dr) = (registry(), registry());
+    let (mut p, mut d) = lan().await?;
+    let (mut ps, mut ds, pi, di, ..) =
+        enroll(p.as_mut(), d.as_mut(), pr.clone(), dr.clone()).await?;
+    let mut injector = Uncertain(0);
+    let text = dictation("Synthetic uncertain");
+    assert_eq!(
+        ds.deliver(d.as_mut(), text.clone(), &mut injector).await?,
+        Delivery::InsertionUnconfirmed
+    );
+    let InnerMessage::TaskStatus(status) = ps.receive(p.as_mut()).await? else {
+        panic!("missing uncertainty status")
+    };
+    assert_eq!(status.outcome, Some(TaskStatusOutcome::Error));
+    let (mut p, mut d) = lan().await?;
+    let pp = pr.devices()?.remove(0);
+    let dp = dr.devices()?.remove(0);
+    let (ps, ds) = tokio::join!(
+        pairing::resume_initiate(p.as_mut(), &pi, &pr, &pp, "phone"),
+        pairing::resume_accept(d.as_mut(), &di, &dr, &dp, "desktop")
+    );
+    let (mut ps, mut ds) = (ps?, ds?);
+    assert_eq!(
+        ds.deliver(d.as_mut(), text, &mut injector).await?,
+        Delivery::Duplicate
+    );
+    let InnerMessage::TaskStatus(status) = ps.receive(p.as_mut()).await? else {
+        panic!("missing duplicate uncertainty status")
+    };
+    assert_eq!(status.outcome, Some(TaskStatusOutcome::Error));
+    assert_eq!(injector.0, 1);
+    Ok(())
+}
 #[tokio::test]
 async fn full_xx_relay_qr_pair_under_one_minute() -> Result<()> {
     let start = Instant::now();
