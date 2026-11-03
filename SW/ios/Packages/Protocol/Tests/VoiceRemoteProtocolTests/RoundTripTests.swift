@@ -25,6 +25,10 @@ final class RoundTripTests: XCTestCase {
     }
     func typed(_ name: String, _ data: Data) throws -> JSONValue {
         switch name {
+        case "AuditArchiveWriter": return try roundTrip(AuditArchiveWriter.self, data)
+        case "AuditArchiveBlock": return try roundTrip(AuditArchiveBlock.self, data)
+        case "AuditArchiveRead": return try roundTrip(AuditArchiveRead.self, data)
+        case "AuditArchivePage": return try roundTrip(AuditArchivePage.self, data)
         case "RelayFrame": return try roundTrip(RelayFrame.self, data)
         case "RelayCiphertext": return try roundTrip(RelayCiphertext.self, data)
         case "RelayPresence": return try roundTrip(RelayPresence.self, data)

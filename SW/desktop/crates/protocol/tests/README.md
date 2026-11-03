@@ -7,7 +7,7 @@ flowchart LR
 
 | File | What it is | Status |
 |---|---|---|
-| [round_trip.rs](round_trip.rs) | All record/union types, malformed fixtures and encode checks | ✅ Linux |
+| [round_trip.rs](round_trip.rs) | All record/union types including archive block/read/page, malformed fixtures and encode checks | ✅ Linux |
 
 Start with the tests; shared JSON is included from `SYS/protocol/vectors` at
 compile time. Trace: product §4/§7; [REQ-59](../../../../../SYS/requirements.md#extensibility), [REQ-61](../../../../../SYS/requirements.md#extensibility).

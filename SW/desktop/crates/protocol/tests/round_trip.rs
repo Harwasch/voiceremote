@@ -37,6 +37,10 @@ fn typed_round_trip<T: WireRecord>(json: &str) -> Result<Value, String> {
 }
 fn typed(name: &str, json: &str) -> Result<Value, String> {
     match name {
+        "AuditArchiveWriter" => typed_round_trip::<AuditArchiveWriter>(json),
+        "AuditArchiveBlock" => typed_round_trip::<AuditArchiveBlock>(json),
+        "AuditArchiveRead" => typed_round_trip::<AuditArchiveRead>(json),
+        "AuditArchivePage" => typed_round_trip::<AuditArchivePage>(json),
         "RelayFrame" => typed_round_trip::<RelayFrame>(json),
         "RelayCiphertext" => typed_round_trip::<RelayCiphertext>(json),
         "RelayPresence" => typed_round_trip::<RelayPresence>(json),

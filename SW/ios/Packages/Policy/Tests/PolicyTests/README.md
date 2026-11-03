@@ -9,6 +9,7 @@ flowchart LR
 
 | File | Content | Status |
 |---|---|---|
+| [ArchiveTests.swift](ArchiveTests.swift) | Replication/retry, both chains, corrupt/missing/old archives, authenticated recovery/crash/races and bound authority retirement, archive_full/writer mismatch, padding, scheduled loss, authority reset/fencing, bounded append and replay-safe compaction | ✅ synthetic Linux tests; no production cipher adapter |
 | [RoutingPermitTests.swift](RoutingPermitTests.swift) | Exact stored command/preview/hash/destination binding, revocation, expiry and gate restart | ✅ Linux |
 | [GateTests.swift](GateTests.swift) | Every schema tool × tiers 1–3; injection, scope, expiry, races and replay | ✅ Synthetic Linux tests |
 | [AuditTests.swift](AuditTests.swift) | SHA-256 vectors, tampering, crash failures, actual file reopen and locking | ✅ Linux |
@@ -18,7 +19,6 @@ flowchart LR
 | [ReviewRegressionTests.swift](ReviewRegressionTests.swift) | Cross-review risk, TTL, revocation, transition, registry, cancellation and dismissal regressions | ✅ Failed before fixes; pass after |
 | [RecoveryTests.swift](RecoveryTests.swift) | Authenticated recovery, clock correction, tampering, partial writes, repeated crashes and races | ✅ Linux |
 
-Start with `everySchemaToolEveryTierRequiresCorrectAuthority`. All suites contain `Gate`
-in their name so the required scoped command includes every safety test. Test helpers
+Start with `everySchemaToolEveryTierRequiresCorrectAuthority`. Run the full Policy package command to include both gate and archive suites. Test helpers
 use fake time, memory checkpoints and authentication; the production Apple adapter is
 **unverified** here. Trace: REQ-28–35, REQ-54–55, REQ-61.

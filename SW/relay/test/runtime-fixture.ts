@@ -42,7 +42,8 @@ export class Room extends ProductionRoom {
         const state: any = this.stored();
         if (request.method === "POST") {
           const op = await request.text();
-          if (op === "unprovision") state.cloudProvisioned = false;
+          if (op === "archiveExpired") state.archiveExpiresAt = Date.now() - 1;
+          else if (op === "unprovision") state.cloudProvisioned = false;
           else if (op === "rollback") state.highWater = Date.now() + 60_000;
           else if (op === "orphan") state.orphanExpires = Date.now() - 1;
           else if (op.startsWith("remove:")) state.members = state.members.filter((m: any) => m.device !== op.slice(7));

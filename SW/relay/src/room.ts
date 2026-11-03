@@ -3,6 +3,8 @@ import { DurableObject } from "cloudflare:workers";
 import type { RelayPresence } from "./protocol/generated.js";
 import { decodeFrame, encodeFrame } from "./codec.js";
 import { parseControl } from "./control.js";
+import { ARCHIVE_LIMITS, archiveHash, decodeArchive, EncryptedArchive } from "./archive.js";
+import type { AuditArchiveBlock } from "./protocol/generated.js";
 import { CiphertextQueue } from "./queue.js";
 import type { WakeRegistration } from "./apns.js";
 import type { Env } from "./worker.js";
@@ -14,7 +16,7 @@ interface Invite { digest: string; issuer: string; expires: number }
 interface Challenge { nonce: string; device: string; operation: string; digest: string; expires: number; message: string }
 interface State {
   account: string; room: string; members: Member[]; invites: Invite[]; usedInvites: Invite[];
-  challenges: Challenge[]; highWater: number; cloudProvisioned?: boolean; paired: boolean; orphanExpires: number;
+  challenges: Challenge[]; highWater: number; cloudProvisioned?: boolean; paired: boolean; orphanExpires: number; archiveWriterKey?: string; archiveWriterRevision?: number; archiveExpiresAt?: number;
 }
 interface Attachment { device: string; generation: string }
 
@@ -39,7 +41,7 @@ export class Room extends DurableObject<Env> {
     let raw: string;
     try {
       if (provider) requireThat(cloudProvisioned(this.env), 503, "cloud_not_configured");
-      raw = request.method === "GET" ? (provider ? cloudSigningQuery(url) : "") : await body(request, provider ? cloudBodyLimit(this.env, provider) : LIMITS.controlBytes);
+      raw = request.method === "GET" ? (provider ? cloudSigningQuery(url) : "") : await body(request, provider ? cloudBodyLimit(this.env, provider) : (url.pathname.endsWith("/archive/checkpoint") ? ARCHIVE_LIMITS.checkpointBytes : url.pathname.endsWith("/archive/append") ? ARCHIVE_LIMITS.bodyBytes : LIMITS.controlBytes));
     }
     catch (error) { metric("rejected"); return failure(error); }
     if (provider) {
@@ -78,7 +80,7 @@ export class Room extends DurableObject<Env> {
     const state = this.stored(); requireThat(state, 403, join ? "invalid_join_token" : "forbidden");
     const now = Date.now();
     requireThat(Number.isSafeInteger(now) && now > 0 && now >= state.highWater, 503, "clock_unavailable");
-    if (!state.paired && state.orphanExpires <= now) {
+    if (!state.members.length || (!state.paired && state.orphanExpires <= now) || (state.archiveExpiresAt !== undefined && state.archiveExpiresAt <= now)) {
       await this.destroy(); throw new Refusal(403, join ? "invalid_join_token" : "forbidden");
     }
     state.highWater = now;
@@ -97,6 +99,7 @@ export class Room extends DurableObject<Env> {
     const deadlines = [...state.invites, ...state.usedInvites, ...state.challenges].map(x => x.expires);
     const queueDeadline = this.queue.deadline(); if (queueDeadline !== undefined) deadlines.push(queueDeadline);
     if (!state.paired) deadlines.push(state.orphanExpires);
+    if (state.archiveExpiresAt !== undefined) deadlines.push(state.archiveExpiresAt);
     if (deadlines.length) await this.ctx.storage.setAlarm(Math.min(...deadlines)); else await this.ctx.storage.deleteAlarm();
   }
   private member(state: State, device: unknown): Member {
@@ -108,16 +111,17 @@ export class Room extends DurableObject<Env> {
     const member = this.member(state, challenge.device);
     requireThat(challenge.operation === operation && challenge.digest === await hash(raw), 403, "forbidden");
     requireThat(await verify(member.key, request.headers.get("x-relay-signature"), challenge.message)
-      && challenge.expires > Date.now(), 403, "forbidden"); return member;
+      && challenge.expires > Date.now(), 403, "forbidden");
+    state.archiveExpiresAt = Date.now() + ARCHIVE_LIMITS.inactivityMs; await this.save(state); return member;
   }
   private async handle(request: Request, raw: string): Promise<Response> {
     const parts = new URL(request.url).pathname.split("/");
-    const account = parts[3], room = parts[5], operation = parts[6];
+    const account = parts[3], room = parts[5], operation = parts.slice(6).join("/");
     if (operation === "create") {
       const value = parseControl(raw); record(value, ["device_id", "public_key"]); id(value.device_id); await publicKey(value.public_key);
       requireThat(await verify(value.public_key as string, request.headers.get("x-relay-signature"),
         JSON.stringify(["voiceremote-relay-create-v1", account, room, await hash(raw)])), 403, "forbidden");
-      const existing = this.stored(); if (existing && !existing.paired && existing.orphanExpires <= Date.now()) await this.destroy();
+      const existing = this.stored(); if (existing && (!existing.members.length || (!existing.paired && existing.orphanExpires <= Date.now()) || (existing.archiveExpiresAt !== undefined && existing.archiveExpiresAt <= Date.now()))) await this.destroy();
       requireThat(!this.stored(), 409, "already_exists");
       this.ctx.storage.sql.exec("CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
       this.queue.initialize();
@@ -139,22 +143,49 @@ export class Room extends DurableObject<Env> {
       requireThat(await verify(value.public_key as string, value.signature, message) && invite.expires > Date.now(), 403, "forbidden");
       requireThat(!state.members.some(m => m.device === device), 409, "already_exists"); requireThat(state.members.length < LIMITS.devices, 409, "room_full");
       state.invites = state.invites.filter(i => i.digest !== digest); state.usedInvites.push(invite);
+      if (!state.paired) {
+        state.archiveWriterKey = value.public_key as string;
+        this.ctx.storage.transactionSync(() => new EncryptedArchive(this.ctx.storage.sql).bind(state.archiveWriterKey!));
+      }
       state.members.push({ device: value.device_id, key: value.public_key as string, generation: randomToken() }); state.paired = true;
+      state.archiveExpiresAt = Date.now() + ARCHIVE_LIMITS.inactivityMs;
       await this.save(state); metric("joined"); return json({ joined: true }, 201);
     }
-    value = operation === "connect" ? undefined : parseControl(raw); await this.save(state);
+    value = operation === "connect" ? undefined : operation.startsWith("archive/") && operation !== "archive/writer" ? decodeArchive(raw, operation === "archive/read") : parseControl(raw); await this.save(state);
     if (operation === "challenge") {
       record(value, ["device_id", "operation", "body_sha256"]); id(value.device_id); const member = this.member(state, value.device_id);
-      requireThat(["connect", "invite", "revoke", "proxy/elevenlabs", "proxy/assemblyai", "proxy/anthropic"].includes(value.operation as string)); unbase64(value.body_sha256, 32);
+      requireThat(["connect", "invite", "revoke", "archive/append", "archive/read", "archive/checkpoint", "archive/writer", "proxy/elevenlabs", "proxy/assemblyai", "proxy/anthropic"].includes(value.operation as string)); unbase64(value.body_sha256, 32);
       requireThat(await verify(member.key, request.headers.get("x-relay-signature"),
         JSON.stringify(["voiceremote-relay-challenge-v1", account, room, await hash(raw)])), 403, "forbidden");
       requireThat(state.challenges.filter(c => c.device === member.device).length < 2 && state.challenges.length < LIMITS.challenges, 429, "rate_limited");
       const nonce = randomToken(), expires = Date.now() + LIMITS.challengeTtlMs;
       const message = JSON.stringify(["voiceremote-relay-auth-v1", account, room, value.device_id, value.operation, value.body_sha256, nonce, expires]);
+      state.archiveExpiresAt = Date.now() + ARCHIVE_LIMITS.inactivityMs;
       state.challenges.push({ nonce, device: value.device_id, operation: value.operation as string, digest: value.body_sha256 as string, expires, message });
       await this.save(state); return json({ challenge: nonce, message, expires_at: expires, server_time: Date.now() });
     }
     const member = await this.authenticate(state, request, operation, raw);
+    if (operation === "archive/writer") {
+      record(value, ["account_id", "room_id", "device_id", "public_key", "old_signature", "revision"]);
+      requireThat(value.account_id === state.account && value.room_id === state.room, 403, "forbidden");
+      const target = this.member(state, value.device_id);
+      requireThat(target.key === value.public_key && state.archiveWriterKey && value.revision === (state.archiveWriterRevision ?? 0), 403, "archive_writer_mismatch");
+      const message = JSON.stringify(["voiceremote-audit-writer-v1", state.account, state.room, state.archiveWriterKey, target.device, target.key, state.archiveWriterRevision ?? 0]);
+      requireThat(await verify(state.archiveWriterKey, value.old_signature, message), 403, "archive_writer_mismatch");
+      state.archiveWriterKey = target.key; state.archiveWriterRevision = (state.archiveWriterRevision ?? 0) + 1;
+      this.ctx.storage.transactionSync(() => { new EncryptedArchive(this.ctx.storage.sql).bind(target.key); this.write(state); });
+      await this.save(state); return json({ replaced: true });
+    }
+    if (operation === "archive/append" || operation === "archive/read" || operation === "archive/checkpoint") {
+      requireThat(state.paired, 403, "forbidden");
+      const block = value as AuditArchiveBlock;
+      requireThat(block.account_id === state.account && block.room_id === state.room, 403, "forbidden");
+      const archive = new EncryptedArchive(this.ctx.storage.sql);
+      if (operation === "archive/read") return json({ account_id: state.account, room_id: state.room, epoch: block.epoch ?? 0, blocks: archive.read(block.sequence, block.epoch ?? 0) });
+      requireThat(block.block_hash === await archiveHash(block), 400, "archive_hash_mismatch");
+      this.ctx.storage.transactionSync(() => archive.append(block, member.key, operation === "archive/checkpoint"));
+      return json({ stored: true }, 201);
+    }
     if (operation === "invite") {
       record(value, ["token_sha256", "expires_at"]); unbase64(value.token_sha256, 32);
       requireThat(typeof value.expires_at === "number" && Number.isSafeInteger(value.expires_at)
@@ -174,7 +205,9 @@ export class Room extends DurableObject<Env> {
       this.cloud.revoke(value.device_id as string);
       if (!this.cloudEligible(state)) this.cloud.revoke();
       for (const socket of this.ctx.getWebSockets()) if (this.attachment(socket).device === value.device_id) this.close(socket, "revoked");
-      this.broadcastPresence(state, value.device_id, "offline"); metric("revoked"); return json({ revoked: true });
+      this.broadcastPresence(state, value.device_id, "offline");
+      if (!state.members.length) await this.destroy();
+      metric("revoked"); return json({ revoked: true });
     }
     requireThat(operation === "connect", 404, "not_found"); requireThat(request.headers.get("upgrade")?.toLowerCase() === "websocket", 426, "upgrade_required");
     for (const old of this.ctx.getWebSockets()) if (this.attachment(old).device === member.device) this.close(old, "replaced");
@@ -213,6 +246,7 @@ export class Room extends DurableObject<Env> {
         requireThat(member.generation === attachment.generation && socket.readyState === 1, 403, "forbidden");
         requireThat(typeof message === "string", 415, "text_required");
         requireThat(message.length <= LIMITS.frameBytes && utf8.encode(message).length <= LIMITS.frameBytes, 413, "too_large");
+        state.archiveExpiresAt = Date.now() + ARCHIVE_LIMITS.inactivityMs;
         const frame = decodeFrame(message);
         requireThat(frame.account_id === state.account && frame.room_id === state.room && frame.sender_device_id === member.device, 403, "forbidden");
         if (frame.kind === "wake_registration") {

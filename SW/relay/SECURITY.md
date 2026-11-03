@@ -8,6 +8,7 @@ flowchart LR
   Phone -->|TLS: plaintext cloud input| Proxy[Separate member-authenticated proxy]
   Proxy --> Vendors[Fixed speech / Messages APIs]
   Proxy --> Budget[Global counters + leases]
+  Room --> Archive[Member-signed encrypted audit archive]
   Room --> Queue[Opaque ciphertext rows]
   Room --> Wake[Separate cached provider JWT + fixed wake]
 ```
@@ -25,7 +26,8 @@ Exact requests, signing bytes, enrollment, expiry and limits:
 | Ciphertext | Schema-closed RelayFrame variants reject outer text/transcript/inner-payload fields before forwarding/storage. Endpoints must encrypt; arbitrary client bytes cannot be distinguished from encryption by the relay. |
 | Privacy evidence | AES-GCM interoperability proves opaque forwarding and endpoint decryption, not absence of plaintext by itself. Separate schema injection tests inspect all room KV/SQL rows/logs. Tests fail when closed-field validation or payload-safe logging is removed. |
 | Logging | Only fixed event names and numeric count/bytes. No IDs, bodies, ciphertext bytes, push tokens, headers or exception text. Wrangler observability is disabled. |
-| Stored metadata | IDs, public signing keys, generations, invite hashes/deadlines, temporary challenges, APNs registration/environment, sizes/times and overflow counters. A separate singleton WakeProvider stores its short-lived bearer JWT and credential fingerprint; no private key/content enters that cache. |
+| Stored metadata | Archive ciphertext/epoch/sequence/hash/size plus enrollment-bound public writer key/revision; IDs, public signing keys, generations, invite hashes/deadlines, temporary challenges, APNs registration/environment, sizes/times and overflow counters. A separate singleton WakeProvider stores its short-lived bearer JWT and credential fingerprint; no private key/content enters that cache. |
+| Audit archive | [Contract](../../SYS/protocol/audit-archive.md): ordered member-signed ciphertext, enrollment-bound phone key, signed replacement, 128 rows / 2 MiB per epoch, signed encrypted checkpoint before pruning, padded blobs and scheduled read-back. Same-key rejoin keeps writer role; new-key handoff needs old-writer signature or fresh-room pairing. Last-member removal deletes the room; authenticated inactivity expires it after 30 days (TBC). Phone-only AEAD and independent checkpoints provide end-to-end integrity/freshness; adapters and deployment **unverified**. |
 | Queue | SQLite rows bounded per offline recipient. Overflow drops only its oldest frames and persists a reconnect drop count. Other queues/live delivery continue; sender stays connected. TTL is enforced on access/alarms. |
 | Delivery | Send/replay has no application acknowledgment. Crash/reconnect races may lose/duplicate frames; endpoints retry/deduplicate. Relay delivery is not task execution. Previously delivered/in-flight data cannot be recalled. |
 | Admission | Creation uses IPv4/IPv6-/64 buckets. Failed-token buckets are per source/room, charged after mismatch. Valid tokens bypass exhausted failure buckets. Challenge allocation requires key possession and per-device slots. |
