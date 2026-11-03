@@ -74,6 +74,8 @@ Cloud CLI findings (2026-11-02; read-only inspection, no cloud task started):
 All provider execution, authentication, environment/repository mapping and real cloud
 status/output compatibility remain **unverified**. Evidence is fake-CLI integration
 coverage in [tests/adapters.rs](tests/adapters.rs), not owner-account acceptance.
+The launch/cancel regression uses explicit launcher readiness and command-ID receipt
+lookup, including when launcher completion follows the cancel acknowledgement.
 
 ## Supported command entry points (checked 2026-11-02)
 
