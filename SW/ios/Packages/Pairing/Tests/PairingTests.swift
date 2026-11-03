@@ -49,6 +49,26 @@ final class PairingTests: XCTestCase, @unchecked Sendable {
         XCTAssertEqual(token, Data(repeating: 7, count: 32))
         return try await PairingConfirmation(handshake: state, invitation: invitation)
     }
+    func testImpostorAdvertisementDoesNotShadowPinnedDesktop() async throws {
+        let key = Curve25519.KeyAgreement.PrivateKey()
+        let invitation = try PairingInvitation(qr: qr(key: key.publicKey.rawRepresentation), expectedAccount: "synthetic", clock: TestClock(now: 1))
+        let (badPhone, badDesktop) = InMemoryPairingTransport.pair()
+        let (goodPhone, goodDesktop) = InMemoryPairingTransport.pair()
+        let bad = Task { try? await self.accept(invitation: invitation, key: .init(), transport: badDesktop) }
+        let good = Task { try? await self.accept(invitation: invitation, key: key, transport: goodDesktop) }
+        let candidates = AsyncThrowingStream<InMemoryPairingTransport, Error> { output in
+            output.yield(badPhone); output.yield(goodPhone); output.finish()
+        }
+        let confirmation = try await PreferredConnection.tryLAN(candidates: candidates) { transport in
+            try await PairingConnection.initiate(invitation: invitation, staticKey: .init(), clock: TestClock(now: 1), transport: transport, timeout: .seconds(1))
+        }
+        let rejected = await bad.value
+        XCTAssertNil(rejected)
+        let accepted = await good.value
+        XCTAssertNotNil(accepted)
+        await confirmation.abort(transport: goodPhone)
+        await accepted?.abort(transport: goodDesktop)
+    }
     func testInMemoryPairingRequiresBothConfirmationsThenExchangesText() async throws {
         let key = Curve25519.KeyAgreement.PrivateKey()
         let invitation = try PairingInvitation(qr: qr(key: key.publicKey.rawRepresentation), expectedAccount: "synthetic", clock: TestClock(now: 1))

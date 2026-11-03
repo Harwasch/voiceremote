@@ -22,3 +22,5 @@ varies; Apple production uses `URLSessionWebSocketConnector`, whose execution is
 requested synthetic desktop `TextInjector`, gated by the `e2e-test` build feature.
 Keys and QR/token stay in memory or private temporary storage; output contains
 fixed event names. Temporary processes/storage are removed on exit.
+
+PhoneE2E uses production LAN framing, PreferredConnection and PhoneConnection for prepare/outcome/query. It tests max Unicode, positive/failure outcomes, durable never-claimed queries with one same-ID insertion, Auto age/skew and same-segment deduplication across LAN-to-relay fallback. CLI display readiness is auto-true; mDNS, capture control and native GUI are not exercised. CapturedTransport injects one synthetic stale encrypted packet solely to test receiver replay rejection.

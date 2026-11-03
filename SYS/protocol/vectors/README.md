@@ -30,3 +30,5 @@ after any edit. Trace: [REQ-59](../../requirements.md#extensibility),
 [REQ-22](../../requirements.md#pairing-and-transport) and
 [REQ-28–33](../../requirements.md#authorization-and-policy). Transport and policy integration
 remain **unverified**.
+
+Delivery vectors include prepared dictation, all outcome/control-result variants, actual listening independent of selection, invalid capture TTL, required request sequence/absolute expiry and out-of-range activity age.

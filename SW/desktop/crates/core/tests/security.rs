@@ -9,12 +9,14 @@ use std::{
 };
 use tokio::{net::TcpListener, task::JoinHandle};
 use tokio_tungstenite::{accept_async, tungstenite::Message};
+#[cfg(unix)]
+use voiceremote_core::storage::FileKeyStore;
 use voiceremote_core::{
     Result, TextInjector,
     pairing::{self, Clock, Offer, PendingPair, SystemClock},
     protocol::*,
     session::{Delivery, Session},
-    storage::{FileKeyStore, Identity, KeyStore, Registry},
+    storage::{Identity, KeyStore, Registry},
     transport::{LanListener, LanTransport, RelayRoute, RelayTransport, Transport},
 };
 use zeroize::Zeroizing;
@@ -58,6 +60,7 @@ fn info(device: &str) -> DeviceInfo {
 }
 fn dictation(text: &str) -> InnerMessage {
     InnerMessage::DictationText(DictationText {
+        preparation_id: None,
         kind: DictationTextKind::DictationText,
         account_id: "synthetic-account".into(),
         segment_id: "synthetic-segment".into(),
@@ -184,6 +187,32 @@ async fn full_xx_lan_qr_pair_under_one_minute_and_literal_delivery() -> Result<(
         Delivery::Inserted
     );
     assert_eq!(injector.0, ["Synthetic sample"]);
+    assert!(matches!(
+        ps.receive(p.as_mut()).await?,
+        InnerMessage::DictationOutcome(DictationOutcome {
+            outcome: DictationOutcomeOutcome::Inserted,
+            ..
+        })
+    ));
+    ds.deliver(
+        d.as_mut(),
+        InnerMessage::DictationQuery(DictationQuery {
+            kind: DictationQueryKind::DictationQuery,
+            account_id: "synthetic-account".into(),
+            segment_id: "synthetic-segment".into(),
+            target_device_id: "desktop".into(),
+        }),
+        &mut injector,
+    )
+    .await?;
+    assert!(matches!(
+        ps.receive(p.as_mut()).await?,
+        InnerMessage::DictationOutcome(DictationOutcome {
+            outcome: DictationOutcomeOutcome::Inserted,
+            ..
+        })
+    ));
+    assert_eq!(injector.0.len(), 1);
     assert!(start.elapsed() < Duration::from_secs(60));
     eprintln!(
         "synthetic LAN QR pair + delivery compute: {:?}; human time unverified",
@@ -213,11 +242,11 @@ async fn pre_input_failure_reports_to_phone_and_same_segment_can_retry_without_r
         ds.deliver(d.as_mut(), text.clone(), &mut injector).await?,
         Delivery::InsertionNotStarted
     );
-    let InnerMessage::TaskStatus(status) = ps.receive(p.as_mut()).await? else {
+    let InnerMessage::DictationOutcome(status) = ps.receive(p.as_mut()).await? else {
         panic!("missing failure status")
     };
-    assert_eq!(status.command_id, "synthetic-segment");
-    assert_eq!(status.outcome, Some(TaskStatusOutcome::Unavailable));
+    assert_eq!(status.segment_id, "synthetic-segment");
+    assert_eq!(status.outcome, DictationOutcomeOutcome::Unavailable);
     assert_eq!(
         ds.deliver(d.as_mut(), text.clone(), &mut injector).await?,
         Delivery::Inserted
@@ -249,10 +278,10 @@ async fn unknown_or_partial_insertion_reports_uncertainty_and_deduplicates_after
         ds.deliver(d.as_mut(), text.clone(), &mut injector).await?,
         Delivery::InsertionUnconfirmed
     );
-    let InnerMessage::TaskStatus(status) = ps.receive(p.as_mut()).await? else {
+    let InnerMessage::DictationOutcome(status) = ps.receive(p.as_mut()).await? else {
         panic!("missing uncertainty status")
     };
-    assert_eq!(status.outcome, Some(TaskStatusOutcome::Error));
+    assert_eq!(status.outcome, DictationOutcomeOutcome::Unconfirmed);
     let (mut p, mut d) = lan().await?;
     let pp = pr.devices()?.remove(0);
     let dp = dr.devices()?.remove(0);
@@ -265,10 +294,10 @@ async fn unknown_or_partial_insertion_reports_uncertainty_and_deduplicates_after
         ds.deliver(d.as_mut(), text, &mut injector).await?,
         Delivery::Duplicate
     );
-    let InnerMessage::TaskStatus(status) = ps.receive(p.as_mut()).await? else {
+    let InnerMessage::DictationOutcome(status) = ps.receive(p.as_mut()).await? else {
         panic!("missing duplicate uncertainty status")
     };
-    assert_eq!(status.outcome, Some(TaskStatusOutcome::Error));
+    assert_eq!(status.outcome, DictationOutcomeOutcome::Unconfirmed);
     assert_eq!(injector.0, 1);
     Ok(())
 }
@@ -1249,5 +1278,97 @@ async fn relay_keepalive_detects_half_open_websocket() -> Result<()> {
         start.elapsed() >= Duration::from_secs(30) && start.elapsed() < Duration::from_secs(31)
     );
     worker.abort();
+    Ok(())
+}
+
+#[tokio::test]
+async fn never_claimed_query_allows_same_identity_once_across_registry_handles() -> Result<()> {
+    let keys = Arc::new(MemoryStore::default());
+    exercise_never_claimed_query(|| Ok(keys.clone())).await?;
+    assert!(
+        keys.0
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(name, value)| name.starts_with("never-claimed-") && value == b"never_claimed")
+    );
+    Ok(())
+}
+
+// FileKeyStore deliberately requires Unix private file modes. Windows uses
+// OsKeyStore; retain the shared protocol checks above on every platform.
+#[cfg(unix)]
+#[tokio::test]
+async fn never_claimed_query_allows_same_identity_once_and_survives_reopen() -> Result<()> {
+    let directory = tempfile::tempdir()?;
+    exercise_never_claimed_query(|| {
+        Ok(Arc::new(FileKeyStore::new(directory.path().join("state"))?))
+    })
+    .await?;
+    assert!(
+        std::fs::read_dir(directory.path().join("state"))?
+            .filter_map(|e| e.ok())
+            .any(|e| e
+                .file_name()
+                .to_string_lossy()
+                .starts_with("never-claimed-"))
+    );
+    Ok(())
+}
+
+async fn exercise_never_claimed_query(open: impl Fn() -> Result<Arc<dyn KeyStore>>) -> Result<()> {
+    let dr = Registry::new(open()?);
+    let (mut p, mut d) = lan().await?;
+    let (mut ps, mut ds, ..) = enroll(p.as_mut(), d.as_mut(), registry(), dr).await?;
+    let query = InnerMessage::DictationQuery(DictationQuery {
+        kind: DictationQueryKind::DictationQuery,
+        account_id: "synthetic-account".into(),
+        segment_id: "synthetic-segment".into(),
+        target_device_id: "desktop".into(),
+    });
+    let mut injector = Injector::default();
+    ds.deliver(d.as_mut(), query.clone(), &mut injector).await?;
+    assert!(matches!(
+        ps.receive(p.as_mut()).await?,
+        InnerMessage::DictationOutcome(DictationOutcome {
+            outcome: DictationOutcomeOutcome::Unavailable,
+            ..
+        })
+    ));
+    let reopened_before_send = Registry::new(open()?);
+    assert_eq!(
+        reopened_before_send.segment_disposition(ds.peer(), "synthetic-segment")?,
+        None
+    );
+    assert_eq!(
+        ds.deliver(d.as_mut(), dictation("Synthetic."), &mut injector)
+            .await?,
+        Delivery::Inserted
+    );
+    let _ = ps.receive(p.as_mut()).await?;
+    assert_eq!(
+        ds.deliver(d.as_mut(), dictation("Synthetic."), &mut injector)
+            .await?,
+        Delivery::Duplicate
+    );
+    let _ = ps.receive(p.as_mut()).await?;
+    ds.deliver(d.as_mut(), query, &mut injector).await?;
+    assert!(matches!(
+        ps.receive(p.as_mut()).await?,
+        InnerMessage::DictationOutcome(DictationOutcome {
+            outcome: DictationOutcomeOutcome::Inserted,
+            ..
+        })
+    ));
+    assert_eq!(injector.0.len(), 1);
+    // A crash after reservation is never negative evidence.
+    assert!(reopened_before_send.claim_segment(ds.peer(), "crashed-segment")?);
+    let reopened = Registry::new(open()?);
+    assert_eq!(
+        reopened.segment_disposition(ds.peer(), "crashed-segment")?,
+        Some(false)
+    );
+    assert!(!reopened.claim_segment(ds.peer(), "crashed-segment")?);
+    assert!(reopened.segment_inserted(ds.peer(), "synthetic-segment")?);
     Ok(())
 }

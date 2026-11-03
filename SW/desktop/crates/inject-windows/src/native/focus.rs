@@ -1,8 +1,5 @@
 use crate::policy::{self, FocusEvidence};
-use std::{
-    mem::size_of,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::mem::size_of;
 use voiceremote_core::{Result, ensure};
 use windows::Win32::{
     Foundation::{CloseHandle, HANDLE, HWND},
@@ -198,19 +195,15 @@ impl Target {
     }
 }
 
-pub(super) fn activity_timestamp() -> u64 {
+pub(super) fn activity_age() -> Option<u64> {
     let mut info = LASTINPUTINFO {
         cbSize: size_of::<LASTINPUTINFO>() as u32,
         ..Default::default()
     };
     unsafe {
         if !GetLastInputInfo(&mut info).as_bool() {
-            return 0;
+            return None;
         }
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64;
-        policy::last_activity_at(now, GetTickCount(), info.dwTime)
+        Some(u64::from(GetTickCount().wrapping_sub(info.dwTime)))
     }
 }

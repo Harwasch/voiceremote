@@ -16,6 +16,8 @@ pub struct Session {
     local_device: String,
     failed: bool,
     revisions: HashMap<String, u64>,
+    presentation_required: bool,
+    prepared: Option<String>,
 }
 #[derive(Debug, PartialEq)]
 pub enum Delivery {
@@ -42,7 +44,15 @@ impl Session {
             local_device,
             failed: false,
             revisions: HashMap::new(),
+            presentation_required: false,
+            prepared: None,
         }
+    }
+    pub fn require_presentation(&mut self) {
+        self.presentation_required = true;
+    }
+    pub fn presentation_ready(&mut self, id: Option<String>) {
+        self.prepared = id;
     }
     pub fn registry(&self) -> &Registry {
         &self.registry
@@ -162,6 +172,17 @@ impl Session {
                     text.target_device_id == self.local_device,
                     "wrong dictation target"
                 );
+                if self.presentation_required
+                    && (self.prepared.is_none() || text.preparation_id != self.prepared)
+                {
+                    self.report_insertion(
+                        transport,
+                        &text.segment_id,
+                        Some(crate::InsertionFailure::NotStarted),
+                    )
+                    .await?;
+                    return Ok(Delivery::InsertionNotStarted);
+                }
                 if let Some(previous) = self.revisions.get(&text.segment_id) {
                     if text.revision <= *previous {
                         if text.state == DictationTextState::Committed {
@@ -238,6 +259,26 @@ impl Session {
                     Some(crate::InsertionFailure::Unconfirmed) => Delivery::InsertionUnconfirmed,
                 })
             }
+            InnerMessage::DictationQuery(query) => {
+                ensure!(
+                    query.target_device_id == self.local_device,
+                    "wrong query target"
+                );
+                let disposition = self
+                    .registry
+                    .segment_disposition(&self.peer, &query.segment_id)?;
+                self.report_insertion(
+                    transport,
+                    &query.segment_id,
+                    match disposition {
+                        Some(true) => None,
+                        Some(false) => Some(crate::InsertionFailure::Unconfirmed),
+                        None => Some(crate::InsertionFailure::NotStarted),
+                    },
+                )
+                .await?;
+                Ok(Delivery::Metadata)
+            }
             InnerMessage::Revoke(revoke) => {
                 ensure!(
                     revoke.device_id == self.local_device,
@@ -274,27 +315,24 @@ impl Session {
         segment: &str,
         failure: Option<crate::InsertionFailure>,
     ) -> Result<()> {
-        let Some(failure) = failure else {
-            return Ok(());
-        };
-        // Existing wire type: command_id correlates to the dictation segment.
-        // unavailable = safe retry; error = uncertain, reconcile without retry.
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64;
+        // A durable positive outcome follows successful native insertion. A lost
+        // reply can be queried after resume without sending text again.
         self.send(
             transport,
-            &InnerMessage::TaskStatus(TaskStatus {
-                kind: TaskStatusKind::TaskStatus,
+            &InnerMessage::DictationOutcome(DictationOutcome {
+                kind: DictationOutcomeKind::DictationOutcome,
                 account_id: self.peer.info.account_id.clone(),
-                command_id: segment.into(),
-                updated_at: now,
-                execution_state: ExecutionState::Failed,
-                outcome: Some(match failure {
-                    crate::InsertionFailure::NotStarted => TaskStatusOutcome::Unavailable,
-                    crate::InsertionFailure::Unconfirmed => TaskStatusOutcome::Error,
-                }),
+                segment_id: segment.into(),
+                target_device_id: self.local_device.clone(),
+                outcome: match failure {
+                    None => DictationOutcomeOutcome::Inserted,
+                    Some(crate::InsertionFailure::NotStarted) => {
+                        DictationOutcomeOutcome::Unavailable
+                    }
+                    Some(crate::InsertionFailure::Unconfirmed) => {
+                        DictationOutcomeOutcome::Unconfirmed
+                    }
+                },
             }),
         )
         .await

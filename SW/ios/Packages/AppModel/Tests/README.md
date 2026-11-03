@@ -26,3 +26,4 @@ and consumed approval retry with failing tests; then repaired those transitions.
 No real transcripts, audio or keys. Apple adapter behavior and CI remain **unverified**.
 
 | [BenchmarkRecorderTests.swift](BenchmarkRecorderTests.swift) | Synthetic clipping/battery export and 50-recording command-to-proposal integration | ✅ Linux synthetic tests; device **unverified** |
+Delivery regressions cover positive outcome authentication/restart, remote-start refusal from OFF, late/stale stop rejection, and tap-only same-ID resend after certified never-claimed queries. Remote requests never start synthetic capture. Capture and field adapters are synthetic.

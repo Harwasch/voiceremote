@@ -20,10 +20,36 @@ private func device(_ id: String, role: DeviceInfoRole = .text_receiver, capabil
     DeviceInfo(account_id: account, device_id: id, display_name: id, platform: .ios, role: role, capabilities: capabilities)
 }
 private func focus(_ id: String, _ time: Int64, focused: Bool = true, account: String = "test") -> FocusReport {
-    FocusReport(account_id: account, device_id: id, text_field_focused: focused, last_activity_at: time)
+    FocusReport(account_id: account, device_id: id, text_field_focused: focused, last_activity_at: time, activity_age_ms: 0)
 }
 
 final class LogicTests: XCTestCase, @unchecked Sendable {
+    func testIdleHeartbeatCannotRefreshActivityDespiteClockSkew() throws {
+        let clock = TestFocusClock(100_000)
+        var picker = TargetPicker(accountID: "test", phoneID: "phone", clock: clock)
+        let bytes = Data(#"{"kind":"focus_report","account_id":"test","device_id":"desktop","text_field_focused":true,"last_activity_at":9007199254740991,"activity_age_ms":61000}"#.utf8)
+        try picker.update(ProtocolCodec.decode(FocusReport.self, from: bytes))
+        XCTAssertEqual(try picker.resolve(devices: [device("desktop")]).device_id, "phone")
+    }
+    func testAutoRanksActivityAgeAcrossTwoDevicesAndIdleHeartbeats() throws {
+        let clock = TestFocusClock(100_000)
+        var picker = TargetPicker(accountID: "test", phoneID: "phone", clock: clock)
+        func report(_ id: String, _ age: Int64, epoch: Int64) -> FocusReport {
+            FocusReport(account_id: "test", device_id: id, text_field_focused: true, last_activity_at: epoch, activity_age_ms: age)
+        }
+        try picker.update(report("a", 500, epoch: 0))
+        clock.set(100_100)
+        try picker.update(report("b", 30_000, epoch: 9_007_199_254_740_991))
+        XCTAssertEqual(try picker.resolve(devices: [device("a"), device("b")]).device_id, "a")
+        clock.set(160_100)
+        try picker.update(report("b", 90_000, epoch: 9_007_199_254_740_991))
+        XCTAssertEqual(try picker.resolve(devices: [device("a"), device("b")]).device_id, "phone")
+        // Legacy focus without an age is unknown; a heartbeat is not input.
+        try picker.update(FocusReport(account_id: "test", device_id: "a", text_field_focused: true, last_activity_at: 0))
+        XCTAssertEqual(try picker.resolve(devices: [device("a")]).device_id, "phone")
+        try picker.update(report("a", 0, epoch: 0)); picker.clear("a")
+        XCTAssertEqual(try picker.resolve(devices: [device("a")]).device_id, "phone")
+    }
     func testModeCaptureAndTargetAreIndependent() {
         var state = AppState()
         XCTAssertEqual(state.mode, .dictation); XCTAssertEqual(state.capture, .off)

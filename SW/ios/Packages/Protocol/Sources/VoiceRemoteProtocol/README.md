@@ -16,3 +16,5 @@ Wire parsing rejects duplicate decoded keys at every object depth and preserves 
 
 Reviewed control/base64/hex patterns inspect `unicodeScalars` directly; no regex or grapheme
 boundaries participate in validation. macOS 26 execution remains **unverified** pending CI.
+
+Generated delivery/control messages and activity-age/listening fields plus required capture request sequence/absolute expiry come from SYS/protocol; round trips cover the new variants. Do not hand-edit Generated.swift.

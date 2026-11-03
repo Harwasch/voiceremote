@@ -244,3 +244,7 @@ cleanup. Unit tests are synthetic evidence only (REQ-18/21–25/57).
 
 The workspace lockfile includes the tray dependency graph. Local checks and CI
 use `--locked`; native GUI/installer acceptance remains **unverified**.
+The workspace lockfile is outside this task’s ownership and remains unchanged.
+The coordinator needs to refresh `Cargo.lock` before committing the new crate.
+
+Delivery builds use the refreshed lockfile (`--locked`); production receiver paths keep private LAN available beside relay. See the [wire exchange](../../SYS/protocol/wire-contract.md#dictation-target-and-capture-exchange).

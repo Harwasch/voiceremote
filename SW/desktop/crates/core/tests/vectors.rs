@@ -85,6 +85,7 @@ fn published_xx_pairing_vector_matches() -> Result<()> {
     let m = i.read_message(&buffer[..n], &mut plain)?;
     assert_eq!(&plain[..m], &dc);
     let application = encode(&DictationText {
+        preparation_id: None,
         kind: DictationTextKind::DictationText,
         account_id: "synthetic-account".into(),
         segment_id: "synthetic-segment".into(),

@@ -56,3 +56,5 @@ Trace: [REQ-59](../requirements.md#extensibility) (generated compatibility),
 [REQ-22, REQ-24](../requirements.md#pairing-and-transport) (pairing/relay), and
 [REQ-28–36](../requirements.md#authorization-and-policy) (authority contracts).
 Contract checks and the desktop’s synthetic pairing/security tests are proven here; physical phone and deployed relay integration remain unverified.
+
+The [delivery exchange](wire-contract.md#dictation-target-and-capture-exchange) defines prepare/ready, durable outcome/query, sequenced, expiring stop-only remote capture control and clock-skew-safe activity age. Physical display/native acceptance remains **unverified**.

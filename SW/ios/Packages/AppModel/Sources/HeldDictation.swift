@@ -6,10 +6,12 @@ import VoiceRemoteProtocol
 public enum DictationDeliveryError: Error, Equatable, Sendable { case unreachable, failed, unconfirmed }
 public protocol DictationAvailability: DictationTarget {
     func isReachable(_ deviceID: String) async -> Bool
+    func reconcile(segmentID: String, deviceID: String) async throws -> DictationOutcome
     func deliveryEpoch(_ deviceID: String) async -> UUID?
     func insert(_ text: DictationText, expectedEpoch: UUID?) async throws
 }
 public extension DictationAvailability {
+    func reconcile(segmentID: String, deviceID: String) async throws -> DictationOutcome { throw DictationDeliveryError.unconfirmed }
     func deliveryEpoch(_ deviceID: String) async -> UUID? { nil }
     func insert(_ text: DictationText, expectedEpoch: UUID?) async throws { try await insert(text) }
 }
@@ -110,10 +112,20 @@ public actor HeldDictationPipeline {
         sending.insert(id); defer { sending.remove(id) }
         guard let entry = try await history.entries(now: now).first(where: { $0.segmentID == id }),
               let state = await history.deliveryStates()[id], [.held, .failed, .unconfirmed].contains(state) else { throw CoreError.unknownSegment }
+        if state == .unconfirmed {
+            guard let availability = target as? any DictationAvailability else { throw DictationDeliveryError.unconfirmed }
+            let outcome = try await availability.reconcile(segmentID: id, deviceID: entry.targetID)
+            guard outcome.account_id == accountID, outcome.target_device_id == entry.targetID,
+                  outcome.segment_id == entry.segmentID else { throw DictationDeliveryError.unconfirmed }
+            try await history.dictationOutcome(outcome, from: entry.targetID, accountID: accountID)
+            if outcome.outcome == .inserted { return }
+            guard outcome.outcome == .unavailable else { throw DictationDeliveryError.unconfirmed }
+        }
         if entry.targetID != phoneID { _ = try await registry.textReceiver(entry.targetID) }
         let device = entry.targetID == phoneID ? TargetPicker(accountID: accountID, phoneID: phoneID).phone : try await registry.textReceiver(entry.targetID)
         try await target.showTarget(device)
-        try await deliver(entry, revision: 0)
+        let epoch = await (target as? any DictationAvailability)?.deliveryEpoch(device.device_id)
+        try await deliver(entry, revision: 0, expectedEpoch: epoch)
     }
     private func message(_ entry: HistoryEntry, revision: Int64) -> DictationText {
         DictationText(account_id: accountID, segment_id: entry.segmentID, revision: revision, state: .committed,

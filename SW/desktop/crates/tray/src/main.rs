@@ -22,8 +22,14 @@ fn snapshot(backend: State<'_, Arc<Backend>>) -> Result<Snapshot, String> {
     backend.snapshot().map_err(failure)
 }
 #[tauri::command]
-async fn pair(settings: Settings, backend: State<'_, Arc<Backend>>) -> Result<(), String> {
-    backend.pair(settings).map_err(failure)?;
+async fn pair(
+    settings: Settings,
+    provisioning_secret: Option<String>,
+    backend: State<'_, Arc<Backend>>,
+) -> Result<(), String> {
+    backend
+        .pair(settings, provisioning_secret)
+        .map_err(failure)?;
     let _ = backend::log(&backend.root, LogEvent::PairRequested);
     Ok(())
 }
@@ -137,19 +143,21 @@ fn main() {
                         }
                         let flash = Instant::now() < flashing_until;
                         let icon = model::icon(&snapshot.status, flash);
-                        let _ = tray.set_icon(Some(tauri::image::Image::new_owned(
-                            model::icon_rgba(icon),
-                            32,
-                            32,
-                        )));
+                        let icon_ready = tray
+                            .set_icon(Some(tauri::image::Image::new_owned(
+                                model::icon_rgba(icon),
+                                32,
+                                32,
+                            )))
+                            .is_ok();
                         let mode = match snapshot.status.mode {
                             Some(voiceremote_core::protocol::Mode::Dictation) => "Dictation",
                             Some(_) => "AI Control",
                             None => "Mode unknown",
                         };
-                        let capture = match snapshot.status.capture {
-                            Some(voiceremote_core::protocol::CaptureState::Off) => "Not listening",
-                            Some(_) => "Listening",
+                        let capture = match snapshot.status.listening {
+                            Some(false) => "Not listening",
+                            Some(true) => "Listening",
                             None => "Capture unknown",
                         };
                         let _ =
@@ -159,7 +167,12 @@ fn main() {
                         if let Some(overlay) = handle.get_webview_window("overlay") {
                             let _ = overlay.set_ignore_cursor_events(true);
                             if flash {
-                                let _ = overlay.show();
+                                let shown = overlay.show().is_ok();
+                                control::presented(
+                                    control::hub(),
+                                    snapshot.status.flash,
+                                    icon_ready && shown,
+                                );
                             } else {
                                 let _ = overlay.hide();
                             }

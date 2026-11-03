@@ -110,10 +110,20 @@ public actor AppHistoryStore: HistoryStore {
         default: break
         }
     }
+    public func dictationOutcome(_ status: DictationOutcome, from deviceID: String, accountID: String) throws {
+        guard status.account_id == accountID, status.target_device_id == deviceID,
+              values.contains(where: { $0.segmentID == status.segment_id && $0.targetID == deviceID }),
+              let state = states[status.segment_id], [.unconfirmed, .failed].contains(state) else { return }
+        switch status.outcome {
+        case .inserted: try setDelivery(.delivered, id: status.segment_id)
+        case .unavailable: try setDelivery(.failed, id: status.segment_id)
+        case .unconfirmed: try setDelivery(.unconfirmed, id: status.segment_id)
+        }
+    }
     public func finishDelivery(id: String, phone: Bool) throws {
         // An asynchronous desktop failure may arrive before insert() returns.
         guard states[id] == .unconfirmed else { return }
-        if phone { try setDelivery(.delivered, id: id) }
+        try setDelivery(.delivered, id: id)
     }
     public func setDelivery(_ state: TextDeliveryState, id: String) throws {
         guard values.contains(where: { $0.segmentID == id }) else { throw CoreError.unknownSegment }

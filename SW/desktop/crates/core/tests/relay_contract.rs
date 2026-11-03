@@ -502,6 +502,7 @@ async fn signed_first_room_invite_join_full_xx_maximum_dictation_and_revoke() ->
     let mut ds = dp.finish(dr.clone())?;
     let text = "🦀".repeat(16_384);
     let message = InnerMessage::DictationText(DictationText {
+        preparation_id: None,
         kind: DictationTextKind::DictationText,
         account_id: "synthetic-account".into(),
         segment_id: "synthetic-segment".into(),
@@ -517,6 +518,13 @@ async fn signed_first_room_invite_join_full_xx_maximum_dictation_and_revoke() ->
     assert_eq!(injector.0, text);
     assert!(fake.state.lock().unwrap().max_frame <= 16_384);
     assert!(fake.state.lock().unwrap().frames > 10);
+    assert!(matches!(
+        ps.receive(&mut pt).await?,
+        InnerMessage::DictationOutcome(DictationOutcome {
+            outcome: DictationOutcomeOutcome::Inserted,
+            ..
+        })
+    ));
     desktop.revoke("phone").await?;
     assert!(
         tokio::time::timeout(Duration::from_secs(1), pt.recv())

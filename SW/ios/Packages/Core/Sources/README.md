@@ -16,3 +16,5 @@ flowchart LR
 | [DictationPipeline.swift](DictationPipeline.swift) | Expose/pin target, preserve line boundaries as spaces, drop empty text, save and insert literal text | ✅ Tested |
 
 Start with `AppState.swift`. Requirements and adapter obligations: [package map](../README.md).
+
+TargetPicker ranks native input age plus phone monotonic elapsed time. Missing age is inactive, disconnect clears focus, and idle heartbeats cannot reset the 60-second activity window.

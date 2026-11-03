@@ -16,7 +16,7 @@ FORBIDDEN = {'authenticated_actor', 'activation_kind', 'approval_credential_clas
              'granted_scope_id', 'source_tier', 'approval_event_id', 'policy_version',
              'risk_class', 'payload_hash', 'execution_state', 'outcome',
              'speaker_evidence', 'recording_consent_state'}
-DICTATION_FIELDS = {'kind', 'account_id', 'segment_id', 'revision', 'state', 'target_device_id', 'text'}
+DICTATION_FIELDS = {'kind', 'account_id', 'segment_id', 'revision', 'state', 'target_device_id', 'text', 'preparation_id'}
 RELAY_FIELDS = {
     'RelayCiphertext': {'kind', 'account_id', 'room_id', 'sender_device_id', 'ciphertext'},
     'RelayPresence': {'kind', 'account_id', 'room_id', 'sender_device_id', 'state'},
@@ -50,7 +50,7 @@ def dictation_invariant(defs):
     assert props['kind'] == {'const': 'dictation_text'}
     assert props['state'] == {'type': 'string', 'enum': ['partial', 'committed']}, 'dictation state gained an action'
     assert props['text']['type'] == 'string', 'dictation text became structured actions'
-    for field in ('account_id', 'segment_id', 'target_device_id'):
+    for field in ('account_id', 'segment_id', 'target_device_id', 'preparation_id'):
         assert props[field] == {'$ref': '#/$defs/Identifier'}, 'dictation identifier gained an action'
     assert props['revision'] == {'$ref': '#/$defs/Counter'}
     assert defs['DictationText']['additionalProperties'] is False

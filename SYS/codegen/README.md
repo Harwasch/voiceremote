@@ -38,3 +38,5 @@ Trace: [REQ-59](../requirements.md#extensibility), [REQ-61](../requirements.md#e
 [REQ-16](../requirements.md#dictation-delivery-and-targets) and
 [REQ-28–33](../requirements.md#authorization-and-policy). Local contract checks
 are evidence for the schema only; see [runtime obligations](../protocol/wire-contract.md).
+
+The dictation field allowlist now includes only the opaque preparation identifier for display-ready binding; mutation checks still reject Send/Enter and structured actions.

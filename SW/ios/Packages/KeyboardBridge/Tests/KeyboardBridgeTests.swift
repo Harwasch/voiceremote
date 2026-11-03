@@ -33,6 +33,25 @@ final class KeyboardBridgeTests: XCTestCase {
         CommittedSegment(id: UUID(), createdAt: now.addingTimeInterval(-age), text: text)
     }
 
+    @MainActor func testOnlySuccessfulInsertionCreatesPositiveSharedReceipt() throws {
+        let (_, shared, local) = try directories()
+        let writer = QueueWriter(sharedDirectory: shared)
+        let success = segment("Synthetic success")
+        try writer.enqueue(success, listening: false, now: now)
+        XCTAssertFalse(try writer.insertionConfirmed(id: success.id, now: now))
+        let destination = Destination()
+        _ = try QueueReader(sharedDirectory: shared, localDirectory: local).drain(into: destination, now: now)
+        XCTAssertTrue(try writer.insertionConfirmed(id: success.id, now: now))
+        let uncertain = segment("Synthetic uncertainty")
+        try writer.enqueue(uncertain, listening: false, now: now)
+        destination.interruptAfterInsert = true
+        XCTAssertThrowsError(try QueueReader(sharedDirectory: shared, localDirectory: local).drain(into: destination, now: now))
+        XCTAssertFalse(try writer.insertionConfirmed(id: uncertain.id, now: now))
+        destination.interruptAfterInsert = false
+        XCTAssertEqual(try QueueReader(sharedDirectory: shared, localDirectory: local).drain(into: destination, now: now), 0)
+        XCTAssertEqual(destination.texts.count, 2)
+    }
+
     @MainActor func testCommitOrderingAndDeduplicationAcrossInstances() async throws {
         let (_, shared, local) = try directories()
         let writer = QueueWriter(sharedDirectory: shared)

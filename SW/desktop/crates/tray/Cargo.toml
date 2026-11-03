@@ -16,6 +16,7 @@ os-keychain = ["voiceremote-core/os-keychain"]
 
 [dependencies]
 anyhow = "1"
+zeroize = "1.8"
 async-trait = "0.1"
 base64 = "0.22"
 futures-util = { version = "0.3", features = ["sink"] }
@@ -47,4 +48,3 @@ tauri-build = { version = "2", optional = true }
 
 [dev-dependencies]
 tempfile = "3"
-zeroize = "1.8"

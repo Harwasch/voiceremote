@@ -266,10 +266,10 @@ mod tests {
     }
 }
 
-pub(crate) async fn activity() -> u64 {
+pub(crate) async fn activity() -> Option<u64> {
     // Never fabricate activity from polling. If no trusted idle source exists,
     // zero makes the phone's Auto treat this receiver as inactive.
-    let activity = tokio::time::timeout(std::time::Duration::from_millis(300), async {
+    tokio::time::timeout(std::time::Duration::from_millis(300), async {
         let connection = Connection::session().await.ok()?;
         let idle = Proxy::new(
             &connection,
@@ -280,15 +280,9 @@ pub(crate) async fn activity() -> u64 {
         .await
         .ok()?;
         let elapsed: u64 = idle.call("GetIdletime", &()).await.ok()?;
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .ok()?
-            .as_millis() as u64;
-        now.checked_sub(elapsed)
+        Some(elapsed)
     })
     .await
     .ok()
     .flatten()
-    .unwrap_or(0);
-    activity
 }

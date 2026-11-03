@@ -22,3 +22,5 @@ Keep these adapters aligned with core supervisors and wire validation.
 The opt-in `e2e-test` feature adds a fixed synthetic TextInjector and explicit
 loopback HTTP relay access for `SYS/tests/e2e/run.sh`. Production adapters remain
 selected in ordinary builds.
+
+Delivery: `desktop_receiver.rs` gates insertion on presentation readiness, sends correlated outcomes, compares native activity age against elapsed time (250 ms jitter tolerance, 30-second heartbeat) and awaits capture-control results, including refusal with a different actual capture selection. Moving-clock and encrypted refusal regressions run locally. `desktop_transport.rs` selects pairing by the first Noise packet. Socket evidence: [e2e](../../../../../SYS/tests/e2e/README.md); native display timing **unverified**.

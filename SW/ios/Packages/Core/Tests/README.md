@@ -15,3 +15,5 @@ All text is synthetic; no audio or real transcripts are used.
 
 CRLF, embedded CRLF and controls followed by combining marks exercise the existing scalar
 sanitation path. No Core source change was needed. Apple behavior is **unverified** pending CI.
+
+Auto regressions compare two devices with extreme peer-clock skew, idle heartbeats beyond 60 seconds, unknown age and disconnect clearing. No physical focus sample is claimed.

@@ -55,3 +55,61 @@ import VoiceRemoteProtocol
     #expect(HistoryTextIdentity.copyID(offline) == HistoryTextIdentity.copyID(offline))
     #expect(HistoryTextIdentity.copyID(offline) != HistoryTextIdentity.copyID(offline + "1"))
 }
+
+@Test func positiveDictationOutcomeIsAuthenticatedAndSurvivesRestart() async throws {
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: url) }
+    let history = try AppHistoryStore(url: url, now: 1000)
+    let entry = HistoryEntry(segmentID: "positive-fixture", targetID: "desktop", text: "Synthetic.", createdAt: 1000)
+    try await history.saveText(entry, state: .unconfirmed, now: 1000)
+    let reply = DictationOutcome(account_id: "fixture", segment_id: entry.segmentID, target_device_id: "desktop", outcome: .inserted)
+    try await history.dictationOutcome(reply, from: "other", accountID: "fixture")
+    try await history.dictationOutcome(reply, from: "desktop", accountID: "other")
+    #expect(await history.deliveryStates()[entry.segmentID] == .unconfirmed)
+    try await history.dictationOutcome(reply, from: "desktop", accountID: "fixture")
+    let reopened = try AppHistoryStore(url: url, now: 1001)
+    #expect(await reopened.deliveryStates()[entry.segmentID] == .delivered)
+    // A delayed failure cannot downgrade a proven insertion.
+    try await history.dictationOutcome(DictationOutcome(account_id: "fixture", segment_id: entry.segmentID, target_device_id: "desktop", outcome: .unavailable), from: "desktop", accountID: "fixture")
+    #expect(await history.deliveryStates()[entry.segmentID] == .delivered)
+}
+
+@Test @MainActor func remoteCaptureOnlyStopsAndRejectsStaleSequenceOrExpiry() async throws {
+    let rig = try Rig(), connection = UUID()
+    func request(_ id: String, _ sequence: Int64, state: CaptureState = .off) -> CaptureControl {
+        CaptureControl(account_id: "fixture", request_id: id, target_device_id: "phone", capture_state: state, ttl_ms: 2000, request_sequence: sequence, expires_at: 1_002_000)
+    }
+    rig.model.setCapture(.continuous); try await rig.until { rig.model.isRecording }
+    let stopped = await rig.model.captureControl(request("stop", 2), connectionID: connection)
+    #expect(stopped.outcome == .applied); #expect(!rig.model.isRecording)
+    let stale = await rig.model.captureControl(request("stale", 1), connectionID: connection)
+    #expect(stale.outcome == .cancelled)
+    let expired = await rig.model.captureControl(request("expired", 3), connectionID: connection, receivedAt: .now - .seconds(3))
+    #expect(expired.outcome == .expired)
+    let lateStart = await rig.model.captureControl(request("late", 4, state: .continuous), connectionID: connection, receivedAt: .now - .seconds(3))
+    #expect(lateStart.outcome == .expired); #expect(!rig.model.isRecording)
+    rig.model.setMode(.ai_control)
+    let start = await rig.model.captureControl(request("ai", 5, state: .continuous), connectionID: connection)
+    #expect(start.outcome == .unavailable)
+    #expect(rig.capture.starts == 1)
+}
+
+@Test @MainActor func remoteRequestFromOffNeverOpensMicrophone() async throws {
+    let rig = try Rig()
+    let request = CaptureControl(account_id: "fixture", request_id: "remote-start", target_device_id: "phone", capture_state: .continuous, ttl_ms: 2000, request_sequence: 1, expires_at: 1_002_000)
+    let reply = await rig.model.captureControl(request, connectionID: UUID())
+    #expect(reply.outcome == .unavailable)
+    #expect(rig.model.controls.capture == .off)
+    #expect(!rig.model.isRecording)
+    #expect(rig.capture.starts == 0)
+}
+
+@Test @MainActor func frameAlreadyExpiredInTransitCannotEvenStopCapture() async throws {
+    let rig = try Rig()
+    rig.model.setCapture(.continuous); try await rig.until { rig.model.isRecording }
+    let request = CaptureControl(account_id: "fixture", request_id: "late-stop", target_device_id: "phone", capture_state: .off,
+        ttl_ms: 2000, request_sequence: 1, expires_at: 999_999)
+    let reply = await rig.model.captureControl(request, connectionID: UUID())
+    #expect(reply.outcome == .expired); #expect(rig.model.isRecording)
+    rig.model.stop()
+}

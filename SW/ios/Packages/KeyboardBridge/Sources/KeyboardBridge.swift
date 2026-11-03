@@ -63,6 +63,13 @@ public final class QueueWriter {
         guard BridgePolicy.live(segment.createdAt, now: now) else { throw BridgeError.expired }
         try update(segment: segment, listening: listening, now: now)
     }
+    /// Only a receipt persisted after the keyboard's insertion call proves success.
+    /// Enqueue and the receipt-before-call dedup ledger never imply delivery.
+    public func insertionConfirmed(id: UUID, now: Date = Date()) throws -> Bool {
+        let ledger = try read(Ledger.self, from: directory.appendingPathComponent("keyboard-inserted-v1.json")) ?? Ledger()
+        guard ledger.version == 1, ledger.receipts.count <= BridgePolicy.maxSegments else { throw BridgeError.invalidFile }
+        return ledger.receipts.contains { $0.id == id && BridgePolicy.live($0.createdAt, now: now) }
+    }
     private func update(segment: CommittedSegment?, listening: Bool, now: Date) throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         try withFileLock(directory.appendingPathComponent("writer.lock")) {
@@ -88,9 +95,11 @@ public struct KeyboardStatus: Equatable, Sendable {
 /// Receipt-before-insertion gives at-most-once attempts, not exactly-once insertion.
 /// Keep the local ledger across controller/process restarts. Never reset it on activation.
 public final class QueueReader {
+    private let sharedDirectory: URL
     private let queueURL: URL
     private let localDirectory: URL
     public init(sharedDirectory: URL, localDirectory: URL) {
+        self.sharedDirectory = sharedDirectory
         queueURL = sharedDirectory.appendingPathComponent(BridgePolicy.queueFilename)
         self.localDirectory = localDirectory
     }
@@ -118,6 +127,17 @@ public final class QueueReader {
                 // Sync the receipt and its directory before the nontransactional UIKit call.
                 try persist(ledger, to: url)
                 try inserter.insertText(segment.text)
+                // Crash or a throwing insertion leaves no positive receipt. The
+                // earlier local receipt still prevents a second UIKit attempt.
+                try withFileLock(sharedDirectory.appendingPathComponent("outcomes.lock")) {
+                    let outcomesURL = sharedDirectory.appendingPathComponent("keyboard-inserted-v1.json")
+                    var outcomes = try read(Ledger.self, from: outcomesURL) ?? Ledger()
+                    guard outcomes.version == 1, outcomes.receipts.count <= BridgePolicy.maxSegments else { throw BridgeError.invalidFile }
+                    outcomes.receipts.removeAll { !BridgePolicy.live($0.createdAt, now: now) }
+                    guard outcomes.receipts.count < BridgePolicy.maxSegments else { throw BridgeError.capacity }
+                    outcomes.receipts.append(Receipt(id: segment.id, createdAt: segment.createdAt))
+                    try persist(outcomes, to: outcomesURL)
+                }
                 inserted += 1
             }
             // Prune old receipts even when there is no pending text.

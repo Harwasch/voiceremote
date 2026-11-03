@@ -394,6 +394,28 @@ impl Registry {
             },
         )
     }
+    /// Persist negative evidence without occupying the atomic insertion claim.
+    /// A concurrent later claimant still wins reserve exactly once. Existing or
+    /// corrupt/incomplete claims are always uncertain, never safe to resend.
+    pub fn segment_disposition(&self, peer: &Peer, id: &str) -> Result<Option<bool>> {
+        let _guard = self
+            .gate
+            .lock()
+            .map_err(|_| crate::anyhow!("registry poisoned"))?;
+        self.require(peer)?;
+        let key = Self::segment_key(peer, id);
+        if let Some(value) = self.store.get(&key)? {
+            return Ok(Some(value.as_slice() == b"inserted"));
+        }
+        self.store
+            .put(&format!("never-claimed-{key}"), b"never_claimed")?;
+        // Recheck after persistence: another Registry could have claimed in the
+        // meantime. The insertion key, not the negative marker, is authoritative.
+        Ok(self
+            .store
+            .get(&key)?
+            .map(|value| value.as_slice() == b"inserted"))
+    }
     /// A reservation left by a crash is uncertain, never a success acknowledgement.
     pub fn segment_inserted(&self, peer: &Peer, id: &str) -> Result<bool> {
         Ok(self

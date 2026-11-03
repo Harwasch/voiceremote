@@ -18,3 +18,5 @@ Security regressions exercise `"\r\n"`, `"a\r\nb"` and `"\n\u{0301}"`, plus ever
 forbidden scalar followed by a combining mark, through validation, typed decode and encode.
 Base64/hex pattern tests also reject trailing control clusters. Apple execution is **unverified**
 until the coordinator reruns macOS CI; the matcher is scalar-based by construction.
+
+Typed round trips include target preparation/readiness, dictation outcome/query and capture-control/result plus their shared negative vectors.
