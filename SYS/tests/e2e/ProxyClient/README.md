@@ -19,3 +19,5 @@ apostrophe, literal plus, Unicode and repeated vocabulary terms. Local HTTP is a
 test-only adapter; deployed TLS/providers and Apple WebSocket remain **unverified**.
 
 [AgentE2E.swift](AgentE2E.swift) composes the production phone packages. Its only fakes are synthetic capture/STT/Brain output, biometric and private queue/checkpoint stores. Dispatch/status go through production PhoneConnection, Noise, relay and agent receiver.
+
+The agent phone explicitly enrolls open_resource and verifies dispatched/reply holds a dependent task. Fake CLI session arguments are checked; no real provider/session continuation or opened-resource proof is claimed.

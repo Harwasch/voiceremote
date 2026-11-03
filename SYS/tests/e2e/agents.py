@@ -4,6 +4,7 @@ Verified only when run.py prints both PASS agents results; no live provider clai
 """
 import json
 import os
+import subprocess
 from pathlib import Path
 import time
 
@@ -20,6 +21,9 @@ def run_agents(Child, root, origin, temp, children):
 import sys, os, json, time, subprocess
 args=sys.argv[1:]
 text=sys.stdin.read()
+expected='test-'+os.path.basename(sys.argv[0])
+actual=args[args.index('--resume')+1] if '--resume' in args else args[-2]
+if actual != expected: sys.exit(23)
 with open('called', 'a') as f: f.write('invoked\n')
 if text == 'wait-tree':
     child=subprocess.Popen(['/usr/bin/python3','-c','import time; time.sleep(60)'], start_new_session=True)
@@ -27,9 +31,10 @@ if text == 'wait-tree':
     while True: time.sleep(1)
 if '--resume' in args:
     session=args[args.index('--resume')+1]
-    print(json.dumps({'type':'result','subtype':'success','is_error':False,'session_id':session}))
+    print(json.dumps({'type':'result','subtype':'success','is_error':False,'session_id':expected,'result':'Synthetic provider reply; opening is unverified.'}))
 else:
-    print(json.dumps({'type':'thread.started','thread_id':args[-2]}))
+    print(json.dumps({'type':'thread.started','thread_id':expected}))
+    print(json.dumps({'type':'item.completed','item':{'type':'agent_message','text':'Synthetic provider reply.'}}))
     print(json.dumps({'type':'turn.completed'}))
 '''
     systemd = r'''#!/usr/bin/python3
@@ -61,7 +66,14 @@ if 'kill' in args or 'stop' in args:
     except FileNotFoundError: pass
 if '--property=ActiveState' in args: print('ActiveState=inactive\nTasksCurrent=0\nLoadState=loaded')
 '''
-    for name, body in [('claude', cli), ('codex', cli), ('systemd-run', systemd), ('systemctl', control)]:
+    try:
+        real_cgroups = subprocess.run(['systemctl', '--user', 'show', '--property=Version'],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        real_cgroups = False
+    tools = [('claude', cli), ('codex', cli)]
+    if not real_cgroups: tools += [('systemd-run', systemd), ('systemctl', control)]
+    for name, body in tools:
         file = binaries / name
         file.write_text(body)
         file.chmod(0o700)
@@ -106,7 +118,7 @@ if '--property=ActiveState' in args: print('ActiveState=inactive\nTasksCurrent=0
             if any(case.rglob('called')): raise RuntimeError('capability-free phone launched a process')
             print(passed, flush=True)
         else:
-            phone.wait_line(lambda label, line: line == 'AGENT_NAMED_SESSION_SUCCEEDED')
+            phone.wait_line(lambda label, line: line == 'AGENT_SESSION_ARGUMENTS_DISPATCHED')
             phone.wait_line(lambda label, line: line == 'AGENT_OFFLINE_READY')
             receiver.close()
             phone.send('offline')
@@ -128,7 +140,8 @@ if '--property=ActiveState' in args: print('ActiveState=inactive\nTasksCurrent=0
             if stat.exists() and stat.read_text().split()[2] != 'Z': raise RuntimeError('cancel left descendant running')
             passed = phone.wait_line(lambda label, line: line.startswith('PASS agents:'))
             phone.success()
-            if len((case/'claude'/'called').read_text().splitlines()) != 2 or len((case/'codex'/'called').read_text().splitlines()) != 1:
+            if len((case/'claude'/'called').read_text().splitlines()) != 3 or len((case/'codex'/'called').read_text().splitlines()) != 1:
                 raise RuntimeError('agent delivery ran more than once or injected authority launched work')
-            print(passed, flush=True)
+            containment = 'real systemd cgroup scope' if real_cgroups else 'fake systemd controls kill recorded child PID; real cgroups unverified'
+            print(passed + '; ' + containment, flush=True)
         receiver.close()

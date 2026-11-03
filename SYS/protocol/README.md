@@ -61,3 +61,5 @@ Contract checks and the desktop’s synthetic pairing/security tests are proven 
 The [delivery exchange](wire-contract.md#dictation-target-and-capture-exchange) defines prepare/ready, durable outcome/query, sequenced, expiring stop-only remote capture control and clock-skew-safe activity age. Physical display/native acceptance remains **unverified**.
 
 Agent inventory/query/dispatch records authenticate through paired Noise. AgentDispatch carries exact session metadata, retained preview bytes and expiry; types are regenerated in Swift/Rust/TypeScript and covered by shared round-trip/rejection vectors.
+
+`TaskStatus` distinguishes dispatched CLI turns from verified success and optionally carries a 4096-character `app_reply`. Dispatch outcomes never release success-dependent work.

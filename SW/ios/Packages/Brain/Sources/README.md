@@ -29,3 +29,5 @@ The host selects a model/API version matching relay deployment settings. Proofs 
 ClaudeBrain bounds HTTP accumulation per response/chunk (1 MiB, 60-second resource timeout), retaining redirect refusal. BrainBenchmark loads the reviewed 50-command set and exports recognized spoken input separately from expected reading prompts. Missing measurements remain TBD; native/provider performance **unverified**.
 
 SuggestionEngine separates review, authorization and successful completion. Command context is supplied by the phone. BrainRouter tolerates terminal sentence punctuation for simple commands while linked/multi-step content still takes the complex route.
+
+`SuggestionEngine.authorized` returns acceptance; dismissed/expired/revised reviews return false. Exact approved-card retries are idempotent so uncertain queue persistence can be reconciled.

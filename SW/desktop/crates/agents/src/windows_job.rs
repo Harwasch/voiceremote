@@ -77,6 +77,10 @@ unsafe extern "system" {
     fn Thread32Next(snapshot: Handle, entry: *mut ThreadEntry) -> i32;
     fn OpenThread(access: u32, inherit: i32, thread: u32) -> Handle;
     fn ResumeThread(thread: Handle) -> u32;
+    #[cfg(test)]
+    fn OpenProcess(access: u32, inherit: i32, pid: u32) -> Handle;
+    #[cfg(test)]
+    fn WaitForSingleObject(handle: Handle, milliseconds: u32) -> u32;
 }
 pub(crate) struct Job(Handle);
 // Handle remains owned and is only used by the task; Win32 job APIs are thread-safe.
@@ -176,32 +180,99 @@ impl Drop for Job {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[tokio::test]
-    async fn closing_last_job_handle_kills_owned_process() -> std::io::Result<()> {
-        let job = Job::new()?;
-        let mut child = tokio::process::Command::new("cmd.exe")
-            .args(["/d", "/c", "ping -n 60 127.0.0.1 >nul"])
+    // Run the test executable itself so cmd/ping availability and shell exit
+    // conventions cannot turn a natural exit into a containment false positive.
+    #[test]
+    fn owned_job_member() {
+        let Some(marker) = std::env::var_os("VR_JOB_TEST_READY") else {
+            return;
+        };
+        if std::env::var_os("VR_JOB_TEST_LEAF").is_none() {
+            let leaf_marker = std::path::PathBuf::from(&marker).with_extension("leaf");
+            let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "windows_job::tests::owned_job_member",
+                    "--nocapture",
+                ])
+                .env("VR_JOB_TEST_LEAF", "1")
+                .env("VR_JOB_TEST_READY", &leaf_marker)
+                .spawn()
+                .unwrap();
+            let deadline = std::time::Instant::now() + Duration::from_secs(3);
+            while !leaf_marker.exists() {
+                assert!(child.try_wait().unwrap().is_none());
+                assert!(std::time::Instant::now() < deadline);
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            std::fs::write(
+                std::path::PathBuf::from(&marker).with_extension("pid"),
+                child.id().to_string(),
+            )
+            .unwrap();
+        }
+        std::fs::write(marker, b"ready").unwrap();
+        std::thread::sleep(Duration::from_secs(60));
+        panic!("job member unexpectedly survived");
+    }
+    async fn member(job: &Job) -> std::io::Result<(tokio::process::Child, tempfile::TempDir)> {
+        let root = tempfile::tempdir()?;
+        let ready = root.path().join("ready");
+        let mut child = tokio::process::Command::new(std::env::current_exe()?)
+            .args([
+                "--exact",
+                "windows_job::tests::owned_job_member",
+                "--nocapture",
+            ])
+            .env("VR_JOB_TEST_READY", &ready)
             .creation_flags(4)
             .kill_on_drop(true)
             .spawn()?;
         job.assign_and_resume(child.raw_handle().unwrap(), child.id().unwrap())?;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !ready.exists() {
+                assert!(
+                    child.try_wait()?.is_none(),
+                    "member exited before readiness"
+                );
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            Ok::<_, std::io::Error>(())
+        })
+        .await??;
+        assert!(
+            child.try_wait()?.is_none(),
+            "member must be alive before kill"
+        );
+        Ok((child, root))
+    }
+    #[tokio::test]
+    async fn closing_last_job_handle_kills_owned_process() -> std::io::Result<()> {
+        let job = Job::new()?;
+        let (mut child, root) = member(&job).await?;
+        let pid: u32 = std::fs::read_to_string(root.path().join("ready.pid"))?
+            .parse()
+            .unwrap();
+        let leaf = unsafe { OpenProcess(0x00100000, 0, pid) }; // SYNCHRONIZE
+        assert!(!leaf.is_null());
+        assert_eq!(unsafe { WaitForSingleObject(leaf, 0) }, 258); // WAIT_TIMEOUT: alive.
         drop(job);
-        let status = tokio::time::timeout(Duration::from_secs(3), child.wait()).await??;
-        assert!(!status.success());
+        // KILL_ON_JOB_CLOSE need not use a nonzero process exit code. A member
+        // proven alive above must terminate long before its 60-second sleep.
+        tokio::time::timeout(Duration::from_secs(3), child.wait()).await??;
+        let dead = unsafe { WaitForSingleObject(leaf, 3000) };
+        unsafe {
+            CloseHandle(leaf);
+        }
+        assert_eq!(dead, 0); // WAIT_OBJECT_0: descendant terminated too.
         Ok(())
     }
     #[tokio::test]
     async fn suspended_child_and_descendants_are_in_job() -> std::io::Result<()> {
-        use tokio::process::Command;
         let job = Job::new()?;
-        let mut child = Command::new("cmd.exe")
-            .args(["/d", "/c", "ping -n 60 127.0.0.1 >nul"])
-            .creation_flags(4)
-            .kill_on_drop(true)
-            .spawn()?;
-        job.assign_and_resume(child.raw_handle().unwrap(), child.id().unwrap())?;
+        let (mut child, _root) = member(&job).await?;
         assert!(job.terminate().await);
-        assert!(!child.wait().await?.success());
+        tokio::time::timeout(Duration::from_secs(3), child.wait()).await??;
         Ok(())
     }
 }

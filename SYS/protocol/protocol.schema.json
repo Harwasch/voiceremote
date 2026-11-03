@@ -443,8 +443,13 @@
             "ok",
             "denied",
             "unavailable",
-            "error"
+            "error",
+            "dispatched"
           ]
+        },
+        "app_reply": {
+          "type": "string",
+          "maxLength": 4096
         }
       },
       "required": [

@@ -17,3 +17,5 @@ Start with `TaskRouter.enqueue`. Different routing candidates require a new appr
 Routing identity includes optional canonical executionWorkspace, distinct from project ID. TaskQueue adds predecessor holds, authenticated success confirmation, atomic reviewed replacement and fresh cancellation permits for restored tasks.
 
 TaskQueueStore exposes an app-owned retention filter for routing snapshots. RetainedTaskStore removes expired/tombstoned task payloads from live UI/reapproval views as well as disk; compare-and-swap persistence retains its original baseline.
+
+Authenticated `dispatched/dispatched` may finish a CLI handoff after running, with bounded app reply retained by the app store. It cannot satisfy `succeeded/ok` predecessor checks. Status-only queries do not erase a previously received reply.

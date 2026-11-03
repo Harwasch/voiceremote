@@ -178,6 +178,8 @@ with a failing test. Commit subjects are prefixed by area: `SYS:`, `SW:`, `FW:`,
 - Leave formatting and lint to CI.
 
 ## Lessons
+
+- CI cost: `desktop-ci-*` skips the 20-minute tray and installer build; use `tray-ci-*` only when `crates/tray` or packaging changes. Use `ios-ci-*` only when Swift changed.
 <!-- one line per lesson learned after a merge; repo-specific only -->
 
 - To run CI on a branch, the coordinator tags its commit `ios-ci-*` or

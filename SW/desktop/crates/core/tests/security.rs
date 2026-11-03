@@ -1255,6 +1255,7 @@ async fn relay_keepalive_detects_half_open_websocket() -> Result<()> {
         let _socket = accept_async(stream).await.unwrap();
         std::future::pending::<()>().await;
     });
+    let before_connect = tokio::time::Instant::now();
     let mut transport = RelayTransport::connect_loopback(
         &endpoint,
         RelayRoute {
@@ -1264,6 +1265,8 @@ async fn relay_keepalive_detects_half_open_websocket() -> Result<()> {
         },
     )
     .await?;
+    // Reproduce setup time between transport creation and the observation clock.
+    tokio::time::sleep(Duration::from_millis(25)).await;
     tokio::time::pause();
     let start = tokio::time::Instant::now();
     let result = tokio::time::timeout(Duration::from_secs(31), transport.recv()).await?;
@@ -1275,7 +1278,8 @@ async fn relay_keepalive_detects_half_open_websocket() -> Result<()> {
             .contains("keepalive timed out")
     );
     assert!(
-        start.elapsed() >= Duration::from_secs(30) && start.elapsed() < Duration::from_secs(31)
+        before_connect.elapsed() >= Duration::from_secs(30)
+            && start.elapsed() < Duration::from_secs(31)
     );
     worker.abort();
     Ok(())

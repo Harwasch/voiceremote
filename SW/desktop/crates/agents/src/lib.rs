@@ -6,6 +6,8 @@ mod registry;
 pub mod transport;
 #[cfg(windows)]
 mod windows_job;
+#[cfg(windows)]
+mod windows_security;
 use anyhow::{Result, ensure};
 pub use cloud::{CloudConfig, CloudProvider, CloudReceipt, CloudState};
 pub use process::{CliAdapter, Finish, ProcessResult};
@@ -458,6 +460,7 @@ impl AgentNode {
                 execution_state: state,
                 updated_at: now_ms(),
                 outcome: Some(outcome),
+                app_reply: process.as_ref().and_then(|p| p.app_reply.clone()),
             },
             process,
         }
@@ -477,12 +480,28 @@ impl AgentNode {
         )
     }
     fn put_result(&self, key: &str, result: &TaskResult) -> Result<()> {
-        self.keys.put(key, &serde_json::to_vec(result)?)
+        let mut receipt = result.clone();
+        receipt.status.app_reply = None;
+        self.keys.put(key, &serde_json::to_vec(&receipt)?)
     }
     fn stored(&self, key: &str) -> Result<Option<TaskResult>> {
         self.keys
             .get(key)?
-            .map(|b| serde_json::from_slice(&b).map_err(Into::into))
+            .map(|b| -> Result<TaskResult> {
+                let mut result: TaskResult = serde_json::from_slice(&b)?;
+                // Pre-dispatched-contract receipts mistook clean CLI turns for
+                // verified action success. Never revive that authority on replay.
+                if result.status.execution_state == ExecutionState::Succeeded
+                    && result
+                        .process
+                        .as_ref()
+                        .is_some_and(|p| p.cloud.is_none() && p.finish == Finish::Completed)
+                {
+                    result.status.execution_state = ExecutionState::Dispatched;
+                    result.status.outcome = Some(TaskStatusOutcome::Dispatched);
+                }
+                Ok(result)
+            })
             .transpose()
     }
     /// Only called synchronously for a message just decrypted by Session::receive.
@@ -552,6 +571,7 @@ impl AgentNode {
                 execution_state: Running,
                 updated_at: now_ms(),
                 outcome: None,
+                app_reply: None,
             },
             process: None,
         };
@@ -745,7 +765,9 @@ impl AgentNode {
             Finish::NotConfigured | Finish::UnsupportedPlatform | Finish::SpawnFailed => {
                 (ExecutionState::Failed, TaskStatusOutcome::Unavailable)
             }
-            _ if process.success => (ExecutionState::Succeeded, TaskStatusOutcome::Ok),
+            // A clean provider turn proves delivery, not completion of the requested action.
+            // Owner policy requires verified predecessor success; dispatched never releases it.
+            _ if process.success => (ExecutionState::Dispatched, TaskStatusOutcome::Dispatched),
             _ => (ExecutionState::Failed, TaskStatusOutcome::Error),
         };
         let confirmed = process.finish != Finish::Unconfirmed;

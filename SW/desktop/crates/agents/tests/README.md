@@ -21,7 +21,7 @@ a bus or after control failure, retry after restart/expiry, restricted Claude
 profiles, role/capability denial, flag-leading IDs and recovered Codex errors.
 Cloud regressions also cover default-off TOML, project/origin allowlists, argv/stdin,
 scrubbed env, real-shaped provider IDs, status markers, replay, unsupported cancel
-and failure honesty. Deferred UI actions return unsupported without spawning.
+and failure honesty. UI requests dispatch through the enrolled CLI with its reply; no GUI effect is claimed.
 Real systemd/cgroup enforcement and live providers remain **unverified**.
 
 The failure-matrix fixture delays its fake launcher by 300 ms to reproduce loaded
@@ -43,3 +43,5 @@ secret variables populated, verifies those inputs exist, then checks their names
 are absent from both fake provider environments. No global test environment is changed.
 
 `authenticated_inventory_and_resource_handoff_bind_preview_and_query_without_resend` covers paired inventory, changed workspace refusal, retained bytes, CLI resource handoff, expired retry and status-only query. Windows-only Job tests require a Windows runner; Linux relay coverage is in SYS/tests/e2e.
+
+Review regressions prove clean CLI/refusal replies produce dispatched, legacy receipts cannot release dependencies, and replies stay out of durable desktop storage. Windows unit tests cover live-before-kill Job leader/descendant death, concrete-owner/foreign-writer/null DACLs, and canonical workspace plus npm `.cmd` native command resolution. They are cross-compiled here; Windows runtime acceptance remains unverified.

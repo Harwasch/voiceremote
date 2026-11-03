@@ -34,13 +34,15 @@ actor BrainSpy: LlmBrain {
     var requests: [BrainRequest] = []
     let sensitive: Bool
     let fixtureTool: ToolCall?
-    init(sensitive: Bool = false, tool: ToolCall? = nil) { self.sensitive = sensitive; fixtureTool = tool }
+    let additionalTool: ToolCall?
+    init(sensitive: Bool = false, tool: ToolCall? = nil, additionalTool: ToolCall? = nil) { self.sensitive = sensitive; fixtureTool = tool; self.additionalTool = additionalTool }
     func propose(_ request: BrainRequest) throws -> BrainResponse {
         calls += 1; requests.append(request)
         let tool: ToolCall = fixtureTool ?? (sensitive
             ? .prepareSendTool(PrepareSendTool(account_id: "fixture", device_id: "phone", recipient: "fixture-recipient", content: "invented content"))
             : .selectTargetTool(SelectTargetTool(account_id: "fixture", device_id: "phone")))
-        return ProposalDecoder.decode(try JSONSerialization.data(withJSONObject: [JSONSerialization.jsonObject(with: ProtocolCodec.encode(tool))]), accountID: "fixture")
+        let tools = [tool] + (additionalTool.map { [$0] } ?? [])
+        return ProposalDecoder.decode(try JSONSerialization.data(withJSONObject: tools.map { try JSONSerialization.jsonObject(with: ProtocolCodec.encode($0)) }), accountID: "fixture")
     }
 }
 @MainActor final class Journal: AuditJournal {
@@ -78,16 +80,17 @@ actor BrainSpy: LlmBrain {
     let execution = ExecutionSpy()
     init(sensitive: Bool = false, script: [SttEvent] = [.final("invented words")],
          captureFactory: (@MainActor () async throws -> any CaptureSession)? = nil,
-         tool: ToolCall? = nil,
+         scriptProvider: (@MainActor () -> [SttEvent])? = nil, additionalTool: ToolCall? = nil,
+         tool: ToolCall? = nil, agent: AgentControl? = nil, policy: PolicyGate? = nil,
          delivery: (@MainActor (ExecutionPermit) throws -> [QueuedTask])? = nil) throws {
-        brain = BrainSpy(sensitive: sensitive, tool: tool)
-        gate = try PolicyGate(audit: AuditLog(journal: Journal(), checkpoints: Checkpoint(), retention: AuditRetention()), biometric: bio, clock: { 1_000_000 })
+        brain = BrainSpy(sensitive: sensitive, tool: tool, additionalTool: additionalTool)
+        gate = try policy ?? PolicyGate(audit: AuditLog(journal: Journal(), checkpoints: Checkpoint(), retention: AuditRetention()), biometric: bio, clock: { 1_000_000 })
         history = try AppHistoryStore(now: 1_000_000)
         registry = DeviceRegistry(accountID: "fixture", revocation: target)
         let capture = self.capture, brain = self.brain, execution = self.execution
         model = VoiceAppModel(accountID: "fixture", phoneID: "phone", actorID: "owner", registry: registry,
             history: history, target: target, policy: gate, makeCapture: captureFactory ?? { capture },
-            engines: { [FakeEngine(script: script)] }, brain: { _ in brain }, now: { 1_000_000 }, deliver: delivery ?? { permit in execution.permits.append(permit); return [] })
+            engines: { [FakeEngine(script: scriptProvider?() ?? script)] }, brain: { _ in brain }, now: { 1_000_000 }, agentControl: agent, deliver: delivery ?? { permit in execution.permits.append(permit); return [] })
     }
     func until(_ condition: @MainActor () -> Bool) async throws {
         for _ in 0..<2000 {

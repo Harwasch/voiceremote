@@ -41,3 +41,5 @@ PairingFlow requires a separate explicit agent-access choice. AppModel retains c
 AgentControl uses a temporary immutable preview lookup per routing pass; task payload persistence remains with the host’s RetainedTaskStore.
 
 RetainedTaskStore also filters live Router snapshots; an expired task cannot be selected from a stale queue to restore its text through a new approval.
+
+Delegate review requires the user's selected provider/project/session. Approval aborts if Brain reports a dismissed/expired/stale card (including an open sheet after spoken cancel); cancellation reads current queue state. Provider replies stay in RetainedTaskStore with the original task expiry.

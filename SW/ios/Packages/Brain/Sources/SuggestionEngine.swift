@@ -223,11 +223,14 @@ public actor SuggestionEngine {
     }
 
     /// Called by the phone only after Policy issues a permit; still no execution authority here.
-    public func authorized(cardID: UUID, revision: Int, now: Date) {
+    @discardableResult public func authorized(cardID: UUID, revision: Int, now: Date) -> Bool {
         advance(now)
         guard let index = storage.firstIndex(where: { $0.id == cardID }),
-              storage[index].revision == revision, storage[index].state == .reviewing else { return }
+              storage[index].revision == revision else { return false }
+        if storage[index].state == .approved { return true } // same permit retry after uncertain persistence
+        guard storage[index].state == .reviewing else { return false }
         replace(index, state: .approved)
+        return true
     }
     /// Authenticated executor outcomes, never proposal/card state, release dependencies.
     public func completed(cardID: UUID, succeeded: Bool, now: Date) {

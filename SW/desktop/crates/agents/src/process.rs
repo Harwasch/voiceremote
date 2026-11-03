@@ -24,8 +24,10 @@ impl Default for CliAdapter {
     fn default() -> Self {
         // Auth is left to the installed CLI's own credential store. No API keys,
         // cloud credentials, relay secrets, loader overrides or proxy env inherit.
-        let environment = [
+        #[allow(unused_mut)]
+        let mut environment: BTreeMap<OsString, OsString> = [
             "PATH",
+            "PATHEXT",
             "HOME",
             "USERPROFILE",
             "LOCALAPPDATA",
@@ -42,6 +44,10 @@ impl Default for CliAdapter {
         .into_iter()
         .filter_map(|key| std::env::var_os(key).map(|v| (key.into(), v)))
         .collect();
+        #[cfg(windows)]
+        environment
+            .entry("PATHEXT".into())
+            .or_insert_with(|| ".COM;.EXE;.BAT;.CMD".into());
         Self { environment }
     }
 }
@@ -69,6 +75,42 @@ impl CliAdapter {
         adapter
     }
 }
+#[cfg(windows)]
+fn command_directory(
+    executable: &std::ffi::OsStr,
+    workspace: &std::path::Path,
+) -> Result<std::path::PathBuf> {
+    use std::path::{Component, Prefix};
+    if !std::path::Path::new(executable)
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("cmd"))
+    {
+        return Ok(workspace.to_owned());
+    }
+    let mut components = workspace.components();
+    let Some(Component::Prefix(prefix)) = components.next() else {
+        anyhow::bail!("shim needs absolute workspace")
+    };
+    let directory = match prefix.kind() {
+        Prefix::VerbatimDisk(drive) => {
+            let mut path = std::path::PathBuf::from(format!("{}:\\", drive as char));
+            for component in components {
+                if let Component::Normal(part) = component {
+                    path.push(part);
+                }
+            }
+            path
+        }
+        Prefix::Disk(_) => workspace.to_owned(),
+        _ => anyhow::bail!("cmd shim cannot use UNC workspace; install a native CLI"),
+    };
+    ensure!(
+        directory.as_os_str().len() < 260
+            && directory.canonicalize()? == workspace.canonicalize()?,
+        "cmd workspace is not representable"
+    );
+    Ok(directory)
+}
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Finish {
     Completed,
@@ -89,6 +131,9 @@ pub enum Finish {
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessResult {
+    /// Ephemeral provider response; durable replay receipts never retain content.
+    #[serde(skip)]
+    pub app_reply: Option<String>,
     pub finish: Finish,
     pub exit_code: Option<i32>,
     pub signal: Option<i32>,
@@ -103,6 +148,7 @@ pub struct ProcessResult {
 impl ProcessResult {
     pub(crate) fn no_process(finish: Finish) -> Self {
         Self {
+            app_reply: None,
             finish,
             exit_code: None,
             signal: None,
@@ -160,10 +206,15 @@ impl CliAdapter {
         session: &SessionIdentity,
         limit: usize,
     ) -> Option<(bool, Vec<u8>)> {
-        let mut command = Command::new(self.executable(executable));
+        let resolved = self.executable(executable);
+        #[cfg(windows)]
+        let directory = command_directory(&resolved, &session.workspace).ok()?;
+        #[cfg(not(windows))]
+        let directory = &session.workspace;
+        let mut command = Command::new(resolved);
         command
             .args(args)
-            .current_dir(&session.workspace)
+            .current_dir(directory)
             .env_clear()
             .envs(&self.environment)
             .env("NO_COLOR", "1")
@@ -306,6 +357,26 @@ fn structured_success(provider: Provider, bytes: &[u8], session: &str) -> bool {
         Provider::Cloud => false,
     }
 }
+#[cfg(any(unix, windows))]
+fn structured_reply(provider: Provider, bytes: &[u8]) -> Option<String> {
+    let reply = match provider {
+        Provider::Claude => serde_json::from_slice::<Value>(bytes).ok()?["result"]
+            .as_str()?
+            .to_owned(),
+        Provider::Codex => std::str::from_utf8(bytes)
+            .ok()?
+            .lines()
+            .filter_map(|line| {
+                let value: Value = serde_json::from_str(line).ok()?;
+                (value["type"] == "item.completed" && value["item"]["type"] == "agent_message")
+                    .then(|| value["item"]["text"].as_str().map(str::to_owned))
+                    .flatten()
+            })
+            .last()?,
+        Provider::Cloud => return None,
+    };
+    Some(reply.chars().take(4096).collect())
+}
 impl CliAdapter {
     pub(crate) async fn run(
         &self,
@@ -383,6 +454,14 @@ impl CliAdapter {
             } else {
                 None
             };
+            let resolved = self.executable(executable);
+            #[cfg(windows)]
+            let directory = match command_directory(&resolved, &session.workspace) {
+                Ok(directory) => directory,
+                Err(_) => return ProcessResult::no_process(Finish::UnsupportedPlatform),
+            };
+            #[cfg(not(windows))]
+            let directory = &session.workspace;
             let mut command = if let Some(unit) = &unit {
                 let mut command = Command::new("systemd-run");
                 command.arg(format!(
@@ -405,7 +484,7 @@ impl CliAdapter {
                 ]);
                 command
             } else {
-                Command::new(self.executable(executable))
+                Command::new(resolved)
             };
             match session.provider {
                 Provider::Claude => {
@@ -466,7 +545,7 @@ impl CliAdapter {
                 }
             }
             command
-                .current_dir(&session.workspace)
+                .current_dir(directory)
                 .env_clear()
                 .envs(&self.environment)
                 .stdin(Stdio::piped())
@@ -572,6 +651,11 @@ impl CliAdapter {
                         structured_success(session.provider, &out, &session.provider_session_id);
                     let unconfirmed = !termination_confirmed;
                     ProcessResult {
+                        app_reply: if valid {
+                            structured_reply(session.provider, &out)
+                        } else {
+                            None
+                        },
                         finish: if unconfirmed {
                             Finish::Unconfirmed
                         } else if !status.success() || valid {
@@ -594,6 +678,7 @@ impl CliAdapter {
                         .and_then(Result::ok);
 
                     ProcessResult {
+                        app_reply: None,
                         finish: if cloud {
                             Finish::Unconfirmed
                         } else if termination_confirmed {
@@ -621,6 +706,73 @@ impl CliAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn npm_cmd_shim_preserves_workspace_stdin_and_native_resolution() -> Result<()> {
+        let root = tempfile::tempdir()?;
+        std::fs::write(
+            root.path().join("claude.cmd"),
+            r#"@echo off
+set /p synthetic_input=
+where cmd > native-resolution.txt
+if errorlevel 1 exit /b 25
+cd > launch-directory.txt
+echo {"type":"result","subtype":"success","is_error":false,"session_id":"test-session","result":"Synthetic shim reply"}
+"#,
+        )?;
+        let workspace = root.path().canonicalize()?; // Windows supplies a verbatim prefix.
+        let paths = std::env::join_paths(std::iter::once(root.path().to_owned()).chain(
+            std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()),
+        ))?;
+        let adapter = CliAdapter::with_path(paths);
+        assert!(
+            adapter
+                .environment
+                .get(std::ffi::OsStr::new("PATHEXT"))
+                .is_some_and(|v| !v.is_empty())
+        );
+        let session = SessionIdentity {
+            provider: Provider::Claude,
+            account: "test".into(),
+            host: "pc".into(),
+            project: "test".into(),
+            workspace: workspace.clone(),
+            provider_session_id: "test-session".into(),
+            capability_profile: crate::CapabilityProfile::ReadOnly,
+            cloud: None,
+        };
+        let (_cancel, receive) = watch::channel(false);
+        let result = adapter
+            .run(
+                &session,
+                "Synthetic shim input",
+                Duration::from_secs(10),
+                4096,
+                receive,
+            )
+            .await;
+        assert_eq!(result.finish, Finish::Completed);
+        assert!(result.success);
+        assert_eq!(result.app_reply.as_deref(), Some("Synthetic shim reply"));
+        let actual = std::fs::read_to_string(root.path().join("launch-directory.txt"))?;
+        assert_eq!(
+            std::path::Path::new(actual.trim()).canonicalize()?,
+            workspace
+        );
+        assert!(
+            !std::fs::read_to_string(root.path().join("native-resolution.txt"))?
+                .trim()
+                .is_empty()
+        );
+        assert!(
+            command_directory(
+                std::ffi::OsStr::new("claude.cmd"),
+                std::path::Path::new(r"\\?\UNC\server\share\project")
+            )
+            .is_err()
+        );
+        Ok(())
+    }
     /// Off by default. Requires explicit owner-selected existing Claude AND Codex
     /// sessions. Never prints their content, credential files or provider output.
     #[tokio::test]

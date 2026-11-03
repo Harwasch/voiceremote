@@ -200,8 +200,9 @@ private struct AgentPreviews: Sendable {
     }
     public func cancel(_ task: QueuedTask) async throws {
         guard task.command.account_id == account, task.command.authenticated_actor == actor else { throw RouterError.invalidAuthorization }
+        guard let live = router.snapshot().first(where: { $0.command == task.command }) else { throw RouterError.invalidAuthorization }
         let session = input.session(account: account, actor: actor, session: UUID().uuidString,
-            device: task.command.destination_id, project: task.rules.project, destinationKind: .software)
+            device: live.command.destination_id, project: live.rules.project, destinationKind: .software)
         let id = task.command.command_id
         let permit: ExecutionPermit
         if let retained = cancellationPermits[id],
@@ -216,7 +217,11 @@ private struct AgentPreviews: Sendable {
         }
         try router.recordCancellation(permit)
         onChange?()
-        if task.state != .queued, let connection = connections[task.command.destination_id] {
+        // Approval can suspend. Read again after recording the cancellation so
+        // a held card which dispatched during approval still sends its control.
+        if let current = router.snapshot().first(where: { $0.command == task.command }),
+           current.cancellationRequested, current.state == .dispatched || current.state == .running,
+           let connection = connections[current.command.destination_id] {
             try await connection.send(.authorizedCommand(permit.command))
         }
     }

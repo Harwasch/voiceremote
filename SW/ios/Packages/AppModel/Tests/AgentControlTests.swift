@@ -1,6 +1,7 @@
 import Foundation
 import Core
 import Stt
+import Brain
 import Testing
 import Policy
 import TrustedInput
@@ -268,4 +269,102 @@ private final class AgentRetentionClock: @unchecked Sendable {
     #expect(throws: (any Error).self) { try store.save([expiredTask], replacing: []) }
     for _ in 0..<20 { await Task.yield() }
     #expect(await rig.messages.values.allSatisfy { if case .agentDispatch = $0 { false } else { true } })
+}
+
+@Test @MainActor func cancellationUsesLiveStateRatherThanHeldCardSnapshot() async throws {
+    let rig = try AgentRig(); try await rig.install()
+    rig.control.disconnected("pc", epoch: rig.epoch)
+    _ = try rig.control.enqueue(await rig.permit())
+    let stale = try #require(rig.router.snapshot().first)
+    #expect(stale.state == .queued)
+    try await rig.connect(); try rig.control.receive(await rig.inventory(), from: "pc", epoch: rig.epoch)
+    #expect(rig.router.snapshot().first?.state == .dispatched)
+    try await rig.control.cancel(stale)
+    #expect(await rig.messages.values.contains { if case .authorizedCommand(let command) = $0,
+        case .cancelTaskTool = command.immutable_task_payload { true } else { false } })
+}
+
+@Test @MainActor func modelCannotChooseDelegateSessionWhenUserHasNotSelectedOne() async throws {
+    let agent = try AgentRig(); try await agent.install()
+    let rig = try Rig(tool: .delegateTaskTool(DelegateTaskTool(account_id: "fixture", device_id: "pc",
+        project_id: "arm", provider_session_id: "named-session", instruction: "Synthetic task")), agent: agent.control, policy: agent.gate)
+    try await rig.registry.register(agent.device); await rig.model.refresh()
+    try await rig.record(mode: .ai_control)
+    await rig.model.review(try #require(rig.model.suggestions.first))
+    #expect(rig.model.approval == nil)
+    #expect(agent.router.snapshot().isEmpty)
+}
+
+@Test @MainActor func dismissedReviewCannotEnqueueUsingStillOpenApproval() async throws {
+    for sensitive in [false, true] {
+        let rig = try Rig(sensitive: sensitive)
+        let original = rig.model.controls.target
+        try await rig.record(mode: .ai_control)
+        let card = try #require(rig.model.suggestions.first)
+        await rig.model.review(card)
+        #expect(rig.model.approval != nil)
+        await rig.model.dismiss(card)
+        await rig.model.approve()
+        #expect(rig.execution.permits.isEmpty)
+        #expect(rig.model.controls.target == original)
+    }
+}
+
+@Test @MainActor func appDispatchReplyNeverReleasesLinkedSuccessor() async throws {
+    let rig = try AgentRig(); try await rig.install()
+    let first = try await rig.permit(), second = try await rig.permit(instruction: "Synthetic successor")
+    _ = try rig.control.enqueue(first)
+    _ = try rig.control.enqueue(second, dependencies: [first.command.command_id])
+    try rig.control.receive(TaskStatus(account_id: "fixture", command_id: first.command.command_id,
+        execution_state: .running, updated_at: 1_000_001), from: "pc", epoch: rig.epoch)
+    try rig.control.receive(TaskStatus(account_id: "fixture", command_id: first.command.command_id,
+        execution_state: .dispatched, updated_at: 1_000_002, outcome: .dispatched, app_reply: "Synthetic refusal"), from: "pc", epoch: rig.epoch)
+    #expect(rig.router.snapshot()[0].appReply == "Synthetic refusal")
+    #expect(rig.router.snapshot()[1].state == .queued)
+    #expect(rig.router.snapshot()[1].hold == .predecessorRequired)
+}
+
+@MainActor private final class ReviewUtterance {
+    var capture = Capture()
+    var text = "Prepare synthetic note. Then prepare another note."
+}
+@Test @MainActor func spokenCancelInvalidatesTheStillOpenApprovalSheet() async throws {
+    let utterance = ReviewUtterance()
+    let rig = try Rig(sensitive: true, captureFactory: { utterance.capture = Capture(); return utterance.capture },
+        scriptProvider: { [.final(utterance.text)] }, additionalTool: .prepareSendTool(PrepareSendTool(
+            account_id: "fixture", device_id: "phone", recipient: "fixture-recipient", content: "Synthetic second note")))
+    rig.model.setMode(.ai_control)
+    func speak() async throws {
+        rig.model.setCapture(.continuous)
+        try await rig.until { rig.model.isRecording }
+        utterance.capture.channel.continuation.yield(.frame(try AudioFrame(samples: [500], timestamp: 0)))
+        rig.model.finishUtterance()
+        try await rig.until { rig.model.listening == .idle }
+    }
+    try await speak()
+    #expect(rig.model.suggestions.count == 2)
+    await rig.model.review(try #require(rig.model.suggestions.first))
+    let review = try #require(rig.model.approval?.id)
+    utterance.text = "cancel the first one"
+    try await speak()
+    #expect(rig.model.approval?.id == review)
+    await rig.model.approve()
+    #expect(rig.execution.permits.isEmpty)
+}
+
+@Test @MainActor func providerReplyUsesTheOriginalRetainedTaskExpiry() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let url = root.appendingPathComponent("tasks.json"), clock = AgentRetentionClock()
+    let store = try RetainedTaskStore(url: url, accountID: "fixture", now: { clock.read() })
+    let rig = try AgentRig(store: store, now: { clock.read() }); try await rig.install()
+    let permit = try await rig.permit()
+    _ = try rig.control.enqueue(permit)
+    try rig.control.receive(TaskStatus(account_id: "fixture", command_id: permit.command.command_id,
+        execution_state: .dispatched, updated_at: clock.read(), outcome: .dispatched, app_reply: "Synthetic expiring reply"), from: "pc", epoch: rig.epoch)
+    #expect(String(decoding: try Data(contentsOf: url), as: UTF8.self).contains("Synthetic expiring reply"))
+    clock.expire(); try store.maintain()
+    #expect(rig.router.snapshot().isEmpty)
+    #expect(!String(decoding: try Data(contentsOf: url), as: UTF8.self).contains("Synthetic expiring reply"))
 }

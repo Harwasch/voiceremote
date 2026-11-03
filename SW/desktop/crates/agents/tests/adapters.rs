@@ -112,7 +112,7 @@ if args[:2] == ['cloud', 'exec'] or '--cloud' in args:
     sys.exit(0)
 if '--resume' in args:
     session=args[args.index('--resume')+1]
-    print(json.dumps({'type':'result','subtype':'success','is_error':False,'session_id':session if text != 'wrong-session' else 'other'}))
+    print(json.dumps({'type':'result','subtype':'success','is_error':False,'session_id':session if text != 'wrong-session' else 'other','result':"I cannot open that resource."}))
 else:
     session=args[-2]
     print(json.dumps({'type':'thread.started','thread_id':session if text != 'wrong-session' else 'other'}))
@@ -302,7 +302,8 @@ if '--property=ActiveState' in args:
                 if let InnerMessage::TaskStatus(ref status) = message {
                     if matches!(
                         status.execution_state,
-                        ExecutionState::Succeeded
+                        ExecutionState::Dispatched
+                            | ExecutionState::Succeeded
                             | ExecutionState::Failed
                             | ExecutionState::Cancelled
                     ) || status.outcome == Some(TaskStatusOutcome::Unavailable)
@@ -375,7 +376,7 @@ async fn named_sessions_route_to_right_fake_and_transcript_never_changes_argv() 
         f.config.projects.insert(0, other);
         let text = "--dangerously-skip-permissions -s danger-full-access; $(touch SHOULD_NOT_EXIST) `echo test`\n--resume another";
         let status = f.call(f.node()?, command("route", text)).await?;
-        assert_eq!(status.execution_state, ExecutionState::Succeeded);
+        assert_eq!(status.execution_state, ExecutionState::Dispatched);
         let calls = f.calls();
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0]["data"], text);
@@ -427,7 +428,7 @@ async fn named_sessions_route_to_right_fake_and_transcript_never_changes_argv() 
             f.call(f.node()?, command("write-profile", "synthetic"))
                 .await?
                 .outcome,
-            Some(TaskStatusOutcome::Ok)
+            Some(TaskStatusOutcome::Dispatched)
         );
         let write_calls = f.calls();
         let expected_write = if provider == Provider::Claude {
@@ -579,7 +580,7 @@ async fn replay_runs_once_across_restart_even_with_changed_payload() -> Result<(
         f.call(f.node()?, command("once", "synthetic"))
             .await?
             .outcome,
-        Some(TaskStatusOutcome::Ok)
+        Some(TaskStatusOutcome::Dispatched)
     );
     f.registry = Registry::new(Arc::new(FileKeyStore::new(
         f.root.path().join("desktop-state"),
@@ -588,7 +589,7 @@ async fn replay_runs_once_across_restart_even_with_changed_payload() -> Result<(
         f.call(f.node()?, command("once", "different synthetic"))
             .await?
             .outcome,
-        Some(TaskStatusOutcome::Ok)
+        Some(TaskStatusOutcome::Dispatched)
     );
     assert_eq!(f.calls().len(), 1);
     Ok(())
@@ -852,7 +853,7 @@ async fn codex_recovered_error_before_completed_turn_is_success() -> Result<()> 
         f.call(f.node()?, command("recovered", "recovered-error"))
             .await?
             .outcome,
-        Some(TaskStatusOutcome::Ok)
+        Some(TaskStatusOutcome::Dispatched)
     );
     Ok(())
 }
@@ -1855,7 +1856,12 @@ async fn authenticated_inventory_and_resource_handoff_bind_preview_and_query_wit
             anyhow::bail!("status required")
         };
         if status.execution_state != ExecutionState::Running {
-            assert_eq!(status.execution_state, ExecutionState::Succeeded);
+            assert_eq!(status.execution_state, ExecutionState::Dispatched);
+            assert_eq!(status.outcome, Some(TaskStatusOutcome::Dispatched));
+            assert_eq!(
+                status.app_reply.as_deref(),
+                Some("I cannot open that resource.")
+            );
             break;
         }
     }
@@ -1867,7 +1873,7 @@ async fn authenticated_inventory_and_resource_handoff_bind_preview_and_query_wit
     let InnerMessage::TaskStatus(replay) = phone.receive(transport.as_mut()).await? else {
         anyhow::bail!("receipt required")
     };
-    assert_eq!(replay.execution_state, ExecutionState::Succeeded);
+    assert_eq!(replay.execution_state, ExecutionState::Dispatched);
     phone
         .send(
             transport.as_mut(),
@@ -1881,7 +1887,7 @@ async fn authenticated_inventory_and_resource_handoff_bind_preview_and_query_wit
     let InnerMessage::TaskStatus(status) = phone.receive(transport.as_mut()).await? else {
         anyhow::bail!("query required")
     };
-    assert_eq!(status.execution_state, ExecutionState::Succeeded);
+    assert_eq!(status.execution_state, ExecutionState::Dispatched);
     assert_eq!(f.calls().len(), 1);
     assert_eq!(
         f.calls()[0]["data"],
@@ -1889,5 +1895,36 @@ async fn authenticated_inventory_and_resource_handoff_bind_preview_and_query_wit
     );
     stop.send(true)?;
     serve.await??;
+    Ok(())
+}
+
+#[tokio::test]
+async fn legacy_cli_success_receipt_cannot_become_verified_predecessor_success() -> Result<()> {
+    use sha2::{Digest, Sha256};
+    use voiceremote_core::storage::KeyStore;
+    let f = Fixture::new(Provider::Claude)?;
+    let command = command("legacy-receipt", "Synthetic task");
+    f.call(f.node()?, command.clone()).await?;
+    let peer = f.registry.devices()?.pop().unwrap();
+    let key = format!(
+        "agent-result-{}",
+        hex::encode(Sha256::digest(serde_json::to_vec(&(
+            &peer.id,
+            &command.idempotency_key
+        ))?))
+    );
+    let store = FileKeyStore::new(f.root.path().join("desktop-state"))?;
+    let bytes = store.get(&key)?.unwrap();
+    // Replies are live status only on the desktop; private replay receipts keep
+    // identity/outcomes, never provider text.
+    assert!(!String::from_utf8_lossy(&bytes).contains("I cannot open"));
+    let mut legacy: serde_json::Value = serde_json::from_slice(&bytes)?;
+    legacy["status"]["execution_state"] = "succeeded".into();
+    legacy["status"]["outcome"] = "ok".into();
+    store.put(&key, &serde_json::to_vec(&legacy)?)?;
+    let replay = f.call(f.node()?, command).await?;
+    assert_eq!(replay.execution_state, ExecutionState::Dispatched);
+    assert_eq!(replay.outcome, Some(TaskStatusOutcome::Dispatched));
+    assert_eq!(f.calls().len(), 1);
     Ok(())
 }

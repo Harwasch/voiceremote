@@ -41,7 +41,7 @@ import VoiceRemoteProtocol
         let phrase = await pending.phrase; emit("PHRASE:" + phrase)
         try require(readLine() == "confirm")
         let phone = DeviceInfo(account_id: account, device_id: "phone", display_name: "Synthetic phone", platform: .ios,
-            role: .capture, capabilities: denied ? [] : [.delegate_task, .cancel_task])
+            role: .capture, capabilities: denied ? [] : [.delegate_task, .cancel_task, .open_resource])
         try await pending.confirmLocal(displayedPhrase: phrase, device: phone, transport: transport)
         try await pending.receiveConfirmation(transport: transport)
         let initial = try await pending.finish(registry: pins)
@@ -140,9 +140,9 @@ import VoiceRemoteProtocol
         try require(router.snapshot().isEmpty && bio.calls == 1)
         bio.allowed = true
         await model.approve()
-        try await until { router.snapshot().first?.state == .succeeded }
-        try require(bio.calls == 2 && router.snapshot().first?.outcome == .ok)
-        emit("AGENT_NAMED_SESSION_SUCCEEDED")
+        try await until { router.snapshot().first?.state == .dispatched && router.snapshot().first?.outcome == .dispatched }
+        try require(bio.calls == 2 && router.snapshot().first?.outcome == .dispatched)
+        emit("AGENT_SESSION_ARGUMENTS_DISPATCHED")
 
         // A real disconnected node is stopped/restarted by the Python coordinator.
         emit("AGENT_OFFLINE_READY")
@@ -157,7 +157,7 @@ import VoiceRemoteProtocol
         readTask = reader(connection, epoch)
         let resumed = connection
         try await control.connected(peer.device, epoch: epoch) { try await resumed.send($0) }
-        try await until { router.snapshot().last?.state == .succeeded }
+        try await until { router.snapshot().last?.state == .dispatched && router.snapshot().last?.outcome == .dispatched }
         try require(await brain.simpleCalls > 0)
         emit("AGENT_HELD_RELEASED")
 
@@ -176,7 +176,25 @@ import VoiceRemoteProtocol
         let count = router.snapshot().count
         try await record(provider: "claude", instruction: "Synthetic injected authority", ptt: true, injected: true)
         try require(model.suggestions.isEmpty && router.snapshot().count == count)
-        emit("PASS agents: phone STT→Brain→real Policy/fake biometric→Router→relay/Noise→agent/fake Claude+Codex; exact sessions, tier1 tap, tier3 biometric, capability refusal, offline hold/release, status query, tree cancel, authority injection, hybrid fast path")
+        let destination = control.destinations.first { $0.session.provider == "claude" }!
+        try control.choose(destination.session)
+        func permit(_ tool: ToolCall) async throws -> ExecutionPermit {
+            let scope = input.session(account: account, actor: "phone", session: UUID().uuidString,
+                device: "desktop", project: destination.session.workspace, destinationKind: .software)
+            let activation = input.activation(session: scope, kind: .inferred, expiresAt: now() + 120_000)
+            guard case .suggestion(let preview) = gate.submit(try ProtocolCodec.encode(tool), input: activation),
+                  case .queued(let permit) = await gate.approve(requestID: preview.requestID,
+                    evidence: input.approval(session: scope, requestID: preview.requestID, payloadHash: preview.payloadHash)) else { throw PairingError.invalidState }
+            return permit
+        }
+        let resource = try await permit(.openResourceTool(OpenResourceTool(account_id: account, device_id: "desktop", resource_uri: "https://example.invalid/synthetic")))
+        _ = try control.enqueue(resource, expectedRoute: destination)
+        try await until { router.snapshot().last?.outcome == .dispatched }
+        try require(router.snapshot().last?.state == .dispatched && router.snapshot().last?.appReply != nil)
+        let successor = try await permit(.delegateTaskTool(DelegateTaskTool(account_id: account, device_id: "desktop", project_id: "arm-claude", provider_session_id: "test-claude", instruction: "Synthetic blocked successor")))
+        _ = try control.enqueue(successor, dependencies: [resource.command.command_id], expectedRoute: destination)
+        try require(router.snapshot().last?.state == .queued && router.snapshot().last?.hold == .predecessorRequired)
+        emit("PASS agents: phone STT→Brain→real Policy/fake biometric→Router→relay/Noise→agent/fake Claude+Codex; fake CLI session arguments checked; real session continuation unverified; tier1 tap, tier3 biometric, capability refusal, offline hold/release, status query, cancel request, authority rejection, hybrid fast path, open-resource dispatched/reply with successor held")
         readTask.cancel(); await connection.close()
     }
     static func now() -> Int64 { Int64(Date().timeIntervalSince1970 * 1000) }

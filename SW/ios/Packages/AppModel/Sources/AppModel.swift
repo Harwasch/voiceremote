@@ -393,7 +393,10 @@ public struct ApprovalCard: Identifiable, Sendable {
         var reviewedRoute: Destination?
         do {
             if case .delegateTaskTool(let proposed) = tapped.proposal.tool, let agentControl {
-                let route = try agentControl.resolve(device: selected.device_id, project: proposed.project_id, providerSession: proposed.provider_session_id)
+                guard let chosen = agentControl.selected, chosen.host == selected.device_id else {
+                    message = "Choose the enrolled project, provider and session before reviewing."; return
+                }
+                let route = try agentControl.resolve(device: selected.device_id, project: chosen.workspace, providerSession: chosen.providerSessionID)
                 guard route.capabilities.contains(.delegate_task) else { throw AppRoutingError.unavailableDestination }
                 project = route.session.workspace; reviewedRoute = route
                 tool = .delegateTaskTool(DelegateTaskTool(account_id: accountID, device_id: selected.device_id,
@@ -467,6 +470,7 @@ public struct ApprovalCard: Identifiable, Sendable {
         switch decision {
         case .queued(let permit):
             if case .selectTargetTool(let tool) = permit.command.immutable_task_payload {
+                guard await authorizeSuggestion(permit, card: card) else { return }
                 guard policy.transition(requestID: card.id, to: .dispatched) else { return }
                 setTarget(.device(tool.device_id))
                 _ = policy.transition(requestID: card.id, to: .running)
@@ -481,12 +485,22 @@ public struct ApprovalCard: Identifiable, Sendable {
         default: message = "Action needs review."
         }
     }
-    private func queue(_ permit: ExecutionPermit, card: ApprovalCard) async throws {
+    private func authorizeSuggestion(_ permit: ExecutionPermit, card: ApprovalCard) async -> Bool {
         if let suggestionID = card.suggestionID {
-            await suggestionEngine?.authorized(cardID: suggestionID, revision: card.suggestionRevision, now: Date(timeIntervalSince1970: Double(now()) / 1000))
+            guard await suggestionEngine?.authorized(cardID: suggestionID, revision: card.suggestionRevision, now: Date(timeIntervalSince1970: Double(now()) / 1000)) == true,
+                  approval?.id == card.id else {
+                pendingPermits.removeValue(forKey: card.id)
+                _ = policy.transition(requestID: card.id, to: .cancelled)
+                if approval?.id == card.id { approval = nil }
+                return false
+            }
             authorizedSuggestions[suggestionID] = permit.command.command_id
             taskSuggestions[permit.command.command_id] = suggestionID
         }
+        return true
+    }
+    private func queue(_ permit: ExecutionPermit, card: ApprovalCard) async throws {
+        guard await authorizeSuggestion(permit, card: card) else { return }
         if let agentControl {
             tasks = try agentControl.enqueue(permit, dependencies: card.dependencies, replacingCommandID: card.replacingCommandID, expectedRoute: card.route)
         } else { tasks = try deliver(permit) }

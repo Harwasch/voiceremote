@@ -34,3 +34,5 @@ OfflineSyncTests additionally checks pending transcript expiry, removal of the d
 [AgentControlTests.swift](AgentControlTests.swift) covers actor/request/connection spoofing, explicit capabilities, exact workspace/profile, offline release, authenticated status, changed profile holds, predecessor refusal, restart review and revoked old permits. AppModelTests covers correction text across silence slices without early inference.
 
 AgentControl retention regression uses the real RetainedTaskStore, expires an offline task, reconnects, and verifies that neither disk payload restoration nor agent dispatch occurs.
+
+Review regressions cover model-selected sessions without user choice, a dismissed/open review, spoken cancellation of an open linked review, stale held-task cancellation and dispatched app replies holding successors.

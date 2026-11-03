@@ -100,3 +100,6 @@ are explicit and independent of model output. The phone re-verifies the sealed
 Policy permit before routing. Protocol interoperability is covered by shared
 vectors and the synthetic agent relay E2E; device/provider/Windows runtime
 acceptance remains **unverified**.
+
+
+CLI app handoff: `task_status.execution_state=dispatched`, `outcome=dispatched`, and optional bounded `app_reply` mean the provider received a command and returned that reply. A completed turn (including refusal) is no proof of an opened resource or fulfilled instruction. Owner policy requires verified `succeeded/ok` for predecessors; dispatched does not release linked work. This policy has no model-controlled override. Replies are data only, retained with the phone task expiry and omitted from desktop replay receipts.

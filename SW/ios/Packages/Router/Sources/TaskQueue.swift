@@ -33,11 +33,12 @@ public struct QueuedTask: Codable, Equatable, Sendable {
     public var route: RouteChoice?
     public var cancellationRequested = false
     public var outcome: TaskStatusOutcome?
+    public var appReply: String?
     public var updatedAt: Int64
 
     public var visibleStatus: String {
         if let hold { return "Held · \(hold.rawValue) · \(route?.label ?? rules.explicitTarget ?? rules.selectedTarget ?? rules.defaultTarget ?? "destination unavailable")" }
-        return "\(state.rawValue) · \(route?.label ?? "awaiting destination")"
+        return "\(state.rawValue) · \(route?.label ?? "awaiting destination")" + (appReply.map { " · " + $0 } ?? "")
     }
 }
 
@@ -339,11 +340,12 @@ public final class FileTaskQueueStore: TaskQueueStore, @unchecked Sendable {
             return
         }
         guard !Self.terminal(old), old != .queued, new != .queued,
-              !(old == .running && new == .dispatched),
+              !(old == .running && new == .dispatched && status.outcome != .dispatched),
               new != .succeeded || status.outcome == .ok else { throw RouterError.invalidStatus }
         var next = tasks
         next[i].state = new
         next[i].outcome = status.outcome
+        if let reply = status.app_reply { next[i].appReply = reply }
         next[i].updatedAt = status.updated_at
         next[i].hold = next[i].cancellationRequested && !Self.terminal(new) ? .cancellationPending : nil
         try persist(next)

@@ -115,7 +115,11 @@ impl Allowlist {
                 "allowlist must be owner-controlled"
             );
         }
-        let mut config: Self = toml::from_str(&fs::read_to_string(path)?)?;
+        #[cfg(windows)]
+        let text = crate::windows_security::read(path, 256 * 1024)?;
+        #[cfg(not(windows))]
+        let text = fs::read_to_string(path)?;
+        let mut config: Self = toml::from_str(&text)?;
         config.validate()?;
         config.outside_workspaces(&path.canonicalize()?)?;
         Ok(config)
@@ -212,6 +216,8 @@ impl Allowlist {
                 "discovery metadata must be owner-controlled"
             );
         }
+        #[cfg(windows)]
+        crate::windows_security::read(file, 64 * 1024)?;
         Ok(())
     }
     pub fn sessions(&self) -> Result<Vec<SessionIdentity>> {
@@ -226,7 +232,11 @@ impl Allowlist {
             if let Some(file) = &project.discovery_file {
                 self.outside_workspaces(&file.canonicalize()?)?;
                 Self::check_metadata(file)?;
-                let discovered: Discovered = toml::from_str(&fs::read_to_string(file)?)?;
+                #[cfg(windows)]
+                let text = crate::windows_security::read(file, 64 * 1024)?;
+                #[cfg(not(windows))]
+                let text = fs::read_to_string(file)?;
+                let discovered: Discovered = toml::from_str(&text)?;
                 ensure!(discovered.sessions.len() <= 256, "discovery session limit");
                 for entry in discovered.sessions {
                     ensure!(

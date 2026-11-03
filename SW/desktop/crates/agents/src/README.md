@@ -22,3 +22,7 @@ See [boundaries](../README.md) before embedding.
 
 
 Inventory, retained-preview dispatch and durable status queries enter only through the paired receiver. HTTPS resource actions hand off to the selected CLI. See [supported entry points](../README.md#supported-command-entry-points-checked-2026-11-02).
+
+| [windows_security.rs](windows_security.rs) | Same concrete token-user SID boundary as the tray pipe; owner/DACL/reparse checks and bounded read on one locked handle | 🟡 Windows tests cross-compiled; runtime unverified |
+
+Clean CLI turns and resource requests return dispatched plus bounded app reply, never verified success. Reply text is excluded from desktop durable receipts; legacy CLI success receipts cannot revive success authority.
