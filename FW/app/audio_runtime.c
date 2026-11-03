@@ -1,4 +1,5 @@
 #include "audio.h"
+#include "offline.h"
 #include "timing.h"
 #include "runtime.h"
 #include "board.h"
@@ -19,7 +20,15 @@ static uint64_t encode_us;
 static unsigned encoded, max_us, notify_failures;
 static int source_error;
 static size_t internal_before, external_before;
-static bool closing, reported;
+static bool closing, reported, local_running;
+static void stop_local(void)
+{
+    if(!local_running) return;
+    board_mic_stop(); generation++;
+    if(worker && xTaskGetCurrentTaskHandle()!=worker) vTaskSuspend(worker);
+    local_running=false; remote_state.input.offline=0;
+    ble_emit(VR_SNAPSHOT,remote_now()); ui_refresh();
+}
 static void lock(void) { xSemaphoreTakeRecursive(remote_mutex,portMAX_DELAY); }
 static void unlock(void) { xSemaphoreGiveRecursive(remote_mutex); }
 static void stats(void)
@@ -63,12 +72,16 @@ static void stop(void)
 }
 void audio_fault(void)
 {
+    if(local_running) { offline_capture_error(); stop_local(); return; }
     remote_state.audio_fault=true; remote_state.recovery_release=!remote_state.input.ptt;
     remote_state.armed=false; remote_state.snapshot_sent=false;
     stop();
 }
 void audio_reset(void)
 {
+    /* A BLE session reset never restarts a locally owned encoder. Its record
+     * keeps one codec history through reconnect, until a local boundary. */
+    if(local_running) { memset(&stream,0,sizeof stream); closing=false; remote_state.input.streaming=0; return; }
     stop(); stats(); memset(&stream,0,sizeof stream); closing=false;
     generation++; remote_state.input.streaming=0;
 }
@@ -89,7 +102,7 @@ static void encode_task(void *arg)
     (void)arg; int16_t pcm[VR_AUDIO_SAMPLES]; uint8_t packet[VR_MAX_PACKET];
     for(;;) {
         lock();
-        if(!stream.running || stream.next_frame==UINT16_MAX) { unlock(); vTaskDelay(pdMS_TO_TICKS(2)); continue; }
+        if((!stream.running && !local_running) || (!local_running && stream.next_frame==UINT16_MAX)) { unlock(); vTaskDelay(pdMS_TO_TICKS(2)); continue; }
         uint32_t g=generation;
         bool reset=worker_generation!=g;
         esp_err_t read=board_mic_read(pcm);
@@ -102,12 +115,13 @@ static void encode_task(void *arg)
         if(!result) result=opus_encode(encoder,pcm,VR_AUDIO_SAMPLES,packet,VR_MAX_PACKET);
         unsigned elapsed=(unsigned)(esp_timer_get_time()-at);
         lock();
-        if(g==generation && stream.running) {
+        if(g==generation && (stream.running || local_running)) {
             worker_generation=g;
             if(result<=0) { source_error=result; audio_fault(); }
             else {
                 encoded++; encode_us+=elapsed; if(elapsed>max_us) max_us=elapsed;
-                if(!vr_stream_push(&stream,packet,result)) {
+                if(local_running) { if(!offline_packet(packet,result)) stop_local(); }
+                else if(!vr_stream_push(&stream,packet,result)) {
                     /* push already discarded the queue; stop still owns board/task. */
                     stream.running=true; audio_fault();
                 }
@@ -131,7 +145,8 @@ void audio_init(void)
 }
 void audio_sync(void)
 {
-    if(stream.running && !vr_capture_gate(&remote_state)) stop();
+    if(local_running && !offline_local_active()) stop_local();
+    if(stream.running && (!vr_capture_gate(&remote_state) || !offline_live_allowed())) stop();
 }
 void audio_poll(void)
 {
@@ -146,9 +161,18 @@ void audio_poll(void)
         }
         return;
     }
-    if(!stream.running && vr_capture_gate(&remote_state) && encoder) {
+    if(!local_running && !stream.running && offline_local_active() && encoder) {
+        offline_cancel_sync(); generation++;
+        esp_err_t mic=board_mic_start();
+        if(mic!=ESP_OK) { offline_capture_error(); return; }
+        local_running=true; remote_state.input.offline=1; remote_state.input.streaming=0;
+        vTaskResume(worker); ble_emit(VR_SNAPSHOT,remote_now()); ui_refresh();
+        ESP_LOGI("offline","capture started mode=%u",remote_state.input.mode);
+    }
+    if(local_running) return;
+    if(!stream.running && offline_live_allowed() && vr_capture_gate(&remote_state) && encoder) {
         if(!vr_stream_begin(&stream)) { audio_fault(); ble_audio_disconnect(); return; }
-        generation++; encode_us=0; encoded=max_us=notify_failures=0; source_error=0; reported=false;
+        offline_cancel_sync(); generation++; encode_us=0; encoded=max_us=notify_failures=0; source_error=0; reported=false;
         internal_before=heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
         external_before=heap_caps_get_free_size(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
         esp_err_t mic=board_mic_start();

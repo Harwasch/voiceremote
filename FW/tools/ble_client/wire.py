@@ -7,6 +7,9 @@ INFO = "cba8d4dd-2aea-4964-a0b7-ef58095a1171"
 INPUT = "9f0f839c-fe73-46e4-acc3-53518ed5689c"
 PHONE = "d9306a59-9e64-48c5-8722-827a0592a412"
 AUDIO = "6df454c4-b29c-4638-b4f5-cc43e81e2427"
+OFFLINE_CONTROL = "14af3886-4d49-4ccd-a2dc-3eea7b5b1577"
+OFFLINE_RESULT = "4fbc7f55-c428-466b-b308-771f7eac6c66"
+OFFLINE_PROGRESS = "32ac7675-c84c-4a2b-a276-ed45a9434426"
 
 def text(value: str, maximum: int, empty: bool = False) -> bytes:
     data = value.encode("utf-8")
@@ -33,34 +36,34 @@ def phone_state(ack: int, *, target: str = "PC", link: str = "BLE", error: str =
     return data
 
 
-def fragments(data: bytes, transaction: int, budget: int):
-    if not 19 <= len(data) <= 512 or not 7 <= budget <= 512:
+def fragments(data: bytes, transaction: int, budget: int, minimum=19):
+    if not minimum <= len(data) <= 512 or not 7 <= budget <= 512:
         raise ValueError("invalid state length or write budget")
     for offset in range(0, len(data), budget - 6):
         yield struct.pack("<HHH", transaction, len(data), offset) + data[offset:offset + budget - 6]
 
 
-def input_event(data: bytes) -> dict:
+def input_event(data: bytes, minor=1) -> dict:
     if len(data) != 14:
         raise ValueError("Input must be 14 bytes")
     seq, ms, event, capture, mode, ptt, streaming, reserved = struct.unpack("<II6B", data)
-    if (event > 5 or capture > 2 or mode > 1 or ptt > 1 or streaming > 1 or reserved
+    if (event > 5 or capture > 2 or mode > 1 or ptt > 1 or (streaming & ~31 if minor <= 1 else False) or reserved
             or (event == 1 and ptt != 1) or (event == 2 and ptt != 0)
-            or (capture == 0 and streaming)):
+            or (streaming & 3 == 3) or (capture == 0 and streaming & 3)):
         raise ValueError("malformed Input")
-    return dict(seq=seq, ms=ms, event=event, capture=capture, mode=mode, ptt=ptt, streaming=streaming)
+    return dict(seq=seq, ms=ms, event=event, capture=capture, mode=mode, ptt=ptt, streaming=bool(streaming & 1), status=streaming & 31, offline=bool(streaming & 2))
 
 
 def version_info(data: bytes) -> dict:
     if len(data) != 20:
         raise ValueError("Version/info must be 20 bytes")
     major, minor, board, a, b, c, reserved, caps, mics, slider, w, h, maximum, tail = struct.unpack("<BBH4BHBB4H", data)
-    if ((major, minor) != (1, 0) or reserved or tail or caps & ~127 or not mics
+    if (major != 1 or reserved or tail or (caps & ~255 if minor <= 1 else False) or not mics
             or slider > 1 or board not in (1, 2, 65535) or not 1 <= maximum <= 4096
             or (bool(w) and bool(h)) != bool(caps & 2) or (not caps & 2 and (w or h))):
         raise ValueError("unsupported/malformed Version/info")
     return dict(contract=f"{major}.{minor}", board=board, firmware=f"{a}.{b}.{c}",
-                capabilities=caps, mics=mics, slider=slider, width=w, height=h,
+                minor=minor, offline=bool(caps & 128), capabilities=caps, mics=mics, slider=slider, width=w, height=h,
                 maximum_packet=maximum, full_v1_capabilities=(caps & 63 == 63))
 
 
@@ -127,7 +130,7 @@ class BenchPolicy:
     def arm(self):
         e = self.latest
         return bool(self.intent and e and not self.blocked and not self.snapshot_needed
-                    and e['capture'] != 0
+                    and e['capture'] != 0 and not e.get('offline', False)
                     and ((e['capture'] == 1 and (self.released or self.ptt_selected))
                          or (e['capture'] == 2 and self.rec_selected)))
 

@@ -14,13 +14,14 @@
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_panel_io.h"
 #include "esp_log.h"
+#include "esp_attr.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 
 /* Swap only this constant if the physical colours are reversed. */
 static const gpio_num_t BUTTON_GPIOS[2]={GPIO_NUM_2,GPIO_NUM_1}; /* yellow PTT, blue cycle */
-static const board_info_t info={1,466,466,0x3f,true,true,true};
+static const board_info_t info={1,466,466,0xbf,true,true,true};
 static i2c_master_dev_handle_t ioe, pm, touch, codec;
 static i2c_master_bus_handle_t bus;
 static esp_lcd_panel_handle_t panel;
@@ -134,12 +135,13 @@ esp_err_t board_flush(int x1, int y1, int x2, int y2, const void *p)
     if(e) return e;
     return xSemaphoreTake(dma_done,pdMS_TO_TICKS(1000))==pdTRUE ? ESP_OK : ESP_ERR_TIMEOUT;
 }
-bool board_touch(uint16_t *x, uint16_t *y)
+board_touch_t board_touch(uint16_t *x, uint16_t *y)
 {
     uint8_t b[7];
-    if(read_reg(touch,0,b,sizeof b)!=ESP_OK || b[2]!=1 || ((b[3]>>6)!=0 && (b[3]>>6)!=2)) return false;
+    if(read_reg(touch,0,b,sizeof b)!=ESP_OK) return BOARD_TOUCH_ERROR;
+    if(b[2]!=1 || ((b[3]>>6)!=0 && (b[3]>>6)!=2)) return BOARD_TOUCH_UP;
     *x=((b[3]&15)<<8)|b[4]; *y=((b[5]&15)<<8)|b[6];
-    return *x<info.width && *y<info.height;
+    return *x<info.width && *y<info.height ? BOARD_TOUCH_DOWN : BOARD_TOUCH_UP;
 }
 bool board_button(unsigned button)
 {
@@ -181,7 +183,7 @@ static bool mic_enabled;
 static atomic_bool mic_overflow;
 static int16_t mic_stereo[640];
 static size_t mic_used;
-static bool mic_q_overflow(i2s_chan_handle_t h,i2s_event_data_t *e,void *ctx)
+static bool IRAM_ATTR mic_q_overflow(i2s_chan_handle_t h,i2s_event_data_t *e,void *ctx)
 { (void)h; (void)e; (void)ctx; atomic_store(&mic_overflow,true); return false; }
 static esp_err_t mic_init(void)
 {

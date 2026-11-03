@@ -3,7 +3,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #define VR_MAJOR 1
-#define VR_MINOR 0
+#define VR_MINOR 1
 #define VR_MAX_STATE 512
 #define VR_INFO_SIZE 20
 #define VR_INPUT_SIZE 14
@@ -13,6 +13,9 @@
 #define VR_INFO_UUID "cba8d4dd-2aea-4964-a0b7-ef58095a1171"
 #define VR_INPUT_UUID "9f0f839c-fe73-46e4-acc3-53518ed5689c"
 #define VR_PHONE_UUID "d9306a59-9e64-48c5-8722-827a0592a412"
+#define VR_OFFLINE_CONTROL_UUID "14af3886-4d49-4ccd-a2dc-3eea7b5b1577"
+#define VR_OFFLINE_RESULT_UUID "4fbc7f55-c428-466b-b308-771f7eac6c66"
+#define VR_OFFLINE_PROGRESS_UUID "32ac7675-c84c-4a2b-a276-ed45a9434426"
 #define VR_AUDIO_UUID "6df454c4-b29c-4638-b4f5-cc43e81e2427"
 
 enum { VR_OFF, VR_PTT, VR_REC };
@@ -24,6 +27,7 @@ typedef struct {
 typedef struct {
     uint32_t seq, ms;
     uint8_t event, capture, mode, ptt, streaming;
+    uint8_t offline, full, waiting, syncing;
 } vr_input_t;
 typedef struct {
     uint8_t flags, capture, recording, mode, count, active;

@@ -1,4 +1,4 @@
-# BLE audio bench client
+# BLE audio / deferred-sync bench client
 
 ```mermaid
 sequenceDiagram
@@ -9,11 +9,16 @@ sequenceDiagram
     Client->>Remote: State with latest Input ack and arm decision
     Remote->>Client: Opus START / fragments / END
     Client->>WAV: Reassemble, decode, close one file per segment
+    Remote->>Client: Offline metadata + resumable export
+    Client->>Disk: fsync source, metadata and WAV / short disposition
+    Client->>Remote: Confirm durable copy, then remote deletes
 ```
 
 | File | Purpose | Status |
 |---|---|---|
-| `client.py` | BlueZ CLI, Numeric Comparison, serialized/coalesced state writes on every Input | 🟡 Adapter unverified |
+| `client.py` | BlueZ CLI, Numeric Comparison, serialized/coalesced state writes; `--sync`, `--set-clock`, timed disconnect | 🟡 Adapter unverified |
+| `offline.py`, `test_offline.py` | Draft 1.1 framing, durable resume/verification/delete, capture/OFF fetch preemption, idle OFF metadata replies, synthetic contract hex fixtures | ✅ Host tested; adapter unverified |
+| [deferred.md](deferred.md) | Sync, clock, enrollment namespace, unattended disconnect procedure | 🟡 Hardware procedure unverified |
 | `wire.py`, `test_wire.py` | Control codecs, sequence/trigger recovery policy, synthetic fixtures | ✅ Host tested |
 | `audio.py`, `test_audio.py` | Bounded reassembly, duplicate/gap detection, 1 s watchdog, Opus decode/WAV and C framing round trip | ✅ Host tested |
 | `pyproject.toml`, `uv.lock` | Python 3.12, Bleak 3.0.2, dbus-fast 5.2.0, opuslib-next 1.3.1 | ✅ Offline resolved |
@@ -76,3 +81,10 @@ The local BlueZ policy must permit registering a default `DisplayYesNo` agent.
 Type `yes` within 25 s and confirm on the remote. PIN/passkey/Just Works are
 rejected. Reconnect uses the stored bond; revoke on the remote and remove the
 stale BlueZ bond manually before fresh enrollment. No adapter was accessed here.
+
+Deferred audio simulates the phone transport only: no STT, history insertion or AI
+execution. Start with [deferred.md](deferred.md). `--sync DIR` requires
+`--remote-id ENROLLED_ID`; it resumes durable partials and confirms only after
+length/frame-count/CRC validation and durable WAV/source or short-discard metadata.
+Recordings under 15 frames receive no WAV. Same-major peers connect; capability
+bit 7 gates all offline operations. C6 bit 7 clear is a clear unsupported error.

@@ -14,7 +14,7 @@ vr_state_t remote_state;
 static board_info_t info={1,466,466,0,true,true,true};
 static uint8_t pixels[466*466*4];
 static uint32_t now=450;
-static bool touched, fail_flush;
+static bool touched, fail_flush, fail_touch;
 static uint16_t touch_x,touch_y;
 static unsigned haptics,pairs,answers,revokes,events,flushes;
 static bool accepted, skip_render, interrupt_render, modal_during_render;
@@ -39,7 +39,7 @@ const board_info_t *board_info(void) { return &info; }
 esp_err_t board_init(void) { return ESP_OK; }
 bool board_button(unsigned button) { (void)button; return false; }
 void board_poll(uint32_t ms) { (void)ms; }
-bool board_touch(uint16_t *x,uint16_t *y) { assert(mutex_depth); *x=touch_x; *y=touch_y; return touched; }
+board_touch_t board_touch(uint16_t *x,uint16_t *y) { assert(mutex_depth); *x=touch_x; *y=touch_y; return fail_touch?BOARD_TOUCH_ERROR:touched?BOARD_TOUCH_DOWN:BOARD_TOUCH_UP; }
 void board_haptic(uint32_t ms) { (void)ms; haptics++; }
 void ble_pair_start(void) { pairs++; }
 void ble_pair_answer(bool accept) { answers++; accepted=accept; }
@@ -97,7 +97,7 @@ static void fixture(void)
 static uint32_t target_hash(void)
 {
     uint32_t hash=2166136261u;
-    for(int y=384;y<450;y++) for(int x=0;x<466;x++)
+    for(int y=356;y<450;y++) for(int x=0;x<466;x++)
         for(int c=0;c<3;c++) hash=(hash^pixels[(y*466+x)*4+c])*16777619u;
     return hash;
 }
@@ -114,6 +114,17 @@ static void partial_matches_full(void)
 {
     static uint8_t partial[sizeof pixels]; memcpy(partial,pixels,sizeof pixels);
     lv_obj_invalidate(lv_screen_active()); ui_tick();
+    static unsigned comparison; comparison++;
+    if(memcmp(partial,pixels,sizeof pixels)) {
+        int x1=466,y1=466,x2=0,y2=0;
+        for(int y=0;y<466;y++) for(int x=0;x<466;x++) if(memcmp(partial+(y*466+x)*4,pixels+(y*466+x)*4,4)) {
+            if(x<x1) x1=x;
+            if(x>x2) x2=x;
+            if(y<y1) y1=y;
+            if(y>y2) y2=y;
+        }
+        fprintf(stderr,"partial/full comparison %u differs at %d,%d..%d,%d (tick %u)\n",comparison,x1,y1,x2,y2,now);
+    }
     assert(!memcmp(partial,pixels,sizeof pixels));
 }
 static void check(void)
@@ -134,6 +145,21 @@ static void check(void)
     assert(memcmp(old_pixels,pixels,sizeof pixels));
     touch_x=320; touch_y=140; advance(5); touched=false; advance(30);
     assert(!memcmp(old_pixels,pixels,sizeof pixels) && events==old_events);
+    /* An I2C read failure must not accept a selected control as a release. */
+    touched=true; touch_x=424; touch_y=210; advance(5);
+    fail_touch=true; advance(50);
+    assert(events==old_events && remote_state.input.capture==VR_PTT);
+    fail_touch=false; advance(5);
+    touched=false; advance(100);
+    assert(events==old_events+1 && remote_state.input.capture==VR_REC);
+    tap(233,40); old_events=events;
+    /* A sustained failure cancels the preview; recovery while still held cannot
+     * reactivate it. Only an observed up rearms touch. */
+    touched=true; touch_x=424; touch_y=210; advance(5);
+    fail_touch=true; advance(100);
+    assert(events==old_events && !memcmp(old_pixels,pixels,sizeof pixels));
+    fail_touch=false; advance(20); touched=false; advance(100);
+    assert(events==old_events && remote_state.input.capture==VR_PTT);
     /* Accepted selection keeps its preview through the unchanged 25 ms filter. */
     touched=true; touch_x=424; touch_y=210; advance(5);
     touched=false; advance(5); assert(events==old_events);
@@ -212,6 +238,26 @@ static void check(void)
     remote_state.secure=false; remote_state.has_phone=false; ui_refresh();
     tap(233,407); assert(pairs==1);
     assert(haptics>=12);
+    /* Offline capture keeps the same filled listening Orb after disconnect and
+     * reconnect; its target stays Bluetooth-off until the local record closes. */
+    remote_state.input.offline=1; ui_refresh(); ui_tick();
+    assert(pixels[(233*466+300)*4+2]>150); partial_matches_full();
+    sent_pixels=0; advance(1000); assert(sent_pixels>0);
+    uint32_t offline_target=target_hash();
+    remote_state.secure=true; remote_state.has_phone=true; ui_refresh(); ui_tick();
+    assert(target_hash()==offline_target); partial_matches_full();
+    remote_state.input.waiting=1; ui_refresh(); ui_tick(); partial_matches_full();
+    remote_state.input.offline=0; ui_refresh(); advance(100);
+    tap(42,210); assert(remote_state.input.capture==VR_OFF);
+    remote_state.input.full=1; ui_refresh(); ui_tick(); partial_matches_full();
+    uint32_t full_target=target_hash();
+    remote_state.input.full=0; ui_refresh(); ui_tick();
+    assert(target_hash()!=full_target); partial_matches_full();
+    remote_state.input.syncing=1; ui_refresh(); ui_tick(); partial_matches_full();
+    uint32_t sync_target=target_hash();
+    remote_state.input.syncing=0; ui_refresh(); ui_tick(); assert(target_hash()!=sync_target);
+    remote_state.input.waiting=0; ui_refresh(); ui_tick(); partial_matches_full();
+    printf("Offline UI checks passed: disconnected/reconnected listening, full/waiting in OFF, syncing, partial redraws.\n");
     printf("Preview interaction checks passed: touch, direct selection, modals, haptics, render/flush barrier.\n");
 }
 int main(int argc,char **argv)
@@ -228,6 +274,11 @@ int main(int argc,char **argv)
     else if(!strcmp(state,"long-name")) strcpy(remote_state.phone.resolved,"A very long destination name 1234");
     else if(!strcmp(state,"error-text")) strcpy(remote_state.phone.error,"Destination unavailable");
     else if(!strcmp(state,"no-link")) { remote_state.secure=false;remote_state.has_phone=false; }
+    else if(!strcmp(state,"offline-recording")) { remote_state.secure=false;remote_state.has_phone=false;remote_state.input.offline=1;remote_state.input.ptt=1; }
+    else if(!strcmp(state,"offline-waiting")) { remote_state.secure=false;remote_state.has_phone=false;remote_state.input.offline=1;remote_state.input.waiting=1;remote_state.input.mode=1; }
+    else if(!strcmp(state,"storage-full")) { remote_state.input.capture=VR_OFF;remote_state.input.full=1;remote_state.input.waiting=1; }
+    else if(!strcmp(state,"recordings-waiting")) { remote_state.input.capture=VR_OFF;remote_state.input.waiting=1; }
+    else if(!strcmp(state,"syncing")) { remote_state.input.waiting=1;remote_state.input.syncing=1; }
     else if(!strcmp(state,"pairing-number") || !strcmp(state,"forget-confirm")) {}
     else if(!strcmp(state,"rectangular")) { info=(board_info_t){2,240,280,0,false,true,false};remote_state.phone.active=0; }
     else { fprintf(stderr,"Unknown state: %s\n",state);return 2; }

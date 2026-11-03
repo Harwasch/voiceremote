@@ -1,5 +1,5 @@
-idf_component_register(SRCS "timing.c" "audio.c" "audio_runtime.c" "protocol.c" "state.c" "main.c" "ui.c" "ble.c"
+idf_component_register(SRCS "offline_capture.c" "offline_store.c" "offline_runtime.c" "timing.c" "audio.c" "audio_runtime.c" "protocol.c" "state.c" "main.c" "ui.c" "ble.c"
     "icons/sparkle.c" "fonts/lexend_24.c" "fonts/lexend_30.c" "fonts/lexend_42.c" "fonts/lexend_84.c"
-    INCLUDE_DIRS "." REQUIRES ${REMOTE_BOARD} bt nvs_flash esp_timer esp_hw_support 78__esp-opus lvgl__lvgl)
+    INCLUDE_DIRS "." REQUIRES ${REMOTE_BOARD} bt esp_partition nvs_flash esp_timer esp_hw_support 78__esp-opus lvgl__lvgl)
 
 target_compile_definitions(${COMPONENT_LIB} PRIVATE VR_TIMING=$<BOOL:${REMOTE_TIMING}>)

@@ -12,7 +12,7 @@ static size_t unhex(const char *s,uint8_t *out)
     while(sscanf(s," %2x%n",&v,&used)==1) { out[n++]=v; s+=used; }
     return n;
 }
-static const char *example_i="01 00 ff ff 00 01 02 00 3f 00 01 01 f0 00 18 01 00 02 00 00";
+static const char *example_i="01 01 ff ff 00 01 02 00 bf 00 01 01 f0 00 18 01 00 02 00 00";
 static const char *examples_e[]={
     "2a 00 00 00 e8 03 00 00 00 01 01 00 00 00",
     "2a 00 00 00 e8 03 00 00 01 01 01 01 00 00",
@@ -67,10 +67,14 @@ static void invalid_fixed(void)
     uint8_t b[512]; vr_info_t info; vr_input_t input; vr_audio_t audio;
     size_t n=unhex(example_i,b);
     for(size_t i=0;i<n;i++) CHECK(!vr_info_decode(b,i,&info));
-    const unsigned fields[]={0,1,7,9,11,18,19};
+    const unsigned fields[]={0,7,9,11,18,19};
     for(unsigned i=0;i<sizeof fields/sizeof fields[0];i++) {
         unhex(example_i,b); b[fields[i]]=255; CHECK(!vr_info_decode(b,n,&info));
     }
+    unhex(example_i,b); b[1]=255; b[9]=255;
+    CHECK(vr_info_decode(b,n,&info) && info.caps==0xbf);
+    b[7]=1; CHECK(!vr_info_decode(b,n,&info));
+    unhex(example_i,b); b[1]=0; CHECK(vr_info_decode(b,n,&info));
     unhex(example_i,b); b[10]=0; CHECK(!vr_info_decode(b,n,&info));
     b[10]=1; b[16]=1; b[17]=16; CHECK(!vr_info_decode(b,n,&info));
     for(unsigned i=0;i<6;i++) {
@@ -270,8 +274,10 @@ static void layout(void)
     CHECK(r.scale==2 && vr_ui_hit(&r,466,466,false)==VR_HIT_ORB);
     CHECK(vr_ui_hit(&r,466,814,false)==VR_HIT_TARGET);
     for(unsigned link=0;link<2;link++) for(unsigned cap=0;cap<3;cap++) for(unsigned held=0;held<2;held++)
-        CHECK(vr_ui_listening(held)==(bool)held);
-    CHECK(!vr_ui_listening(false));
+        CHECK(vr_ui_listening(held,false)==(bool)held);
+    CHECK(!vr_ui_listening(false,false));
+    CHECK(vr_ui_listening(false,true));
+    CHECK(vr_ui_listening(true,true));
     char ascii[32]; vr_ui_ascii(ascii,sizeof ascii,"Caf\xc3\xa9 \xf0\x9f\x92\xbb"); CHECK(!strcmp(ascii,"Caf? ?"));
     vr_ui_ascii(ascii,4,"Desktop"); CHECK(!strcmp(ascii,"Des"));
 }
@@ -299,8 +305,33 @@ static void immediate_feedback(void)
     vr_ui_press_cancel(&p);
     CHECK(vr_ui_press_sample(&p,false,VR_HIT_TARGET,20)==VR_HIT_NONE);
 }
+static void failed_touch_read(void)
+{
+    vr_ui_press_t p={0};
+    CHECK(vr_ui_touch_sample(&p,true,true,VR_HIT_REC,100)==VR_HIT_NONE);
+    /* A bus error currently returns false from board_touch: it must not accept REC. */
+    CHECK(vr_ui_touch_sample(&p,false,false,VR_HIT_REC,105)==VR_HIT_NONE);
+    CHECK(p.down && p.hit==VR_HIT_REC);
+    CHECK(vr_ui_touch_sample(&p,true,true,VR_HIT_REC,110)==VR_HIT_NONE);
+    CHECK(vr_ui_touch_sample(&p,true,false,VR_HIT_REC,115)==VR_HIT_REC);
+    CHECK(vr_ui_touch_sample(&p,true,true,VR_HIT_ORB,120)==VR_HIT_NONE);
+    CHECK(vr_ui_touch_sample(&p,false,false,VR_HIT_ORB,219)==VR_HIT_NONE);
+    CHECK(p.down && p.hit==VR_HIT_ORB);
+    CHECK(vr_ui_touch_sample(&p,false,false,VR_HIT_ORB,220)==VR_HIT_NONE);
+    CHECK(!p.down && p.hit==VR_HIT_NONE && p.blocked);
+    CHECK(vr_ui_touch_sample(&p,true,true,VR_HIT_ORB,225)==VR_HIT_NONE);
+    CHECK(vr_ui_touch_sample(&p,true,false,VR_HIT_ORB,230)==VR_HIT_NONE);
+    CHECK(vr_ui_touch_sample(&p,true,true,VR_HIT_ORB,235)==VR_HIT_NONE);
+    CHECK(vr_ui_touch_sample(&p,true,false,VR_HIT_ORB,240)==VR_HIT_ORB);
+    p=(vr_ui_press_t){0};
+    vr_ui_touch_sample(&p,true,true,VR_HIT_REC,UINT32_MAX-50);
+    vr_ui_touch_sample(&p,false,false,VR_HIT_REC,48);
+    CHECK(p.down);
+    vr_ui_touch_sample(&p,false,false,VR_HIT_REC,49);
+    CHECK(!p.down && p.blocked);
+}
 int main(void)
 {
-    examples(); invalid_fixed(); invalid_phone(); fragments(); arming(); debounce(); layout(); immediate_feedback();
+    examples(); invalid_fixed(); invalid_phone(); fragments(); arming(); debounce(); layout(); immediate_feedback(); failed_touch_read();
     printf("%u checks passed: contract examples, validation, fragments, wrap, arm/OFF, debounce\n",checks);
 }

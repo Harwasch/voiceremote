@@ -27,7 +27,7 @@ static lv_layer_t *layer;
  * No state/board-I2C mutex is held during drawing or synchronous panel DMA. */
 typedef struct {
     vr_phone_t phone;
-    bool valid, secure, streaming, error;
+    bool valid, secure, streaming, offline, full, waiting, syncing, error;
     uint8_t capture, mode, overlay;
     uint32_t number, touch_id, touch_at;
 } ui_view_t;
@@ -54,7 +54,7 @@ static uint32_t ticks(void) { return remote_now(); }
 static bool linked(void) { return view.secure && view.valid; }
 static bool listening(void)
 {
-    return vr_ui_listening(view.streaming);
+    return vr_ui_listening(view.streaming,view.offline);
 }
 static int sx(float x) { return (int)lroundf(layout.ox+x*layout.scale); }
 static int sy(float y) { return (int)lroundf(layout.oy+y*layout.scale); }
@@ -89,7 +89,7 @@ static void arc(float x,float y,float r,float a,float b,float width,uint32_t col
     while(d.end_angle<0) d.end_angle+=360;
     d.width=sz(width); d.rounded=1; d.color=lv_color_hex(color); lv_draw_arc(layer,&d);
 }
-enum { IC_OFF, IC_HOLD, IC_REC, IC_TYPE, IC_AI, IC_BT_OFF, IC_BT, IC_X, IC_CHECK, IC_BIN };
+enum { IC_OFF, IC_HOLD, IC_REC, IC_TYPE, IC_AI, IC_BT_OFF, IC_BT, IC_X, IC_CHECK, IC_BIN, IC_SAVED, IC_FULL, IC_SYNC };
 static void icon(int kind,float x,float y,float k,uint32_t color)
 {
 #define L(a,b,c,d) line(x+(a)*k,y+(b)*k,x+(c)*k,y+(d)*k,3*k,color)
@@ -113,6 +113,16 @@ static void icon(int kind,float x,float y,float k,uint32_t color)
     case IC_BT: L(-7,-7,7,7); L(7,7,0,14); L(0,14,0,-14); L(0,-14,7,-7); L(7,-7,-7,7); break;
     case IC_X: L(-9,-9,9,9); L(9,-9,-9,9); break;
     case IC_CHECK: L(-11,1,-3,9); L(-3,9,12,-8); break;
+    case IC_SAVED:
+        L(-10,-10,4,-10); L(-10,-10,-10,10); L(-10,10,3,10);
+        L(-5,-14,8,-14); L(8,-14,8,-5);
+        L(10,14,10,-1); L(10,-1,4,5); L(10,-1,16,5); break;
+    case IC_FULL:
+        L(-14,-11,14,-11); L(-14,-11,-14,12); L(-14,12,14,12); L(14,12,14,-11);
+        L(-14,-4,14,-4); L(0,0,0,5); circle(x,y+9*k,1.5f*k,color,0,255); break;
+    case IC_SYNC:
+        L(-14,-7,14,-7); L(14,-7,7,-14); L(14,-7,7,0);
+        L(14,7,-14,7); L(-14,7,-7,0); L(-14,7,-7,14); break;
     case IC_BIN: L(-13,-9,13,-9); L(-5,-14,5,-14); L(-10,-8,-8,14); L(-8,14,8,14); L(8,14,10,-8); L(-3,-3,-3,8); L(3,-3,3,8); break;
     }
 #undef L
@@ -133,8 +143,8 @@ static void target_label(void)
 {
     float cx=layout.cx,y=layout.baseline;
     /* Crossed out only when nothing is connected; plain blue means connected, waiting for the phone's state. */
-    if(!linked()) {
-        bool up=view.secure;
+    if(!linked() || view.offline) {
+        bool up=view.secure && !view.offline;
         icon(up?IC_BT:IC_BT_OFF,cx,y-(layout.ring?42:30)*.32f,(layout.ring?42:30)/26.f,up?0x2f8bff:0x8a9099); return;
     }
     bool error=view.error && view.phone.error[0];
@@ -210,7 +220,17 @@ static void draw_base(lv_event_t *e)
             icon(i,233+193*sinf(a),233-193*cosf(a),1.8f,selected?0:dim[i]);
         }
     }
-    if(linked()) for(int i=0;i<view.phone.count;i++)
+    /* Local storage indicators use the existing small-pip row. They remain
+     * visible with OFF selected, and never claim a current destination. */
+    unsigned status_count=view.full+view.waiting+view.syncing;
+    if(status_count) {
+        unsigned slot=0; const bool active[]={view.full,view.waiting,view.syncing};
+        const int kinds[]={IC_FULL,IC_SAVED,IC_SYNC};
+        for(unsigned i=0;i<3;i++) if(active[i]) {
+            float x=layout.cx+(slot++-(status_count-1)/2.f)*(layout.ring?36:30);
+            icon(kinds[i],x,layout.pips_y,layout.ring?.7f:.6f,i==0?0xff453a:0x8a9099);
+        }
+    } else if(linked() && !view.offline) for(int i=0;i<view.phone.count;i++)
         circle(layout.cx+(i-(view.phone.count-1)/2.f)*(layout.ring?20:16),layout.pips_y,layout.ring?5:4,
             i==view.phone.active?0xffffff:0x3a3f45,0,255);
     target_label();
@@ -219,7 +239,7 @@ static void draw_orb(lv_event_t *e)
 {
     layer=lv_event_get_layer(e);
     float cx=layout.cx,cy=layout.cy,r=layout.radius;
-    bool off=!linked() || view.capture==VR_OFF, live=listening();
+    bool off=(!linked() && !view.offline) || view.capture==VR_OFF, live=listening();
     uint32_t color=mode_colors[view.mode==1];
     if(off) circle(cx,cy,r,0x3a3f45,6,255);
     else if(live) {
@@ -250,8 +270,9 @@ static void invalidate_changes(bool force_target)
     } else if(!view.overlay) {
         if(view.capture!=drawn.capture) { sector(drawn.capture); sector(view.capture); }
         if((view.capture==VR_OFF)!=(drawn.capture==VR_OFF) || view.mode!=drawn.mode || view.secure!=drawn.secure ||
-           view.valid!=drawn.valid || view.streaming!=drawn.streaming) lv_obj_invalidate(orb_obj);
-        if(force_target || view.valid!=drawn.valid || view.secure!=drawn.secure || view.error!=drawn.error ||
+           view.valid!=drawn.valid || view.streaming!=drawn.streaming || view.offline!=drawn.offline) lv_obj_invalidate(orb_obj);
+        if(force_target || view.offline!=drawn.offline || view.full!=drawn.full || view.waiting!=drawn.waiting ||
+           view.syncing!=drawn.syncing || view.valid!=drawn.valid || view.secure!=drawn.secure || view.error!=drawn.error ||
            view.phone.count!=drawn.phone.count || view.phone.active!=drawn.phone.active ||
            strcmp(view.phone.resolved,drawn.phone.resolved) || strcmp(view.phone.error,drawn.phone.error)) target();
     }
@@ -353,6 +374,8 @@ void ui_refresh(void)
     if(!display) return;
     current.valid=remote_state.has_phone; current.secure=remote_state.secure;
     current.streaming=remote_state.input.streaming;
+    current.offline=remote_state.input.offline; current.full=remote_state.input.full;
+    current.waiting=remote_state.input.waiting; current.syncing=remote_state.input.syncing;
     if(current.valid) current.phone=remote_state.phone;
 }
 void ui_pair_number(uint32_t number)
@@ -371,11 +394,13 @@ void ui_poll(void)
     if(!display) return;
     uint32_t now=remote_now(); uint16_t x=0,y=0;
     uint64_t poll_start=timing_now_us();
-    bool down=board_touch(&x,&y);
+    board_touch_t sample=board_touch(&x,&y);
+    bool down=sample==BOARD_TOUCH_DOWN;
     timing_touch_poll(poll_start);
     vr_hit_t hit=down?vr_ui_hit(&layout,x,y,current.overlay!=0):press.hit;
     vr_hit_t previous=press.hit;
-    vr_hit_t released=vr_ui_press_sample(&press,down,hit,now);
+    vr_hit_t released=vr_ui_touch_sample(&press,sample!=BOARD_TOUCH_ERROR,down,hit,now);
+    down=press.down;
     if(down && previous==VR_HIT_NONE &&
        ((press.hit>=VR_HIT_OFF && press.hit<=VR_HIT_REC) || press.hit==VR_HIT_ORB)) {
         current.touch_id++; if(!current.touch_id) current.touch_id++;
@@ -383,7 +408,7 @@ void ui_poll(void)
     }
     if(!down && !long_recognised) act(released);
     if(!press.down) long_recognised=false;
-    if(!current.overlay && press.hit==VR_HIT_TARGET && !long_recognised && now-press.since>=3000) {
+    if(sample!=BOARD_TOUCH_ERROR && !current.overlay && press.hit==VR_HIT_TARGET && !long_recognised && now-press.since>=3000) {
         long_recognised=true; current.overlay=2; forget_since=now;
         vr_ui_press_cancel(&press); cancel_barrier(); board_haptic(now);
     }

@@ -1,102 +1,140 @@
-# UI responsiveness handoff — 2026-11-02
+# Offline recording handoff — 2026-11-02
 
 ```mermaid
 flowchart LR
-    Touch[Touch + buttons] --> Input[Priority 5: poll / debounce / audio transport]
-    Input --> Mailbox[Short app-mutex snapshot]
-    Mailbox --> Render[Priority 1: LVGL + synchronous panel DMA]
-    Encode[Priority 4: Opus] --> Input
-    Phone[Phone write] --> Barrier[40 ms wait / app mutex released]
-    Barrier --> Render
-    Render -->|completed matching DMA| Apply[Existing security / ack / epoch checks → response]
+    Trigger[Owner bond + deliberate local trigger / live link loss] --> Opus[20 ms Opus]
+    Opus --> Queue[16-frame bounded queue]
+    Queue --> Writer[Priority 2 writer / no app lock across IO]
+    Writer --> Flash[Committed prefix + persisted counters]
+    Flash --> Sync[Separate list / fetch / confirm / clock]
+    Sync --> Phone[Durable source + metadata / later history text]
+    Live[Live capture / OFF] -->|preempt| Sync
 ```
 
-Purpose: hand off UI latency/audio-isolation changes against `c712529`. Inputs:
-production firmware, native LVGL fixtures, ESP-IDF 5.5.6, supplied vendor sources.
-Host logic/render checks and both board builds are verified; perceived latency,
-sustained audio and power **need hardware to tell**. No hardware/adapter/serial,
-flash, commit, push, PR or additional review was used. Earlier Stage 2 evidence
-is retained below as history.
+Purpose: coordinator handoff for draft 1.1 offline recording, touch-glitch fix and
+phone simulator. Inputs: HEAD `064b528`, complete `SYS/protocol/remote-ble.md`,
+ESP-IDF **5.5.6**, current S3/C6 baseline builds, synthetic host/audio/UI fixtures.
+**Verified:** host logic/crash/runtime/client tests, native rendering, both builds,
+binary version/capabilities and generated partition comparison. **Unverified:**
+all new hardware/audio/flash/radio/power behavior. No hardware, adapter, serial,
+flash, eFuse, encryption, commit, push, PR or extra review was used. SYS is unchanged.
+Traces to [REQ-8], [REQ-18], [REQ-49–53], [REQ-56], [REQ-58], [REQ-62]; no claim
+of measured hardware compliance. Owner's `hw_mic_cut=0` prototype exception remains.
 
-| Likely cause | Finding / action | Evidence / remaining measurement |
-|---|---|---|
-| Whole-screen invalidation / synchronous refresh | Confirmed by source. Normal changes now invalidate old/new capture sectors, Orb, or target; initial draw, overlay transitions and failed-flush recovery remain full screen | Native destination update: **44,270 pixels**, y=356..450, versus 466×466 = **217,156** full screen. Partial transitions equal forced full redraws; device time needs hardware to tell |
-| Touch debounce / release | Confirmed: selection previously waited for release, then 25 ms debounce. Capture/Orb now preview existing selected styles on down, roll back when cancelled; accepted release + debounce still emits the event | Pure gesture tests and real-UI native checks include first 5 ms sample, rollback, unchanged state before release/filter, dead zones and direct PTT→OFF |
-| Touch polling cadence | Additional source finding: `ui_tick` ran each pass, but LVGL's input timer used `CONFIG_LV_DEF_REFR_PERIOD=33` ms (`src/indev/lv_indev.c:132`) | Touch now samples in the main loop independently of LVGL, with the existing 5 ms delay per pass; actual cadence is work + delay. `touch_poll` and `period` log the bus/loop cost |
-| Rendering under audio/input mutex | Confirmed by source. Renderer uses an immutable snapshot and holds no app mutex during LVGL or DMA; input/transport priority 5 > encoder 4 > renderer 1, without core pinning | Native flush asserts lock depth zero and interleaves input during DMA. Existing transport/gate tests pass. C6 builds; its display/mic remain stubs. Sustained audio/UI coexistence needs hardware to tell |
-| CPU 160 vs 240 MHz | Both generated configs remain **160 MHz**, PM disabled. Vendor UserDemo selects 240 MHz; no CPU clock change made pending measurements | Vendor `sdkconfig.defaults:10`; built `CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ=160` on S3/C6. No CPU-frequency power increase; battery effect of the overall change needs hardware to tell |
-| QSPI / shared I2C | QSPI **40→80 MHz**, matching vendor panel/pins. I2C remains **100 kHz**, matching vendor CST820 driver. Reset retries/readback are untouched | [UserDemo at supplied revision](https://github.com/m5stack/M5StopWatch-UserDemo/tree/81099c784991dc77f522de1a5bf62ec5de9ae0b5): `main/hal/hal_display.cpp:83`, `main/hal/drivers/cst820/cst820.cpp:25`. Higher switching rate / shorter wire time can affect power in opposite directions; net current/battery delta **TBC**, needs hardware to tell |
-| 16-line strip / software antialiasing | Retained one internal 16-row RGB565 DMA strip, no PSRAM dependency; no speculative cache or larger buffer | Redraw wall time plus DMA-strip mean/max let hardware separate transport from other redraw work. Whether arcs/icons dominate **needs hardware to tell**; no desktop timing is used as device evidence |
-| 268×268 pulse at 5 Hz | Retained visual design and bounds; each redraw uses one frozen phase across strips | Native test flushes **359,120 pixels in 1 s** = five 268×268 regions, bounds (99,99)..(366,366). On-device cost **needs hardware to tell** |
-
-All twelve synthetic fixture PNGs are byte-identical to the baseline. Audio
-framing, arm rules, producer-only listening indication and SYS files are unchanged.
-Linked target taps remain inert; existing modal/haptic actions still accept release.
-
-The REQ-18 barrier hands a candidate to the renderer, releases the app mutex,
-and waits up to 40 ms on a semaphore. Success requires the same request's completed
-synchronous DMA, no intervening modal/cancellation, and elapsed time below 40 ms;
-BLE rechecks security before applying the phone state. A failed/late draw returns
-an ATT error, disarms as before, and restores the authoritative view on the next
-render pass. A new control epoch during the wait still prevents arming.
-
-Notification pacing remains one data submission per main-loop pass. In the pinned
-ESP-IDF source, `ble_gattc.c:5512–5575` calls `ble_gap_notify_tx_event` from
-`ble_gatts_notify_custom`; `ble_gap.c:11436–11455` and `:1310–1324` deliver this
-inline once CONNECT has been delivered. It is a submission result, **not a radio
-acknowledgment**. Thus app-task notifications can retire their existing pending
-slot while the host is waiting. No nested host event pumping or transport-policy
-change was added. The 40 ms budget is an engineering assumption below the four
-20 ms packets' 80 ms horizon, **not proof of link headroom**; scheduling, HCI flow
-control, slow I2C and mutex reacquisition still need hardware to tell. Rejections
-are logged for tuning; a stalled panel cannot cause a successful display ack.
-
-`REMOTE_TIMING` defaults **ON**, including both final build caches. One `timing`
-line every five seconds, from the low-priority renderer, reports:
-
-| Field | Meaning |
+| Entry point | Result |
 |---|---|
-| `redraw=mean/max n=` | Wall µs for passes that actually flushed, including DMA waits and preemption; idle passes excluded |
-| `touch_to_dma_est=mean/max n=` | Millisecond-resolution touch sample → last successful DMA for a changed capture/Orb preview, expressed in µs; excludes physical contact before sampling and panel scanout. Previews cancelled before drawing are excluded |
-| `loop`, `period` | Mean/max µs of main-loop work including lock wait, and start-to-start interval including the 5 ms delay |
-| `touch_poll`, `dma_strip` | Mean/max µs of touch I2C read and each panel flush including RGB565 swap/wait; DMA count `n` allows comparison of total DMA time against total redraw time |
-| `queue_high` | Maximum encoded packets observed during the interval, out of four; existing per-segment encoder/drop/heap metrics remain |
-| `flush_errors`, `barrier`, `rejects` | Failed redraw passes, mean/max phone barrier µs and unsuccessful requested barriers |
+| [Storage design](app/offline-storage.md) | Raw sector journal: independently CRC/commit-protected frames, verified-prefix recovery, immutable finalized export, persistent ID/boot and durable deletion intent |
+| `app/offline_capture.c`, `offline_runtime.c` | Fresh owner-trigger policy, live-loss boundary, locally owned reconnect, stored mode/clock, full/failure stop, OFF volatile-tail discard, bounded writer queue and separate sync |
+| `app/audio_runtime.c` | One encoder history across offline reconnect; generation cancellation prevents stale PCM/Opus output after OFF |
+| `app/ble.c`, `protocol.c` | Contract 1.1, firmware 0.3.0; StopWatch caps `0xbf`, C6 `0x00`; authenticated sync characteristics omitted on C6 |
+| `app/ui_input.h`, board touch API | A failed I2C read holds prior state for <100 ms; timeout cancels and requires a real up. Failed-first regression observed before fix |
+| `app/ui.c`, [preview](tools/ui_preview/README.md) | Truthful offline listening + Bluetooth-off target; small full/waiting/sync icons; 17 states, original 12 PNGs unchanged |
+| [Client procedure](tools/ble_client/deferred.md) | `--sync DIR --remote-id ID`, resumable fsynced copies, structure/count/CRC, WAV/time/mode, short disposition, idempotent confirm, `--set-clock`, timed disconnect |
 
-No per-frame log, audio contents, transcripts, target names or credentials.
-`-DREMOTE_TIMING=OFF` compiles out the probes/log; S3 OFF build succeeded and the
-ELF contained no `timing_*` symbols. Runtime stack/heap and timing remain **TBC**.
+The raw journal avoids filesystem dependency and exposes every write boundary to
+fake flash. Frame body/commit are separate writes; two journal sectors protect
+counter/deletion updates. Deleted IDs cost no historical tombstones. IDs/boot never
+wrap; dirty lost counters fail closed. Ordinary firmware flashing preserves the
+partition and counters. A RAM-only 16 KiB next-sector/export-byte index avoids
+rereading old sectors on resume; its test counts 96 reads for the last frame of a
+300-frame/two-sector record, before and after mount. The flash format is unchanged.
 
-| Bytes | S3 baseline | S3 now | Delta | C6 baseline | C6 now | Delta |
+| Partition | StopWatch offset | Size | C6 |
+|---|---:|---:|---|
+| Partition table | `0x8000` | `0x1000` | Same |
+| NVS | `0x9000` | `0x6000` | Same |
+| PHY | `0xf000` | `0x1000` | Same |
+| Factory | `0x10000` | `0x177000` | Same |
+| Offline | `0x187000` | `0xe79000` (15,175,680 B) | Absent |
+
+The new table ends at 16 MiB; C6 keeps the old table within its 4 MiB flash.
+`tests/check_partitions.py` compares **generated binaries**, including the saved
+pre-edit tables, and IDF's old single-app-large layout. NVS remains **0x9000 /
+0x6000**. Bond preservation is proven as a layout property; actual bonded reconnect
+after flashing is hardware-only. No NVS erase is part of this update.
+
+**Capacity is calculated, unmeasured.** 3705 sectors minus two journal sectors =
+3703 data sectors. Header-excluded area: 3703 × 4032 = **14,930,496 B** (G total).
+Assumed 24 kbit/s / 50 frames/s gives 60-byte packets and 3100 exported B/s.
+Private 12-byte frame overhead makes 72 stored B/frame; 56 frames/sector yields
+**4147.36 s = 69.12 min**, equivalent to 12,856,816 exported bytes. Partially filled
+record tails, 128-record limit, quarantines and actual packets reduce capacity.
+G free/total is allocatable frame area, including future frame bookkeeping, rather
+than chip size or a guarantee of exported bytes. See the complete calculation.
+
+| Bytes | S3 baseline | S3 final | Delta | C6 baseline | C6 final | Delta |
 |---|---:|---:|---:|---:|---:|---:|
-| Total image | 1,158,645 | 1,151,369 | −7,276 | 1,231,534 | 1,224,080 | −7,454 |
-| Padded `.bin` | 1,158,768 | 1,151,488 | −7,280 | 1,231,872 | 1,224,416 | −7,456 |
-| DIRAM used | 171,747 | 173,251 | +1,504 | 154,394 | 156,236 | +1,842 |
-| `.bss` + `.data` | 77,492 | 78,996 | +1,504 | 67,804 | 69,308 | +1,504 |
-| DIRAM remainder | 170,013 | 168,509 | −1,504 | 297,718 | 295,876 | −1,842 |
-| Runtime internal heap delta | TBC | TBC | TBC | TBC | TBC | TBC |
+| Total image | 1,151,369 | 1,166,201 | +14,832 | 1,224,080 | 1,240,894 | +16,814 |
+| Padded `.bin` | 1,151,488 | 1,166,320 | +14,832 | 1,224,416 | 1,241,232 | +16,816 |
+| DIRAM used | 173,251 | 174,639 | +1,388 | 156,236 | 157,604 | +1,368 |
+| `.bss` + `.data` | 78,996 | 80,356 | +1,360 | 69,308 | 70,676 | +1,368 |
+| DIRAM remainder | 168,509 | 167,121 | −1,388 | 295,876 | 294,508 | −1,368 |
+| Runtime free internal/PSRAM delta | TBC | TBC | TBC | No offline allocation | No PSRAM | N/A |
 
-Baseline builds were checked/rebuilt and `idf.py size` recorded before edits;
-final values use the same generated configs and timing ON. Link-time remainder
-is not runtime free heap. The S3 renderer adds an **8,192-byte internal task stack**
-plus task/semaphore overhead at runtime; exact net heap delta needs hardware to
-tell. The C6 stub allocates no renderer task while `operational=false`. No strip
-size increase, framebuffer cache or shared PSRAM allocation was added. Smaller
-images follow removal of the unused LVGL input/timer path; no size target claimed.
+Baseline builds were rebuilt/sized **before edits**. These link-time numbers are
+not runtime free heap. S3 adds a 6144-byte internal writer stack, an 18-job queue
+(two slots reserved around the 16-frame/320 ms nominal bound), and the **49,232-byte** bounded store/index allocation. Compiled jobs are
+544 bytes: queue payload is **9792 bytes**, plus queue/RTOS overhead. Together
+with the writer stack this adds **15,936 internal bytes before overhead**; an
+internal store fallback adds a further 49,232 bytes. Board allocation prefers PSRAM, with internal fallback;
+all flash IO buffers, queue, task stacks and DMA remain internal. C6 allocates no
+store, writer or queue; shared core assumes no PSRAM. Exact compiled type sizes
+are in `final-build-metadata.log`; allocator/RTOS overhead and free heap need hardware.
 
-Verification: `heavy bash FW/tests/run.sh` passes all four suites (**700** control/
-layout/gesture checks, **373** audio transport checks, **4** Python wire tests,
-**9** Python audio tests). `heavy bash FW/tools/ui_preview/run.sh` passes all
-12 states and added preview/rollback, partial/full equality, lock-free DMA,
-interleaved input, modal cancellation, failed/late/no-render barrier checks.
-Both S3 and C6 builds succeed with `VR_TIMING=1`, CPU 160 MHz. Native interleaving
-checks model scheduling boundaries; they do not establish RTOS/radio timing.
+**Flash-stall risk remains unverified.** A writer task avoids blocking the app
+mutex on IO but cannot keep flash-resident code executing while SPI1 disables
+cache. IDF `components/spi_flash/cache_utils.c` coordinates both CPUs; priority
+alone cannot protect Opus, NimBLE, touch or LVGL. StopWatch enables
+`CONFIG_I2S_ISR_IRAM_SAFE`; its overflow callback is IRAM-safe and four DMA
+frames provide an 80 ms nominal horizon. This is buffering, not a timing proof.
+No erase is intentionally scheduled during capture; counter writes occur before
+starting acquisition, frame programming during offline capture, and data erases
+only after confirmation while idle. A fresh trigger can race an in-flight flash
+operation, which cannot be retracted. Flash auto-suspend stays disabled because
+chip support is unverified (IDF `components/spi_flash/Kconfig`). Display DMA/IRQs
+and BLE may be delayed too. Hardware must measure maximum stall, DMA loss, queue
+headroom, BLE/input/display latency, heap/stack, wear, power and battery life.
+Writer logs `queue_high` and `flash_write_max_us` on finalization; existing five-second
+`timing` and per-live-segment encoder/heap logs remain. No audio contents are logged.
 
-Reproduce from the repository root with the [README toolchain setup](README.md)
-(and the supplied offline mirror variables in the shell only), one heavy job at
-a time and no more than four build workers:
+Assumptions: one existing owner bond; no tap-lock; 24 kbit/s is a configuration,
+not an acoustic/throughput measurement; UTC is always approximate (zero if unknown)
+and snapshots at capture start. Unix epoch through year 9999 is accepted; future,
+stale (>10000 ms) or wrong-boot samples are rejected. Queue depth, task stacks,
+flash cadence and the 128-record bound are engineering bounds, not measurements.
+A frame commits after its commit word; power loss discards queued/in-flight tail.
+A strict real-time tail-loss bound is TBC. Storage is unencrypted, confirmed delete
+is logical, and the contract's privacy/product questions remain open.
+
+Two contract gaps remain unchanged:
+
+| Gap | Handling / consequence |
+|---|---|
+| “Explicit incompatible-version result” has no wire representation | Info is read-only; Phone state and C1–C4 carry no peer version/incompatibility result. Client rejects a different major and never arms. Firmware cannot distinguish that peer from an incomplete handshake (which explicitly permits offline). No invented opcode or silent SYS change |
+| Unattended end-to-end recording test cannot finish through BLE alone | The contract deliberately keeps offline capture locally owned through reconnect; Phone state cannot operate local OFF/PTT. An existing physical actuator fixture is required to create the deliberate trigger and finish the record. No test backdoor added |
+
+Re-enrollment is blocked while any previous records or storage errors remain,
+including after revoke. Normal deletion needs durable C4. To change owners with
+retained records, an **explicitly authorized local maintenance erase** can remove
+only data sectors, preserving the first two offline counter journals and NVS:
+`esptool.py --chip esp32s3 --port /dev/ttyACM0 erase_region 0x189000 0xe77000`.
+This command was **not run** and is not a normal flash step. Lost/corrupt journals
+need explicit identity reset/new enrollment namespace; never erase counters and
+reuse the same enrolled identity. The CLI requires `--remote-id` because this draft
+has no readable enrollment identity. Keep it stable across normal updates.
+
+Run from repository root, one heavy job at a time (no more than four compiler jobs).
+Regenerated S3/C6 sdkconfigs were checked for their respective tables, flash sizes,
+160 MHz CPU, and S3's IRAM-safe I2S setting. Set the supplied offline mirror/cache
+variables in the shell only; none are embedded in source:
 
 ```sh
+export PATH=$HOME/.local/share/uv/python/cpython-3.12.14-linux-x86_64-gnu/bin:$PATH
+export IDF_TOOLS_PATH=$HOME/hw-tools/espressif
+. ~/hw-tools/esp-idf/export.sh
+export IDF_TOOLS_PATH=/tmp/voiceremote-espressif
+export TMPDIR=$PWD/AI/scratch/offline-build-tmp
+mkdir -p "$TMPDIR"
 heavy bash FW/tests/run.sh
 heavy bash FW/tools/ui_preview/run.sh
 heavy idf.py -C FW -B FW/build-m5 -DIDF_TARGET=esp32s3 -DREMOTE_TIMING=ON reconfigure
@@ -109,146 +147,50 @@ heavy idf.py -C FW -B FW/build-c6 -DREMOTE_BOARD=waveshare_c6_169 build
 heavy idf.py -C FW -B FW/build-c6 size
 ```
 
-Coordinator-only flash command, **not executed**:
+[Reproduction script and evidence](../AI/FW/2026-11-02-offline-sync/README.md)
+include final host/preview/build/size/table logs and the failed-touch observation.
+All **10 host suites** pass, including 26 Python cases, production runtime/audio
+harnesses, contract hex round trips, 15 capture mutation boundaries and 10 deletion
+boundaries (whole/torn writes/erases), full storage, resume, ID persistence,
+idempotent confirm, live preemption, and OFF. All **17 previews** pass; the original
+**12 PNG hashes** are unchanged. Host scheduling models do not prove radio timing.
+
+Coordinator-only hardware procedure — **not executed**. Run only after the
+coordinator has exclusive device/adapter access. Prerequisites: existing authenticated
+bond; known address; an authorized physical-control fixture. Without that fixture,
+only the BLE reconnect/open-record checks below are unattended; complete pass/fail
+is blocked, not claimed. Use silence/curated synthetic test input; outputs stay ignored.
 
 ```sh
-heavy idf.py -C FW -B FW/build-m5 -p /dev/ttyACM0 flash
+export UV_CACHE_DIR=/tmp/voiceremote-uvc-s2 UV_OFFLINE=1 UV_LINK_MODE=copy
+remote_addr=AA:BB:CC:DD:EE:FF
+mkdir -p AI/scratch/offline-hil
+uv run --project FW/tools/ble_client python FW/tools/ble_client/client.py --address "$remote_addr" --capture 2 --recording 1 --arm --save AI/scratch/offline-hil/live.wav --disconnect-after 8
+sleep 3
+uv run --project FW/tools/ble_client python FW/tools/ble_client/client.py --address "$remote_addr" --remote-id stopwatch-enrollment-1 --sync AI/scratch/offline-hil/copies --seconds 15
 ```
 
-Hardware pass: tap/drag/release each sector and Orb, exercise both buttons while
-streaming, change phone destinations during pulse/encoding, and open/cancel both
-modals. Collect the five-second timing lines with existing audio segment stats;
-check no queue overflow/disarm/drop under UI load, target barrier rejections,
-real display visibility, stack/heap, touch-I2C latency and stability of 80 MHz QSPI.
-Compare battery current with the old build on the same board/workload. The
-remaining subjective lag, whether antialiasing dominates and net power impact
-**need hardware to tell**. The first microphone initialization and I2C fault paths
-can still block their existing input/audio mutex; they are not redraw work.
+| Step | Fixture action / expected serial and client output | Pass / fail |
+|---|---|---|
+| Start live | After initial snapshot, fixture selects OFF then REC. Client emits streaming Input. At 8 s client prints `Disconnecting BLE without phone stop` | A recovered/preselected snapshot alone never starts capture |
+| Lose link | No fixture action. Serial shows `offline: capture started mode=0`; recording Orb remains lit with Bluetooth-off target | No replay of earlier live frames into offline record; no false listening if storage/mic start fails |
+| Reconnect while REC | Second command sees Input `offline=True`, `offline sync paused...`; serial must not report local finalization merely on reconnect | Open record is absent from list/count and no fetch bytes are transmitted |
+| Finalize locally | Fixture selects OFF, then PTT with button up. Serial shows `offline: finalized waiting=1... queue_high=... flash_write_max_us=...`; OFF must stop acquisition/data, preserve durable prefix | Local boundary required. Phone stop alone must not finalize |
+| Sync/verify | Rerun the second command with `--set-clock` while idle. Expect `resume=...`, `verified disposition=audio-saved` (or `discarded-short`), `confirmed deletion`, `offline list exhausted`; waiting icon clears | One ID/source/sidecar/WAV, stored mode/time intact, only verified durable source confirmed |
+| Retry/resume | Disconnect sync mid-fetch with `--disconnect-after 2`, then repeat the second command with the same directory/identity | First missing byte resumes; partial metadata/bytes match; lost R4 retries C4 without refetch |
+| Priority/OFF | Fixture triggers live capture while fetching, then OFF; reconnect/list again | Sync stops before new capture; no further sync audio after OFF; unfinished copy retained for retry |
+| Reboot/full/fault | Fixture power-cycles during a frame write and later fills storage; repeat sync. Correlate serial/timing counters | Verified prefix has interrupted flag; IDs/boot advance, full stops visibly without overwrite; no counter reuse |
 
-# Stage 2 handoff — 2026-11-02
+To verify idempotence, rerun the sync command after success: only `list exhausted`,
+no new ID/WAV. Fail on deletion before verification, changed immutable metadata,
+Audio/sync splicing, capture restarted by reconnect, old-owner access, overflow
+without visible stop, or unsafe OFF behavior. Collect existing serial output via
+the coordinator's collector; this worker never opened a serial device. Exact fixture
+actuator commands are **TBD**, because no fixture interface was supplied. Therefore
+an exact BLE-only, no-person end-to-end completion procedure is unworkable under
+this unchanged contract; the executable BLE half and expected outputs are above.
 
-```mermaid
-flowchart LR
-    ES[ES8311 left mic / 16 kHz] --> Opus[Fixed-point Opus: 320 samples]
-    Opus --> Queue[4 packets / 512-byte bound]
-    Queue --> Framer[Actual MTU / START + END + LAST]
-    Framer --> Client[BlueZ client / current-ack arm]
-    Client --> WAV[One 16 kHz mono Int16 WAV per segment]
-    Host[Native logic + C/Python round trip] --> Framer
-    Builds[S3 + C6 builds] --> Pending[Coordinator: hardware measurements / playback]
-```
-
-Purpose: reproducible Stage 2 handoff. Inputs: current `SYS/protocol/remote-ble.md`,
-owner-confirmed control/Orb baseline `dd3db68`, supplied vendor sources and offline
-component/Python caches, ESP-IDF 5.5.6. Host framing/codec/render/build checks are
-verified; **new on-device audio, heap and timing remain unverified**. Existing
-pairing/buttons/touch/Orb were confirmed by the owner before this change.
-No flash, serial device, Bluetooth adapter, commit, push, PR or extra review used.
-
-| Change | Entry point |
-|---|---|
-| Mic / allocation | `boards/m5stopwatch/board.c`: vendor ES8311 register setup, I2C 0x18, G18/17/16/15/21, analog left mic, 30 dB; AU_EN high, both speaker enable lines low; four RX DMA descriptors. C6 mic returns unsupported, allocation internal only |
-| Codec / queue | `app/audio.h`, `audio.c`, `audio_runtime.c`: fixed-point mono 16 kHz / 20 ms raw Opus, starting 24 kbit/s CBR / complexity 0, max 512 bytes; dedicated 48 KiB internal-stack task, four-packet queue |
-| Transport / gate | Actual `ble_att_mtu()` per frame, segment starts 1 and never reuses IDs; END/sequence exhaustion; arm + local not OFF + PTT for hold; subscription/security/info/snapshot prerequisites retained |
-| OFF / failures | RX disable and task suspension immediately under app mutex; old computation resumes only for a new generation, then its output is discarded. No queued data flush. END reserved slot, then stopped Input; END failure disconnects after 1 s. Overflow/notify failure requires resync + a fresh trigger |
-| UI | Producer sets `input.streaming` after first accepted data notification, clears on stop; Orb and Input read the same bit. Preview checks it independently of PTT |
-| Version / link | 0.2.0; name `Voice Remote`; S3 caps 0x3f, `hw_mic_cut=0`, maximum packet 512; C6 capabilities remain zero because it is a stub. Requests MTU 247, 15–30 ms interval, zero latency, 4 s supervision; phone/OS decides |
-| Client | `tools/ble_client/{client,wire,audio}.py`: fresh-snapshot recovery, coalesced current-ack writes after every Input, `--arm` follows local capture/mode, WAV decode, duplicate/loss checks and 1 s watchdog, including missing START |
-
-At most one data notification is pending in NimBLE plus one reserved empty END.
-Data already accepted by the controller cannot be retracted on OFF; no new data
-notification is submitted after OFF. Queued tail packets own frame sequences, so
-an END following discarded tail data produces a reported gap rather than a splice.
-There is no tap-lock, PLC, FEC, DTX, audio storage or audio-content serial logging.
-
-| Verification | Result |
-|---|---|
-| `heavy bash FW/tests/run.sh` | Four ctest suites pass: 687 control/layout C checks, 373 transport C checks, 4 Python wire cases and 9 Python audio cases. Suites cover control/layout, Python wire, fake-encoder transport, Python reassembly/codec/WAV. C transport covers MTU 23/247, frame flags, arm/hold/OFF, queue overflow, MTU changes and ID/sequence exhaustion; C/Python round trips also use MTU 64/517 |
-| `heavy bash FW/tools/ui_preview/run.sh` | All 12 PNG states and pointer/render-barrier/pulse checks; producer bit controls listening |
-| S3 and C6 build commands below | Both succeed; C6 remains build-only |
-| Locked uv Python tests below | Wire, recovery, duplicate/conflict/gap/watchdog and WAV cases pass (13 total); real libopus round trip, no C development headers |
-
-Static baseline `idf.py size` was run **before edits**, rebuilding the stale C6
-UI object first. Final size uses the same build configurations plus GATT-client
-support needed to request MTU exchange. Image sizes exclude `.bin` padding.
-These link-time remainders are **not free runtime heap**.
-
-| Bytes | S3 before | S3 after | Delta | C6 before | C6 after | Delta |
-|---|---:|---:|---:|---:|---:|---:|
-| Total image | 968,837 | 1,158,317 | +189,480 | 1,036,470 | 1,231,534 | +195,064 |
-| Padded `.bin` | 968,960 | 1,158,432 | +189,472 | 1,036,816 | 1,231,872 | +195,056 |
-| DIRAM used | 166,591 | 171,739 | +5,148 | 151,574 | 154,394 | +2,820 |
-| `.bss` + `.data` | 73,980 | 77,484 | +3,504 | 65,612 | 67,804 | +2,192 |
-| DIRAM remainder | 175,169 | 170,021 | −5,148 | 300,538 | 297,718 | −2,820 |
-| Runtime internal heap before/after/delta | TBC | TBC | TBC | TBC | TBC | TBC |
-| Runtime PSRAM before/after/delta | TBC | TBC | TBC | No PSRAM | No PSRAM | N/A |
-
-Both images fit the existing 1,536,000-byte app partition. Once per segment serial
-logs encoder mean/max µs, queue high-water, known dropped encoded frames, notify
-failures, source error code, free internal and PSRAM heap + deltas from segment start, CPU Hz and
-encoder stack watermark. Boot logs allocation deltas across encoder/task creation.
-The first mic start allocates I2S/DMA and is visible in its segment heap delta.
-Capture-overflow loss counts beyond known discarded packets remain unknown.
-
-Both current configs select 160 MHz; S3 has two cores and PSRAM while C6 has one
-core and no PSRAM. S3 encode timings include its own architecture/memory/scheduler
-and cannot establish C6 capacity by clock scaling. C6 links the same fixed-point
-code with internal allocation but cannot capture until its real driver lands.
-Compare frame time against the chosen 20 ms profile on each named board; throughput,
-heap sufficiency, acoustic quality, power and sustained MTU-23 capacity are TBC.
-
-Run from the repository root; setup in [README](README.md), at most four compiler
-jobs and one heavy job at a time. Offline mirror/cache environment belongs only in
-the shell; sandbox metadata overlay after IDF export is `/tmp/voiceremote-espressif`.
-
-```sh
-heavy bash FW/tests/run.sh
-heavy bash FW/tools/ui_preview/run.sh
-heavy idf.py -C FW -B FW/build-m5 -DIDF_TARGET=esp32s3 reconfigure
-heavy cmake --build FW/build-m5 -j 4
-heavy idf.py -C FW -B FW/build-m5 build
-heavy idf.py -C FW -B FW/build-m5 size
-heavy idf.py -C FW -B FW/build-c6 -DREMOTE_BOARD=waveshare_c6_169 -DIDF_TARGET=esp32c6 reconfigure
-heavy cmake --build FW/build-c6 -j 4
-heavy idf.py -C FW -B FW/build-c6 -DREMOTE_BOARD=waveshare_c6_169 build
-heavy idf.py -C FW -B FW/build-c6 size
-UV_CACHE_DIR=/tmp/voiceremote-uvc-s2 UV_OFFLINE=1 UV_LINK_MODE=copy uv run --project FW/tools/ble_client python -m unittest discover -s FW/tools/ble_client -p 'test_*.py' -v
-```
-
-Coordinator-only flash command, **not executed**:
-
-```sh
-heavy idf.py -C FW -B FW/build-m5 -p /dev/ttyACM0 flash
-```
-
-Coordinator-only recordings (substitute scanned address; choose fresh file prefixes):
-
-```sh
-uv run --project FW/tools/ble_client python FW/tools/ble_client/client.py --address AA:BB:CC:DD:EE:FF --capture 1 --recording 1 --arm --save /tmp/ptt.wav --seconds 60
-uv run --project FW/tools/ble_client python FW/tools/ble_client/client.py --address AA:BB:CC:DD:EE:FF --capture 2 --recording 1 --arm --save /tmp/rec.wav --seconds 60
-```
-
-PTT: select PTT, release then hold yellow and speak, release to close. REC: start
-OFF, wait for connection/snapshot, deliberately select REC, then OFF to close.
-The phone options do not move physical controls. Files are `ptt-seg00000001.wav`,
-etc.; loss adds `-interrupted.wav`, preserves earlier PCM for diagnosis and reports
-gap events. The client never silently joins later audio or overwrites a file.
-It retains provisional short PTT presses for bench listening, with no STT/actions.
-
-| Assumption / contract question | Handling |
-|---|---|
-| Prototype hardware cut | Owner's documented exception; AU_EN stays powered, `hw_mic_cut=0`. No [REQ-49] hardware compliance claim |
-| Hold lock field absent | Require physical PTT for local or phone hold; tap-lock remains disabled |
-| Draft bounds unspecified | Starting bitrate 24 kbit/s, four-packet queue, 48 KiB task stack, requested MTU/interval and 200 ms pending deadline are engineering starting points, **unverified** on device |
-| New START after a lost tail | Client disarms, resets decoder, requests snapshot and needs fresh release/press or OFF→REC; no automatic REC from a recovered snapshot |
-| Contract feasibility | No blocking firmware contract problem found. Binary schema/codegen, phone trigger-lock timing and iOS interruption signalling remain open in the contract; SYS untouched |
-| BlueZ MTU | **Yes**, public D-Bus AcquireNotify/AcquireWrite returns FD + actual MTU. Bleak 3.0.2 default public `mtu_size` reports 23; source evidence and method locations are in [client README](tools/ble_client/README.md). This client keeps StartNotify, prints public MTU and observed lower bound; firmware logs actual MTU. Phone writes' 20-byte budget never sizes Audio |
-| Licences | `78/esp-opus` 1.0.5 metadata says MIT; actual libopus COPYING/source terms are BSD and retained. ES8311 registers Apache-2.0; M5 adaptation MIT; opuslib-next BSD; Bleak/dbus-fast MIT. No av/FFmpeg/GPL. Details in [licences](licences/README.md) |
-
-Hardware-only: verify ES8311 left mic/gain, intelligible playback and restart
-transients; OFF while held/REC/mid-fragment; accepted MTU/connection interval,
-backpressure/recovery and END order on BlueZ/iOS; authenticated subscriptions,
-bond/revoke/reconnect; encode mean/max, dropped frames, real heap/stack and CPU;
-BLE/input/Orb responsiveness while encoding, display scanout, battery/power and
-[REQ-51]/[REQ-53] source-quality/whisper benchmarks. Preserve owner-confirmed
-controls/pairing/touch/Orb while checking these. No hardware compliance claimed.
+Open questions: which actuator fixture can supply deliberate local controls; how
+to encode an explicit incompatibility result; hardware flash/audio/BLE/display
+stall limits and actual heap/capacity; enrollment identity reset and production
+at-rest privacy/retention policy.

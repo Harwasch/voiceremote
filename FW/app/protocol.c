@@ -9,14 +9,14 @@ bool vr_forward(uint32_t n, uint32_t p) { uint32_t d=n-p; return d && d<UINT32_C
 
 static bool info_valid(const vr_info_t *v)
 {
-    return (v->board==1 || v->board==2 || v->board==65535) && !(v->caps & ~127u) &&
+    return (v->board==1 || v->board==2 || v->board==65535) && !(v->caps & ~255u) &&
         v->mics && v->slider<=1 && v->max_packet && v->max_packet<=4096 &&
         ((v->caps & 2) ? (v->width && v->height) : (!v->width && !v->height));
 }
 bool vr_info_decode(const uint8_t *p, size_t n, vr_info_t *out)
 {
-    if(n!=20 || p[0]!=1 || p[1]!=0 || p[7] || p[18] || p[19]) return false;
-    vr_info_t v={.board=vr_get16(p+2), .caps=vr_get16(p+8), .mics=p[10], .slider=p[11],
+    if(n!=20 || p[0]!=1 || (p[1]<=VR_MINOR && (vr_get16(p+8)&~255u)) || p[7] || p[18] || p[19]) return false;
+    vr_info_t v={.board=vr_get16(p+2), .caps=vr_get16(p+8)&255u, .mics=p[10], .slider=p[11],
         .width=vr_get16(p+12), .height=vr_get16(p+14), .max_packet=vr_get16(p+16)};
     memcpy(v.fw,p+4,3);
     if(!info_valid(&v)) return false;
@@ -25,20 +25,22 @@ bool vr_info_decode(const uint8_t *p, size_t n, vr_info_t *out)
 bool vr_info_encode(const vr_info_t *v, uint8_t p[20])
 {
     if(!info_valid(v)) return false;
-    memset(p,0,20); p[0]=1; vr_put16(p+2,v->board); memcpy(p+4,v->fw,3);
+    memset(p,0,20); p[0]=1; p[1]=VR_MINOR; vr_put16(p+2,v->board); memcpy(p+4,v->fw,3);
     vr_put16(p+8,v->caps); p[10]=v->mics; p[11]=v->slider;
     vr_put16(p+12,v->width); vr_put16(p+14,v->height); vr_put16(p+16,v->max_packet); return true;
 }
 static bool input_valid(const vr_input_t *v)
 {
-    return v->event<=5 && v->capture<=2 && v->mode<=1 && v->ptt<=1 && v->streaming<=1 &&
+    return v->event<=5 && v->capture<=2 && v->mode<=1 && v->ptt<=1 && v->streaming<=1 && v->offline<=1 && v->full<=1 && v->waiting<=1 && v->syncing<=1 &&
+        !(v->streaming && v->offline) &&
         (v->event!=VR_DOWN || v->ptt==1) && (v->event!=VR_UP || v->ptt==0) &&
-        (v->capture!=VR_OFF || !v->streaming);
+        (v->capture!=VR_OFF || (!v->streaming && !v->offline));
 }
 bool vr_input_decode(const uint8_t *p, size_t n, vr_input_t *out)
 {
-    if(n!=14 || p[13]) return false;
-    vr_input_t v={vr_get32(p),vr_get32(p+4),p[8],p[9],p[10],p[11],p[12]};
+    if(n!=14 || p[13] || (p[12]&~31u)) return false;
+    vr_input_t v={.seq=vr_get32(p),.ms=vr_get32(p+4),.event=p[8],.capture=p[9],.mode=p[10],.ptt=p[11],
+        .streaming=p[12]&1,.offline=(p[12]>>1)&1,.full=(p[12]>>2)&1,.waiting=(p[12]>>3)&1,.syncing=(p[12]>>4)&1};
     if(!input_valid(&v)) return false;
     *out=v; return true;
 }
@@ -46,7 +48,7 @@ bool vr_input_encode(const vr_input_t *v, uint8_t p[14])
 {
     if(!input_valid(v)) return false;
     vr_put32(p,v->seq); vr_put32(p+4,v->ms);
-    p[8]=v->event; p[9]=v->capture; p[10]=v->mode; p[11]=v->ptt; p[12]=v->streaming; p[13]=0; return true;
+    p[8]=v->event; p[9]=v->capture; p[10]=v->mode; p[11]=v->ptt; p[12]=v->streaming | v->offline<<1 | v->full<<2 | v->waiting<<3 | v->syncing<<4; p[13]=0; return true;
 }
 /* Reject overlong encodings, surrogates, out-of-range scalars and C0/C1 controls. */
 static bool text_valid(const uint8_t *p, size_t n)

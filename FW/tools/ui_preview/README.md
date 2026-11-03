@@ -14,7 +14,7 @@ flowchart LR
 | `main.c` | Runtime/board stubs, synthetic fixtures, PNG writer and interaction checks | ✅ Native verified |
 | `preview_runtime.h`, `stubs/` | ESP-free UI runtime boundary | ✅ No board access |
 | `lv_conf.h` | LVGL software renderer and lodepng; no GPU/window system | ✅ Native verified |
-| `../../build-preview/*.png` | Eleven round states and one 240×280 physical-slider state | ✅ Generated; ignored |
+| `../../build-preview/*.png` | Sixteen round states and one 240×280 physical-slider state | ✅ Generated; ignored |
 
 Purpose: inspect the actual firmware UI without a panel. Inputs: bundled Lexend
 subsets and `FW/managed_components/lvgl__lvgl`; no separate mock renderer.
@@ -36,9 +36,13 @@ Everything generated goes into ignored `FW/build-preview/`.
 | `long-name.png`, `error-text.png` | Shrink/ellipsis and temporary red error |
 | `no-link.png` | Hollow grey orb and Bluetooth-off pairing target |
 | `pairing-number.png`, `forget-confirm.png` | Numeric comparison / bin confirmation |
+| `offline-recording.png`, `offline-waiting.png` | Same filled/pulsed Orb offline, Bluetooth-off target, optional waiting icon |
+| `storage-full.png`, `recordings-waiting.png` | Small red full / grey saved-record icons in existing pip row, including OFF |
+| `syncing.png` | Small opposite-arrow transfer icon beside waiting icon |
 | `rectangular.png` | 240×280 physical-slider layout; no capture ring |
 
 ![Orb preview](../../build-preview/ptt-armed.png)
+![Offline listening](../../build-preview/offline-waiting.png)
 
 `run.sh` first executes `ui_preview --check`: production touch sampling, immediate preview before release/debounce, preview rollback, direct capture
 selection, mode/target events, cancelled/recognised 3-second holds, haptics,
@@ -47,7 +51,11 @@ during DMA, lock-free flushes with interleaved input sampling, partial redraws
 matching forced full redraws, destination-only flush bounds,
 error expiry and pulse invalidation bounds. A held PTT with streaming=0 never
 pulses; streaming=1 pulses independently of the held level, and clearing the bit
-stops it. All twelve baseline fixture PNGs were byte-identical after the task split; the
-script still renders the same states. Fixtures inject the producer bit; this is not a microphone measurement. Pure geometry/listening checks live in
+stops it. Offline recording pulses with no link and retains its Bluetooth-off
+target after reconnect until local capture ends. Full/waiting remain visible
+in OFF; storage-state transitions equal forced full redraws. Failed touch reads
+preserve the previous state briefly; sustained faults cancel without accepting
+a control, and held recovery cannot retrigger it. All twelve baseline PNG SHA256
+hashes remain identical; five offline/storage fixtures extend the set to seventeen. Fixtures inject the producer bit; this is not a microphone measurement. Pure geometry/listening checks live in
 [tests](../../tests/). These support [REQ-8]/[REQ-18]; physical scanout, frame rate,
 BLE/input latency, motor feel and panel colour remain **unverified**.

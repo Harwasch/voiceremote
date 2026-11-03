@@ -9,4 +9,4 @@ set(SDKCONFIG_DEFAULTS "${CMAKE_CURRENT_LIST_DIR}/sdkconfig.defaults;${CMAKE_CUR
 set(EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/app;${CMAKE_CURRENT_LIST_DIR}/boards/${REMOTE_BOARD}")
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 idf_build_set_property(DEPENDENCIES_LOCK "dependencies.lock.${REMOTE_BOARD}")
-project(voice_remote VERSION 0.2.0)
+project(voice_remote VERSION 0.3.0)

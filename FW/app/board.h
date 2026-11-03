@@ -13,7 +13,9 @@ const board_info_t *board_info(void);
 esp_err_t board_init(void);
 /* Inclusive coordinates; RGB565 in panel byte order. Synchronous DMA completion. */
 esp_err_t board_flush(int x1, int y1, int x2, int y2, const void *pixels);
-bool board_touch(uint16_t *x, uint16_t *y);
+/* An I2C failure must never masquerade as a finger release. */
+typedef enum { BOARD_TOUCH_ERROR=-1, BOARD_TOUCH_UP=0, BOARD_TOUCH_DOWN=1 } board_touch_t;
+board_touch_t board_touch(uint16_t *x, uint16_t *y);
 /* Physical levels only; shared app debounces. */
 bool board_button(unsigned button);
 void board_haptic(uint32_t now_ms);

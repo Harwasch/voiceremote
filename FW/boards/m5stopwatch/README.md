@@ -26,6 +26,10 @@ Start at `board_init`; [REQ-8], [REQ-18], [REQ-49–53] not hardware proven.
 AU_EN (IOE pin 3) stays high as in vendor `hal_ioe`; amp IOE pin 10 and GPIO 14
 are held low before enabling the audio rail. The prototype OFF exception applies;
 this is a DMA/encoder stop, with no independent hardware mic cut. No expander reset.
+`board_touch` reports read failure separately from finger-up; the shared UI
+holds the last good state for less than 100 ms, then cancels until a real release
+is observed. Synthetic host/native tests reproduce the prior false activation;
+real I2C fault timing remains **unverified**.
 I2C runs at 100 kHz, serially under the app mutex; touch is polled (G13 configured
 as input), QSPI uses 80 MHz, matching UserDemo `hal_display.cpp:83` (previously the
 Espressif macro’s 40 MHz default), TE G38 is an input, not used to synchronize scanout. Driver checks all
@@ -67,3 +71,12 @@ The vendor uses 44.1 kHz for its demo; this profile uses the same driver's 16 kH
 clock coefficient. Register values were compared with supplied source; PCM polarity,
 left-channel route, clipping/gain, continuous clocks and restart transients are
 **unverified** until the coordinator records/plays audio. No speaker playback added.
+
+Offline capability bit 7 is set (`0xbf`); firmware/contract are 0.3.0/1.1.
+The board-specific defaults select the 16 MiB CSV while preserving NVS at
+0x9000/0x6000, PHY and the existing factory image. The I2S ISR/overflow callback
+is IRAM-safe; four DMA descriptors retain an 80 ms nominal sample horizon.
+Encoder and storage-index allocations prefer PSRAM with an internal fallback;
+writer queue, flash IO buffers, task stacks and DMA remain internal. Flash
+operations still stall flash/PSRAM execution, BLE and display work; this config
+does not prove 20 ms timing. See [storage](../../app/offline-storage.md).
