@@ -1,0 +1,29 @@
+name: Desktop
+on:
+  schedule:
+    - cron: '23 9 * * *'
+  push:
+    tags:
+      - 'desktop-v*'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      RUST_TEST_THREADS: 4
+    defaults:
+      run:
+        working-directory: SW/desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Test workspace
+        run: cargo test --workspace -j4
+      - name: Check OS keychain feature
+        run: cargo check --workspace --features os-keychain -j4

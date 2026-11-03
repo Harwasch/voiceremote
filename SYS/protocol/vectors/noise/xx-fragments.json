@@ -1,0 +1,22 @@
+{
+  "fragments": [
+    {
+      "ciphertext_hex": "76cf977e4e48b5e9aaf572e829d6faa628d345960ddb71cfc2208517bb7317e866d02fb42bfa7b089b6a312f5debcd98ae60cd9a75989001154105c746495515bd5123b132901b60b17aabe5a1c5a7dd412170023ded44e35ecb03e203a84085b90b74f900c8210234b6cd6fb71d3b644572",
+      "offset": 0,
+      "plaintext_hex": "03000000b3000000007b226163636f756e745f6964223a2273796e7468657469632d6163636f756e74222c226b696e64223a22646963746174696f6e5f74657874222c227265766973696f6e223a312c227365676d656e745f6964223a2273796e74"
+    },
+    {
+      "ciphertext_hex": "0abc76b1caaecfd0262160fa68c9072143c6a6a7e3db0a9f48360d1c033c1e7a670e2495874c0c4c4c7af9fa907f687b5cb9fa983ed113c91ef45b2736b68240a5e8275b1bcd4f7da6f75939bd67b2daa060ecbd3977823bf98b3c97951cd2308f2511878163b1a9c1cc58086d082ef0b47f0c",
+      "offset": 89,
+      "plaintext_hex": "03000000b30000005968657469632d7365676d656e74222c227374617465223a22636f6d6d6974746564222c227461726765745f6465766963655f6964223a226465736b746f70222c2274657874223a2253796e7468657469632073616d706c65227d"
+    }
+  ],
+  "initiator_nonces": [
+    2,
+    3
+  ],
+  "pattern": "Noise_XX_25519_ChaChaPoly_BLAKE2s",
+  "purpose": "Synthetic fragment encoding fixture; continues xx-pairing.json after application nonce 1",
+  "reassembled_plaintext": "{\"account_id\":\"synthetic-account\",\"kind\":\"dictation_text\",\"revision\":1,\"segment_id\":\"synthetic-segment\",\"state\":\"committed\",\"target_device_id\":\"desktop\",\"text\":\"Synthetic sample\"}",
+  "total_bytes": 179
+}

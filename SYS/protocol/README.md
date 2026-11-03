@@ -14,6 +14,7 @@ flowchart LR
 | File / folder | What it is | Status |
 |---|---|---|
 | [protocol.schema.json](protocol.schema.json) | Version 1 wire records, enums and discriminated unions | ✅ |
+| [noise.md](noise.md) | Exact Noise suite, enrollment, relay auth, fragment framing and published ciphertext vectors | ✅ synthetic Rust tests; Swift/deployment unverified |
 | [wire-contract.md](wire-contract.md) | Boundaries, encoding rules and runtime obligations | ✅ contract; runtime integration unverified |
 | [vectors/](vectors/) | Shared synthetic valid and invalid fixtures | ✅ |
 | [../tools/](../tools/) / [../codegen/](../codegen/) | Model proposal contract / reproducible generator and checks | ✅ |
@@ -53,4 +54,4 @@ Trace: [REQ-59](../requirements.md#extensibility) (generated compatibility),
 [REQ-16, REQ-18](../requirements.md#dictation-delivery-and-targets) (insertion/focus),
 [REQ-22, REQ-24](../requirements.md#pairing-and-transport) (pairing/relay), and
 [REQ-28–36](../requirements.md#authorization-and-policy) (authority contracts).
-Only contract checks are proven here; component integration remains unverified.
+Contract checks and the desktop’s synthetic pairing/security tests are proven here; physical phone and deployed relay integration remain unverified.
