@@ -22,3 +22,5 @@ Edit `SYS/protocol` / `SYS/tools`, then regenerate. Trace: product §4/§7;
 [REQ-59](../../../../SYS/requirements.md#extensibility), [REQ-61](../../../../SYS/requirements.md#extensibility). Noise, policy, dispatch and Windows linking are **unverified** here.
 
 Wire parsing rejects duplicates, lone surrogates, underflow and nonliteral integer spellings before typed serde decoding.
+
+Paired agent inventory, exact-session retained-preview dispatch and durable task queries are generated from SYS/protocol. Shared vectors cover the new typed records and reject added authority fields.

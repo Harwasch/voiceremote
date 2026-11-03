@@ -56,7 +56,7 @@ final class SuggestionTests: XCTestCase, @unchecked Sendable {
         let tapped = await engine.tap(event, now: now)
         XCTAssertEqual(tapped?.proposal, card.proposal)
         let after = await engine.history(now: now)
-        XCTAssertEqual(after[0].state, .approved)
+        XCTAssertEqual(after[0].state, .reviewing)
         let replay = await engine.tap(event, now: now)
         XCTAssertNil(replay)
         // Neither BrainProposal nor TappedSuggestion offers any execution or authority API.
@@ -182,8 +182,13 @@ final class SuggestionTests: XCTestCase, @unchecked Sendable {
         guard allowed.cards.count == 2 else { return }
         let first = await engine.tap(.init(cardID: allowed.cards[0].id, previewRevision: 0), now: now)
         let second = await engine.tap(.init(cardID: allowed.cards[1].id, previewRevision: 0), now: now)
-        XCTAssertNotNil(first); XCTAssertNotNil(second)
-        XCTAssertEqual(second?.dependsOn, [allowed.cards[0].id])
+        XCTAssertNotNil(first); XCTAssertNil(second)
+        await engine.authorized(cardID: allowed.cards[0].id, revision: 0, now: now)
+        let premature = await engine.tap(.init(cardID: allowed.cards[1].id, previewRevision: 0), now: now)
+        XCTAssertNil(premature)
+        await engine.completed(cardID: allowed.cards[0].id, succeeded: true, now: now)
+        let released = await engine.tap(.init(cardID: allowed.cards[1].id, previewRevision: 0), now: now)
+        XCTAssertEqual(released?.dependsOn, [allowed.cards[0].id])
     }
 
     func testSuggestionInjectionCannotSupplyApprovalOrWakeAuthority() async throws {
@@ -197,6 +202,22 @@ final class SuggestionTests: XCTestCase, @unchecked Sendable {
         XCTAssertTrue(update.cards.isEmpty); XCTAssertEqual(update.droppedCount, 1)
         let history = await engine.history(now: now)
         XCTAssertFalse(history.contains { $0.state == .approved })
+    }
+
+    func testDeniedOrEditedPredecessorNeverReleasesLinkedSuccessor() async throws {
+        for edited in [false, true] {
+            let engine = try engine(EchoBrain())
+            let cards = await engine.ingest(segment("open one. Then open two"), now: now).cards
+            XCTAssertEqual(cards.count, 2)
+            if edited {
+                _ = await engine.edit(cardID: cards[0].id, proposal: proposal(device: "other"), now: now)
+            } else {
+                _ = await engine.tap(.init(cardID: cards[0].id, previewRevision: 0), now: now)
+                await engine.dismiss(cardID: cards[0].id, now: now)
+            }
+            let successor = await engine.tap(.init(cardID: cards[1].id, previewRevision: 0), now: now)
+            XCTAssertNil(successor)
+        }
     }
 
     func testSuggestionInferenceFailureIsVisibleAndNotSuccess() async throws {

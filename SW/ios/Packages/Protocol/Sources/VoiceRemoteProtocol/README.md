@@ -18,3 +18,7 @@ Reviewed control/base64/hex patterns inspect `unicodeScalars` directly; no regex
 boundaries participate in validation. macOS 26 execution remains **unverified** pending CI.
 
 Generated delivery/control messages and activity-age/listening fields plus required capture request sequence/absolute expiry come from SYS/protocol; round trips cover the new variants. Do not hand-edit Generated.swift.
+
+Paired agent inventory, exact-session retained-preview dispatch and durable task queries are generated from SYS/protocol. Shared vectors cover the new typed records and reject added authority fields.
+
+Generated TaskStatus now carries dispatched outcomes and bounded app replies; shared vectors distinguish delivery from verified success.

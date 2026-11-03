@@ -42,6 +42,10 @@ public final class RetainedTaskStore: TaskQueueStore, @unchecked Sendable {
         tombstones = next
         try store.save(retained, replacing: disk); disk = retained
     }
+    public func retainedTasks(_ tasks: [QueuedTask]) -> [QueuedTask] {
+        lock.lock(); defer { lock.unlock() }
+        return tasks.filter { $0.command.account_id == accountID && live($0) && keys($0).isDisjoint(with: tombstones) }
+    }
     public func maintain() throws {
         lock.lock(); defer { lock.unlock() }
         try persist(disk)

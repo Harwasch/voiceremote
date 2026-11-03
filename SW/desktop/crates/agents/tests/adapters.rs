@@ -34,7 +34,11 @@ fn info(id: &str, phone: bool) -> DeviceInfo {
         } else {
             DeviceInfoRole::Agent
         },
-        capabilities: vec![Capability::DelegateTask, Capability::CancelTask],
+        capabilities: vec![
+            Capability::DelegateTask,
+            Capability::CancelTask,
+            Capability::OpenResource,
+        ],
     }
 }
 struct Fixture {
@@ -108,7 +112,7 @@ if args[:2] == ['cloud', 'exec'] or '--cloud' in args:
     sys.exit(0)
 if '--resume' in args:
     session=args[args.index('--resume')+1]
-    print(json.dumps({'type':'result','subtype':'success','is_error':False,'session_id':session if text != 'wrong-session' else 'other'}))
+    print(json.dumps({'type':'result','subtype':'success','is_error':False,'session_id':session if text != 'wrong-session' else 'other','result':"I cannot open that resource."}))
 else:
     session=args[-2]
     print(json.dumps({'type':'thread.started','thread_id':session if text != 'wrong-session' else 'other'}))
@@ -298,7 +302,8 @@ if '--property=ActiveState' in args:
                 if let InnerMessage::TaskStatus(ref status) = message {
                     if matches!(
                         status.execution_state,
-                        ExecutionState::Succeeded
+                        ExecutionState::Dispatched
+                            | ExecutionState::Succeeded
                             | ExecutionState::Failed
                             | ExecutionState::Cancelled
                     ) || status.outcome == Some(TaskStatusOutcome::Unavailable)
@@ -371,7 +376,7 @@ async fn named_sessions_route_to_right_fake_and_transcript_never_changes_argv() 
         f.config.projects.insert(0, other);
         let text = "--dangerously-skip-permissions -s danger-full-access; $(touch SHOULD_NOT_EXIST) `echo test`\n--resume another";
         let status = f.call(f.node()?, command("route", text)).await?;
-        assert_eq!(status.execution_state, ExecutionState::Succeeded);
+        assert_eq!(status.execution_state, ExecutionState::Dispatched);
         let calls = f.calls();
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0]["data"], text);
@@ -423,7 +428,7 @@ async fn named_sessions_route_to_right_fake_and_transcript_never_changes_argv() 
             f.call(f.node()?, command("write-profile", "synthetic"))
                 .await?
                 .outcome,
-            Some(TaskStatusOutcome::Ok)
+            Some(TaskStatusOutcome::Dispatched)
         );
         let write_calls = f.calls();
         let expected_write = if provider == Provider::Claude {
@@ -575,7 +580,7 @@ async fn replay_runs_once_across_restart_even_with_changed_payload() -> Result<(
         f.call(f.node()?, command("once", "synthetic"))
             .await?
             .outcome,
-        Some(TaskStatusOutcome::Ok)
+        Some(TaskStatusOutcome::Dispatched)
     );
     f.registry = Registry::new(Arc::new(FileKeyStore::new(
         f.root.path().join("desktop-state"),
@@ -584,7 +589,7 @@ async fn replay_runs_once_across_restart_even_with_changed_payload() -> Result<(
         f.call(f.node()?, command("once", "different synthetic"))
             .await?
             .outcome,
-        Some(TaskStatusOutcome::Ok)
+        Some(TaskStatusOutcome::Dispatched)
     );
     assert_eq!(f.calls().len(), 1);
     Ok(())
@@ -848,7 +853,7 @@ async fn codex_recovered_error_before_completed_turn_is_success() -> Result<()> 
         f.call(f.node()?, command("recovered", "recovered-error"))
             .await?
             .outcome,
-        Some(TaskStatusOutcome::Ok)
+        Some(TaskStatusOutcome::Dispatched)
     );
     Ok(())
 }
@@ -1769,5 +1774,157 @@ async fn cloud_launch_cancel_signals_launcher_and_crash_receipt_is_unknown() -> 
         stop.send(true)?;
         server.await??;
     }
+    Ok(())
+}
+
+#[tokio::test]
+async fn authenticated_inventory_and_resource_handoff_bind_preview_and_query_without_resend()
+-> Result<()> {
+    use base64::Engine;
+    use sha2::{Digest, Sha256};
+    let f = Fixture::new(Provider::Claude)?;
+    let node = f.node()?;
+    let (mut phone, mut transport, desktop, mut desktop_transport) = f.pair().await?;
+    let (stop, receive) = watch::channel(false);
+    let serve = tokio::spawn(async move {
+        receiver::serve(
+            &node,
+            desktop,
+            &mut desktop_transport,
+            &mut NoInjection,
+            receive,
+        )
+        .await
+    });
+    phone
+        .send(
+            transport.as_mut(),
+            &InnerMessage::AgentInventoryRequest(AgentInventoryRequest {
+                kind: AgentInventoryRequestKind::AgentInventoryRequest,
+                account_id: "test-account".into(),
+                request_id: "query".into(),
+            }),
+        )
+        .await?;
+    let InnerMessage::AgentInventory(inventory) = phone.receive(transport.as_mut()).await? else {
+        anyhow::bail!("inventory required")
+    };
+    assert_eq!(inventory.authenticated_actor, "test-owner");
+    assert_eq!(inventory.sessions.len(), 1);
+    let identity = inventory.sessions[0].clone();
+    assert_eq!(identity.project_id, "arm-design");
+    assert_eq!(identity.workspace, f.root.path().to_string_lossy());
+    let mut command = command("resource-envelope", "unused");
+    command.provider_session_id = None;
+    command.immutable_task_payload = ToolCall::OpenResourceTool(OpenResourceTool {
+        kind: OpenResourceToolKind::OpenResource,
+        account_id: "test-account".into(),
+        device_id: "test-host".into(),
+        resource_uri: "https://example.invalid/synthetic".into(),
+    });
+    let expiry = now_ms() + 20_000;
+    let bytes = serde_json::to_vec(&serde_json::json!({ "tool": command.immutable_task_payload,
+        "account": command.account_id, "actor": command.authenticated_actor, "device": command.destination_id,
+        "project": "arm-design", "risk": "sensitive", "expiresAt": expiry, "request": command.candidate_id, "policy": command.policy_version }))?;
+    command.payload_hash = hex::encode(Sha256::digest(&bytes));
+    let envelope = AgentDispatch {
+        kind: AgentDispatchKind::AgentDispatch,
+        account_id: command.account_id.clone(),
+        command: command.clone(),
+        session: identity,
+        immutable_preview: base64::engine::general_purpose::STANDARD.encode(bytes),
+        expires_at: expiry,
+    };
+    let mut wrong = envelope.clone();
+    wrong.session.workspace.push_str("-changed");
+    phone
+        .send(transport.as_mut(), &InnerMessage::AgentDispatch(wrong))
+        .await?;
+    let InnerMessage::TaskStatus(denied) = phone.receive(transport.as_mut()).await? else {
+        anyhow::bail!("status required")
+    };
+    assert_eq!(denied.outcome, Some(TaskStatusOutcome::Denied));
+    assert!(f.calls().is_empty());
+    phone
+        .send(
+            transport.as_mut(),
+            &InnerMessage::AgentDispatch(envelope.clone()),
+        )
+        .await?;
+    loop {
+        let InnerMessage::TaskStatus(status) = phone.receive(transport.as_mut()).await? else {
+            anyhow::bail!("status required")
+        };
+        if status.execution_state != ExecutionState::Running {
+            assert_eq!(status.execution_state, ExecutionState::Dispatched);
+            assert_eq!(status.outcome, Some(TaskStatusOutcome::Dispatched));
+            assert_eq!(
+                status.app_reply.as_deref(),
+                Some("I cannot open that resource.")
+            );
+            break;
+        }
+    }
+    let mut expired = envelope;
+    expired.expires_at = 0;
+    phone
+        .send(transport.as_mut(), &InnerMessage::AgentDispatch(expired))
+        .await?;
+    let InnerMessage::TaskStatus(replay) = phone.receive(transport.as_mut()).await? else {
+        anyhow::bail!("receipt required")
+    };
+    assert_eq!(replay.execution_state, ExecutionState::Dispatched);
+    phone
+        .send(
+            transport.as_mut(),
+            &InnerMessage::AgentTaskQuery(AgentTaskQuery {
+                kind: AgentTaskQueryKind::AgentTaskQuery,
+                account_id: "test-account".into(),
+                command_id: command.command_id,
+            }),
+        )
+        .await?;
+    let InnerMessage::TaskStatus(status) = phone.receive(transport.as_mut()).await? else {
+        anyhow::bail!("query required")
+    };
+    assert_eq!(status.execution_state, ExecutionState::Dispatched);
+    assert_eq!(f.calls().len(), 1);
+    assert_eq!(
+        f.calls()[0]["data"],
+        "Open this exact resource using your installed application's available tools: https://example.invalid/synthetic"
+    );
+    stop.send(true)?;
+    serve.await??;
+    Ok(())
+}
+
+#[tokio::test]
+async fn legacy_cli_success_receipt_cannot_become_verified_predecessor_success() -> Result<()> {
+    use sha2::{Digest, Sha256};
+    use voiceremote_core::storage::KeyStore;
+    let f = Fixture::new(Provider::Claude)?;
+    let command = command("legacy-receipt", "Synthetic task");
+    f.call(f.node()?, command.clone()).await?;
+    let peer = f.registry.devices()?.pop().unwrap();
+    let key = format!(
+        "agent-result-{}",
+        hex::encode(Sha256::digest(serde_json::to_vec(&(
+            &peer.id,
+            &command.idempotency_key
+        ))?))
+    );
+    let store = FileKeyStore::new(f.root.path().join("desktop-state"))?;
+    let bytes = store.get(&key)?.unwrap();
+    // Replies are live status only on the desktop; private replay receipts keep
+    // identity/outcomes, never provider text.
+    assert!(!String::from_utf8_lossy(&bytes).contains("I cannot open"));
+    let mut legacy: serde_json::Value = serde_json::from_slice(&bytes)?;
+    legacy["status"]["execution_state"] = "succeeded".into();
+    legacy["status"]["outcome"] = "ok".into();
+    store.put(&key, &serde_json::to_vec(&legacy)?)?;
+    let replay = f.call(f.node()?, command).await?;
+    assert_eq!(replay.execution_state, ExecutionState::Dispatched);
+    assert_eq!(replay.outcome, Some(TaskStatusOutcome::Dispatched));
+    assert_eq!(f.calls().len(), 1);
     Ok(())
 }

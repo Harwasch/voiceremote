@@ -31,15 +31,18 @@ actor TargetSpy: DictationTarget, DeviceRevocationHandler {
 }
 actor BrainSpy: LlmBrain {
     var calls = 0
+    var requests: [BrainRequest] = []
     let sensitive: Bool
     let fixtureTool: ToolCall?
-    init(sensitive: Bool = false, tool: ToolCall? = nil) { self.sensitive = sensitive; fixtureTool = tool }
+    let additionalTool: ToolCall?
+    init(sensitive: Bool = false, tool: ToolCall? = nil, additionalTool: ToolCall? = nil) { self.sensitive = sensitive; fixtureTool = tool; self.additionalTool = additionalTool }
     func propose(_ request: BrainRequest) throws -> BrainResponse {
-        calls += 1
+        calls += 1; requests.append(request)
         let tool: ToolCall = fixtureTool ?? (sensitive
             ? .prepareSendTool(PrepareSendTool(account_id: "fixture", device_id: "phone", recipient: "fixture-recipient", content: "invented content"))
             : .selectTargetTool(SelectTargetTool(account_id: "fixture", device_id: "phone")))
-        return ProposalDecoder.decode(try JSONSerialization.data(withJSONObject: [JSONSerialization.jsonObject(with: ProtocolCodec.encode(tool))]), accountID: "fixture")
+        let tools = [tool] + (additionalTool.map { [$0] } ?? [])
+        return ProposalDecoder.decode(try JSONSerialization.data(withJSONObject: tools.map { try JSONSerialization.jsonObject(with: ProtocolCodec.encode($0)) }), accountID: "fixture")
     }
 }
 @MainActor final class Journal: AuditJournal {
@@ -77,16 +80,17 @@ actor BrainSpy: LlmBrain {
     let execution = ExecutionSpy()
     init(sensitive: Bool = false, script: [SttEvent] = [.final("invented words")],
          captureFactory: (@MainActor () async throws -> any CaptureSession)? = nil,
-         tool: ToolCall? = nil,
+         scriptProvider: (@MainActor () -> [SttEvent])? = nil, additionalTool: ToolCall? = nil,
+         tool: ToolCall? = nil, agent: AgentControl? = nil, policy: PolicyGate? = nil,
          delivery: (@MainActor (ExecutionPermit) throws -> [QueuedTask])? = nil) throws {
-        brain = BrainSpy(sensitive: sensitive, tool: tool)
-        gate = try PolicyGate(audit: AuditLog(journal: Journal(), checkpoints: Checkpoint(), retention: AuditRetention()), biometric: bio, clock: { 1_000_000 })
+        brain = BrainSpy(sensitive: sensitive, tool: tool, additionalTool: additionalTool)
+        gate = try policy ?? PolicyGate(audit: AuditLog(journal: Journal(), checkpoints: Checkpoint(), retention: AuditRetention()), biometric: bio, clock: { 1_000_000 })
         history = try AppHistoryStore(now: 1_000_000)
         registry = DeviceRegistry(accountID: "fixture", revocation: target)
         let capture = self.capture, brain = self.brain, execution = self.execution
         model = VoiceAppModel(accountID: "fixture", phoneID: "phone", actorID: "owner", registry: registry,
             history: history, target: target, policy: gate, makeCapture: captureFactory ?? { capture },
-            engines: { [FakeEngine(script: script)] }, brain: { _ in brain }, now: { 1_000_000 }, deliver: delivery ?? { permit in execution.permits.append(permit); return [] })
+            engines: { [FakeEngine(script: scriptProvider?() ?? script)] }, brain: { _ in brain }, now: { 1_000_000 }, agentControl: agent, deliver: delivery ?? { permit in execution.permits.append(permit); return [] })
     }
     func until(_ condition: @MainActor () -> Bool) async throws {
         for _ in 0..<2000 {
@@ -351,4 +355,22 @@ actor BrainSpy: LlmBrain {
     fail = false; await rig.model.approve()
     #expect(router?.snapshot().count == 1)
     #expect(rig.model.approval == nil)
+}
+
+@Test @MainActor func commandCorrectionsAcrossSilenceSlicesWaitForUtteranceCompletion() async throws {
+    let rig = try Rig(script: [.final("synthetic correction")])
+    rig.model.setMode(.ai_control); rig.model.setCapture(.continuous)
+    try await rig.until { rig.model.isRecording }
+    rig.capture.channel.continuation.yield(.frame(try AudioFrame(samples: [1000], timestamp: 0)))
+    rig.capture.channel.continuation.yield(.frame(try AudioFrame(samples: Array(repeating: 0, count: 12_800), timestamp: 0.1)))
+    try await Task.sleep(for: .milliseconds(30))
+    #expect(await rig.brain.calls == 0)
+    #expect(rig.model.suggestions.isEmpty)
+    rig.capture.channel.continuation.yield(.frame(try AudioFrame(samples: [1000], timestamp: 1)))
+    rig.model.finishUtterance()
+    try await rig.until { rig.model.listening == .idle }
+    #expect(await rig.brain.calls == 1)
+    let transcript = await rig.brain.requests.first?.transcript
+    #expect(transcript == "Synthetic correction. Synthetic correction.")
+    #expect(rig.execution.permits.isEmpty)
 }

@@ -24,3 +24,5 @@ edit generated Swift. Trace: product §4/§7; requirements [REQ-59](../../../../
 Apple app integration is **unverified**; this package has no Apple frameworks.
 
 Wire codecs reject duplicate keys, nonliteral integers, invalid Unicode and control-bearing dictation before Foundation decoding.
+
+Paired agent inventory, exact-session retained-preview dispatch and durable task queries are generated from SYS/protocol. Shared vectors cover the new typed records and reject added authority fields.

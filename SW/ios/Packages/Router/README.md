@@ -51,3 +51,5 @@ swift test -j 4 --package-path SW/ios/Packages/Router --filter Journey
 ```
 
 On hwgeekom prefix commands with `HEAVY_CPUS=4 heavy`.
+
+Queue dependency IDs are bound by the trusted phone composition. Reconnect releases a successor only after a matching authenticated `ok` predecessor outcome. Restored successful predecessors need fresh receipt confirmation. Replacement approval retires the old queued item atomically with the new reservation. Fresh cancellation permits can mark an expired/restored original task without reviving its execution authority.

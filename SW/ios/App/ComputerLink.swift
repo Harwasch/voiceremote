@@ -38,6 +38,7 @@ import VoiceRemoteProtocol
     private(set) var notice: String?
     var enrolledDevices: [DeviceInfo] { store.active.map(\.device) }
     private var role: DeviceInfoRole = .text_receiver
+    private var allowAgentCommands = false
     private var readers: [String: Task<Void, Never>] = [:]
     init(accountID: String, phoneID: String, store: PeerStore) {
         self.accountID = accountID; self.phoneID = phoneID; self.store = store
@@ -124,7 +125,11 @@ import VoiceRemoteProtocol
         }
     }
     func begin(_ invitationOrCode: String, role: DeviceInfoRole) async throws -> String {
+        try await begin(invitationOrCode, role: role, allowAgentCommands: false)
+    }
+    func begin(_ invitationOrCode: String, role: DeviceInfoRole, allowAgentCommands: Bool) async throws -> String {
         await cancel(); self.role = role
+        self.allowAgentCommands = allowAgentCommands && (role == .agent || role == .both)
         let epoch = pairingEpoch
         do {
             let invitation = try PairingInvitation(code: invitationOrCode, expectedAccount: accountID, clock: SystemPairingClock())
@@ -172,13 +177,14 @@ import VoiceRemoteProtocol
         guard let confirmation, let transport = pendingTransport, let runtime else { throw PairingError.invalidState }
         do {
             let phone = DeviceInfo(account_id: accountID, device_id: phoneID, display_name: "iPhone", platform: .ios,
-                role: .capture, capabilities: [])
+                role: .capture, capabilities: allowAgentCommands ? [.delegate_task, .cancel_task, .open_resource] : [])
             try await confirmation.confirmLocal(displayedPhrase: phrase, device: phone, transport: transport)
             try await confirmation.receiveConfirmation(transport: transport)
             let peer = try await confirmation.finish()
             // Do not expand peer-declared role/capabilities. Role selection can narrow.
             let capabilities = peer.device.capabilities.filter { capability in
-                role == .both || (role == .text_receiver ? capability == .receive_text : capability != .receive_text)
+                (capability == .receive_text && (role == .both || role == .text_receiver)) ||
+                (allowAgentCommands && capability != .receive_text && (role == .both || role == .agent))
             }
             let device = DeviceInfo(account_id: accountID, device_id: peer.device.device_id,
                 display_name: peer.device.display_name, platform: peer.device.platform, role: role, capabilities: capabilities)
@@ -239,7 +245,10 @@ import VoiceRemoteProtocol
                         guard peers[id]?.0.session === peer.session else { return }
                         try await peer.connection.send(.captureControlResult(result))
                         synchronizeState()
+                    case .agentInventory(let inventory):
+                        try runtime?.agentControl.receive(inventory, from: id, epoch: peer.epoch)
                     case .taskStatus(let status):
+                        try runtime?.agentControl.receive(status, from: id, epoch: peer.epoch)
                         await runtime?.model.insertionStatus(status, from: id)
                     case .revoke:
                         remoteRevocations.insert(id)
@@ -254,6 +263,7 @@ import VoiceRemoteProtocol
                 guard let self, peers[id]?.0.session === peer.session else { return }
                 runtime?.model.clearFocus(id)
                 runtime?.model.forgetCaptureConnection(peer.epoch)
+                runtime?.agentControl.disconnected(id, epoch: peer.epoch)
                 peers.removeValue(forKey: id); connectedIDs.remove(id)
                 notice = "Computer disconnected. Dictation will be held in History."
                 scheduleReconnect(id)
@@ -261,6 +271,9 @@ import VoiceRemoteProtocol
         }
         synchronizeState()
         Task { [weak self] in
+            try? await self?.runtime?.agentControl.connected(peer.device, epoch: peer.epoch) { message in
+                try await peer.connection.send(message)
+            }
             await self?.runtime?.model.reconcileDictation(on: id) { segment in
                 try await peer.connection.reconcile(segmentID: segment)
             }
@@ -315,6 +328,7 @@ import VoiceRemoteProtocol
         reconnectors.removeValue(forKey: deviceID)?.cancel(); connectedIDs.remove(deviceID); suspendedIDs.remove(deviceID)
         // Remove delivery eligibility before awaits; keep transport solely for Revoke.
         let live = peers.removeValue(forKey: deviceID)
+        if let live { runtime?.agentControl.disconnected(deviceID, epoch: live.0.epoch) }
         let publicKey = try SecureStore.load(keyName(deviceID))
         let enrollment: Enrollment?
         if let publicKey { enrollment = try await peerRegistry.lookup(publicKey: publicKey) }

@@ -38,6 +38,7 @@ import VoiceRemoteProtocol
     private let activity = ListeningActivity()
     private let network = NetworkStatus()
     private let taskStore: RetainedTaskStore
+    let agentControl: AgentControl
     private let router: TaskRouter
     private var maintenance: Task<Void, Never>?
     private var preparation: Task<Void, Error>?
@@ -74,6 +75,7 @@ import VoiceRemoteProtocol
         let policy = try PolicyGate(audit: audit, biometric: LocalAuthenticationBiometric())
         taskStore = try RetainedTaskStore(url: root.appendingPathComponent("tasks.json"), accountID: account)
         router = try TaskRouter(store: taskStore, policy: policy)
+        agentControl = AgentControl(router: router, policy: policy, account: account, actor: phoneID)
         guard let phrases = Bundle.main.url(forResource: "phrases", withExtension: "json") else { throw SttFailure.invalidResponse }
         recorder = try BenchmarkRecorder(prompts: RecorderPrompt.load(Data(contentsOf: phrases)), directory: root.appendingPathComponent("Recorder"))
         // Resolve self only after every stored property is initialized.
@@ -97,7 +99,7 @@ import VoiceRemoteProtocol
             }, online: { AppRuntime.shared?.network.online ?? false }, power: {
                 let process = ProcessInfo.processInfo
                 return (process.thermalState == .serious || process.thermalState == .critical, EngineRouter.lowBattery(level: UIDevice.current.batteryLevel, lowPowerMode: process.isLowPowerModeEnabled))
-            }, deliver: { permit in
+            }, agentControl: agentControl, deliver: { permit in
                 guard let host = AppRuntime.shared else { throw RouterError.invalidAuthorization }
                 try RegisteredRouting.enqueue(permit, devices: host.model.devices, router: host.router)
                 return host.router.snapshot()
@@ -107,6 +109,7 @@ import VoiceRemoteProtocol
             model.settings = settings; try settingsStore.save(settings)
         }
         savedSettings = model.settings; link.runtime = self
+        agentControl.onChange = { [weak self] in Task { await self?.model.refreshTasks() } }
         model.settingsDidChange = { [weak self] settings in self?.saveSettings(settings) }
         model.onStateChange = { [weak self] in
             guard let self else { return }
@@ -126,6 +129,7 @@ import VoiceRemoteProtocol
         let task = Task { [self] in
             try await link.restore(registry: registry)
             await model.refresh()
+            await model.refreshTasks()
             await reconcileKeyboard()
             link.reconnectAtLaunch()
         }

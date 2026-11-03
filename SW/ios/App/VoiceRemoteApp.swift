@@ -184,7 +184,54 @@ private struct SuggestionsView: View {
                     }.buttonStyle(.borderless)
                 }
             }
-            ForEach(model.tasks, id: \.command.command_id) { task in Text(task.visibleStatus) }
+            if let agents = model.agentControl {
+                Section("Agent session") {
+                    ForEach(Array(agents.destinations.enumerated()), id: \.offset) { _, destination in
+                        Button {
+                            try? agents.choose(destination.session)
+                            model.settingsChanged()
+                        } label: {
+                            VStack(alignment: .leading) {
+                                Text("\(destination.session.provider) · \(destination.session.host) · \(destination.session.workspace)")
+                                Text(destination.session.providerSessionID).font(.caption)
+                                Text(destination.available ? "Connected" : "Offline — commands held").font(.caption)
+                                if agents.selected == destination.session { Text("Selected").font(.caption) }
+                            }
+                        }
+                    }
+                }
+            }
+            ForEach(model.tasks, id: \.command.command_id) { task in
+                VStack(alignment: .leading) {
+                    Text(task.visibleStatus)
+                    if task.hold == .reapprovalRequired, task.state == .queued {
+                        Button("Review restored task") { model.reviewRestoredTask(task) }
+                    }
+                    if task.state == .queued || task.state == .dispatched || task.state == .running {
+                        Button(task.cancellationRequested ? "Retry cancellation" : "Cancel task", role: .destructive) {
+                            Task { await model.cancelTask(task) }
+                        }
+                    }
+                }
+            }
+            Section("Scoped permissions") {
+                Text("Target selection only. Agent delegation always requires fresh Face ID or iPhone passcode. Permissions expire and are not restored after restart.").font(.footnote)
+                if let device = model.destination, device.capabilities.contains(.receive_text) {
+                    Button("Allow target selection on \(device.display_name) for 15 minutes") {
+                        model.grantTargetSelection(device: device, project: model.agentControl?.selected?.workspace ?? "default")
+                    }
+                }
+                ForEach(model.grants, id: \.id) { grant in
+                    VStack(alignment: .leading) {
+                        Text("\(grant.session.device) / \(grant.session.project) · \(grant.capability.rawValue)")
+                        Text("Account \(grant.session.account) · actor \(grant.session.actor) · \(grant.risk.rawValue)").font(.caption)
+                        Text("Expires \(Date(timeIntervalSince1970: Double(grant.expiresAt) / 1000), style: .relative)").font(.caption)
+                        Button("Revoke permission", role: .destructive) { model.revokeGrant(grant) }
+                    }
+                }
+                Toggle("Arm wake context for selected scope", isOn: Binding(get: { model.wakeArmed }, set: { model.wakeArmed = $0 }))
+                Text("Voice is not identity. Ambiguous wake or meeting input still requires a phone tap.").font(.footnote)
+            }
         }.navigationTitle("Suggestions")
     }
 }
@@ -196,7 +243,10 @@ private struct ApprovalView: View {
             Form {
                 if let card = model.approval {
                     Section("Exact action") { Text(card.exactAction).font(.body.monospaced()).textSelection(.enabled) }
-                    Section("Destination") { Text(card.destination.display_name); Text(card.destination.device_id).font(.caption) }
+                    Section("Destination") {
+                        Text(card.destination.display_name); Text(card.destination.device_id).font(.caption)
+                        if let route = card.routeDescription { Text(route).font(.caption.monospaced()).textSelection(.enabled) }
+                    }
                     Section("Consequences") { Text(card.consequences) }
                     Section {
                         if card.preview.risk == .sensitive { Label("Face ID or iPhone passcode required", systemImage: "faceid") }

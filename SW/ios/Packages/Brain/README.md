@@ -30,3 +30,5 @@ Provider metadata is ignored. A refusal produces no proposals and never reruns o
 Signed relay access uses [RelayBrainTransport](Sources/RelayBrainTransport.swift) around the final Messages body. The app derives the room route from persisted pairing and exposes deployment model/API-version settings. Linux tests and [real local relay gate](../../../../SYS/tests/e2e/README.md) verify body signing; live Anthropic and Apple host execution remain **unverified**.
 
 Measurement update ([REQ-15], [REQ-39]): Claude HTTP reads reject oversized headers/chunks before accumulating more than 1 MiB. BrainBenchmark supports 50 recorded commands with separate expected prompts, recognized transcripts and recording IDs; real-source exports require spoken provenance. Benchmark proposals are never executed. Native/provider/device measurements remain **unverified**.
+
+Suggestion review has a separate `reviewing` state; Policy issuance marks authorized, and only authenticated executor completion releases linked successors. Explicit command context enables hybrid simple routing, including terminal speech punctuation. Ambient/ambiguous wake remains proposal-only.

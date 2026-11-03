@@ -16,3 +16,7 @@ Rust. Trace: product §4/§7; [REQ-59](../../../../../SYS/requirements.md#extens
 A strict recursive parser retains integer token kinds and rejects duplicate decoded keys at every object depth.
 
 Generated delivery contract includes target prepare/ready, dictation outcome/query, sequenced capture-control with absolute expiry/result, optional activity age and actual listening state. Edit SYS schema, then regenerate.
+
+Paired agent inventory, exact-session retained-preview dispatch and durable task queries are generated from SYS/protocol. Shared vectors cover the new typed records and reject added authority fields.
+
+Generated TaskStatus now carries dispatched outcomes and bounded app replies; shared vectors distinguish delivery from verified success.

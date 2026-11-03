@@ -92,6 +92,8 @@ final class AuthorityAndRouterTests: XCTestCase, @unchecked Sendable {
         let router = BrainRouter(onDevice: local, cloud: cloud, isOnline: { true })
         let simple = try await router.route(request("switch to laptop"))
         let multi = try await router.route(request("open dashboard then compare motors", workload: .simpleRouting))
+        let punctuated = try await router.route(request("Open dashboard."))
+        XCTAssertEqual(punctuated.route, .onDevice)
         XCTAssertEqual(simple.route, .onDevice); XCTAssertEqual(multi.route, .cloud)
     }
 

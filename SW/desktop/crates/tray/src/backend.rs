@@ -26,6 +26,8 @@ pub struct Settings {
     pub device: String,
     pub relay: Option<String>,
     pub role: DeviceInfoRole,
+    #[serde(default)]
+    pub agents_config: Option<PathBuf>,
 }
 impl Settings {
     fn info(&self) -> Result<DeviceInfo> {
@@ -33,6 +35,22 @@ impl Settings {
         info.role = self.role.clone();
         if self.role == DeviceInfoRole::Agent {
             info.capabilities.clear();
+        }
+        if let Some(path) = &self.agents_config {
+            ensure!(
+                matches!(self.role, DeviceInfoRole::Agent | DeviceInfoRole::Both),
+                "choose agent role explicitly"
+            );
+            let config = voiceremote_agents::Allowlist::load(path)?;
+            ensure!(
+                config.account == self.account && config.host == self.device,
+                "agent configuration identity mismatch"
+            );
+            info.capabilities.extend([
+                Capability::DelegateTask,
+                Capability::CancelTask,
+                Capability::OpenResource,
+            ]);
         }
         encode(&info).map_err(anyhow::Error::msg)?;
         Ok(info)
@@ -196,6 +214,44 @@ impl Backend {
             let (send, stop) = watch::channel(false);
             let task = tokio::spawn(async move {
                 let result: Result<()> = async {
+                    if let Some(path) = &settings.agents_config {
+                        let node = voiceremote_agents::AgentNode::new(
+                            voiceremote_agents::Allowlist::load(path)?,
+                            voiceremote_agents::CliAdapter::default(),
+                            backend.keys.clone(),
+                        )?;
+                        let mut listener =
+                            voiceremote_agents::transport::Listener::bind_auto().await?;
+                        listener.advertise(&peer.room)?;
+                        let lan = voiceremote_agents::receiver::run_lan(
+                            node.clone(),
+                            listener,
+                            backend.identity.clone(),
+                            backend.registry.clone(),
+                            peer.clone(),
+                            settings.device.clone(),
+                            backend.injectors.clone(),
+                            stop.clone(),
+                        );
+                        let relay = async {
+                            if settings.relay.is_some() {
+                                voiceremote_agents::receiver::run_relay(
+                                    node,
+                                    backend.client(&settings, peer.room.clone())?,
+                                    backend.identity.clone(),
+                                    backend.registry.clone(),
+                                    peer.clone(),
+                                    settings.device.clone(),
+                                    backend.injectors.clone(),
+                                    stop.clone(),
+                                )
+                                .await
+                            } else {
+                                std::future::pending::<Result<()>>().await
+                            }
+                        };
+                        return tokio::select! { result = lan => result, result = relay => result };
+                    }
                     let listener = match LanListener::bind_auto().await {
                         Ok(mut listener) => {
                             listener.advertise(&peer.room)?;
@@ -390,6 +446,15 @@ impl Backend {
                 message: "Phone paired; waiting for phone state".into(),
                 ..View::default()
             };
+            if settings.agents_config.is_some() {
+                // Transfer from the pairing transport to the bounded agent pump on
+                // fresh resume. Dropping the old listener prevents duplicate room consumers.
+                let _ = transport.close().await;
+                drop(listener);
+                drop(client);
+                self.resume();
+                return Ok(());
+            }
             // Keep the freshly enrolled session instead of requiring a reconnect.
             let backend = self.clone();
             let (send, session_stop) = watch::channel(false);
@@ -548,6 +613,7 @@ mod tests {
             device: "desktop".into(),
             relay: None,
             role: DeviceInfoRole::TextReceiver,
+            agents_config: None,
         };
         backend.registry.remember_local(&settings.info()?)?;
         backend
@@ -592,6 +658,7 @@ mod tests {
                 device: "desktop".into(),
                 relay: None,
                 role,
+                agents_config: None,
             }
             .info()?;
             assert!(

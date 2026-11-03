@@ -86,3 +86,20 @@ sequenceDiagram
 Trace: REQ-16–18, REQ-22–27; owner wording question Q-12. Local synthetic
 contract tests do not prove native field insertion, physical UI timing or phone
 background behavior.
+
+## Paired agent inventory and dispatch
+
+| Message | Responsibility |
+|---|---|
+| `agent_inventory_request` / `agent_inventory` | Paired controlling phone only; account/device/request/actor correlation. Inventory carries owner project, canonical workspace, provider, exact session, permission profile and intersected enrollment capabilities. Metadata is never a grant. |
+| `agent_dispatch` | Retains the approved command, exact inventory session, base64 immutable preview bytes and original expiry. Node hashes retained bytes, checks preview bindings and compares the exact owner session before starting a CLI. Existing receipts are read before freshness checks. |
+| `agent_task_query` | Paired read-only receipt lookup; unknown IDs never spawn or resend. Status remains account/command correlated; authenticated connection and pinned Router identity supply the source. |
+
+Phone permission choice and desktop `--allow-agents`/owner allowlist enrollment
+are explicit and independent of model output. The phone re-verifies the sealed
+Policy permit before routing. Protocol interoperability is covered by shared
+vectors and the synthetic agent relay E2E; device/provider/Windows runtime
+acceptance remains **unverified**.
+
+
+CLI app handoff: `task_status.execution_state=dispatched`, `outcome=dispatched`, and optional bounded `app_reply` mean the provider received a command and returned that reply. A completed turn (including refusal) is no proof of an opened resource or fulfilled instruction. Owner policy requires verified `succeeded/ok` for predecessors; dispatched does not release linked work. This policy has no model-controlled override. Replies are data only, retained with the phone task expiry and omitted from desktop replay receipts.

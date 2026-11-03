@@ -6,6 +6,7 @@ on:
     tags:
       - 'desktop-v*'
       - 'desktop-ci-*'
+      - 'tray-ci-*'
   workflow_dispatch:
 permissions:
   contents: read
@@ -76,6 +77,8 @@ jobs:
         run: xvfb-run -a cargo test --locked -p voiceremote-inject-linux --test x11_display -j4 -- --ignored --test-threads=1
 
   tray:
+    # Installer builds take about 20 minutes: skip them on routine desktop-ci-* runs.
+    if: ${{ !startsWith(github.ref, 'refs/tags/desktop-ci-') }}
     name: Tray / ${{ matrix.os }}
     strategy:
       fail-fast: false

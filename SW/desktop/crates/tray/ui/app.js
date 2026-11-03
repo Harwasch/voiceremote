@@ -15,7 +15,7 @@ $('pair-form').addEventListener('submit', event => {
   event.preventDefault();
   const provisioningSecret = $('provisioning-secret').value || null;
   $('provisioning-secret').value = '';
-  operation(() => invoke('pair', { provisioningSecret, settings: { account: $('account').value.trim(), device: $('device').value.trim(), role: $('role').value, relay: $('relay').value.trim() || null } }));
+  operation(() => invoke('pair', { provisioningSecret, settings: { account: $('account').value.trim(), device: $('device').value.trim(), role: $('role').value, agents_config: $('agents-config').value.trim() || null, relay: $('relay').value.trim() || null } }));
 });
 $('confirm-form').addEventListener('submit', event => {
   event.preventDefault();
@@ -34,6 +34,7 @@ async function refresh() {
       if (settings) {
         for (const key of ['account', 'device', 'role']) $(key).value = settings[key];
         $('relay').value = settings.relay || '';
+        $('agents-config').value = settings.agents_config || '';
       }
       $('autostart').checked = await invoke('autostart', { enabled: null });
       initialized = true;

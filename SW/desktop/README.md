@@ -248,3 +248,5 @@ The workspace lockfile is outside this task’s ownership and remains unchanged.
 The coordinator needs to refresh `Cargo.lock` before committing the new crate.
 
 Delivery builds use the refreshed lockfile (`--locked`); production receiver paths keep private LAN available beside relay. See the [wire exchange](../../SYS/protocol/wire-contract.md#dictation-target-and-capture-exchange).
+
+Agent review fixes distinguish CLI dispatch from verified effects, enforce Windows owner-file ACLs, and cross-check Job/shim tests. See [agent boundaries](crates/agents/README.md); Windows runtime acceptance remains unverified.

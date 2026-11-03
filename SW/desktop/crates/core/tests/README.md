@@ -24,3 +24,5 @@ Run `python3 SW/desktop/crates/core/tests/check-token-guards.py` alone (no concu
 The [real E2E gate](../../../../../SYS/tests/e2e/README.md) complements fakes with the production Worker, Rust CLI and Swift over actual WS/TCP, including persisted old-frame replay.
 
 Delivery coverage includes positive encrypted outcomes, never-claimed queries and same-ID insertion/dedup on every platform, Unix file persistence across fresh store handles, crashed reservations remaining uncertain, pre-input refusal and uncertain insertion across resume. All text/injectors are synthetic; native field acceptance **unverified**.
+
+The half-open relay regression includes a deliberate 25 ms setup delay. Its lower bound uses the pre-connect clock, matching the transport's heartbeat age; measuring from a later pause incorrectly failed on CI before 30 seconds of *test* time elapsed.

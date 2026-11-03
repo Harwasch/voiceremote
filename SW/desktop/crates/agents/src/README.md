@@ -9,6 +9,7 @@ flowchart LR
 
 | File | What | Status |
 |---|---|---|
+| [windows_job.rs](windows_job.rs) | Suspended start, kill-on-close Job Object, zero-active-process cleanup confirmation | 🟡 Windows cross-compile; runtime unverified |
 | [lib.rs](lib.rs) | Private command admission; role/capability checks and durable replay receipts | ✅ synthetic tests |
 | [registry.rs](registry.rs) | Strict owner TOML, exact workspace/session identity, bounded owner metadata discovery | ✅ synthetic tests |
 | [process.rs](process.rs) | `AgentAdapter`, opt-in cloud handoff, subprocess exit/JSON checks, cleanup exit-status retention regression, opt-in smoke | ✅ fake CLIs; live providers unverified |
@@ -18,3 +19,12 @@ flowchart LR
 
 Start at `receiver::serve`; REQ-34/41/44/60.
 See [boundaries](../README.md) before embedding.
+
+
+Inventory, retained-preview dispatch and durable status queries enter only through the paired receiver. HTTPS resource actions hand off to the selected CLI. See [supported entry points](../README.md#supported-command-entry-points-checked-2026-11-02).
+
+| [windows_security.rs](windows_security.rs) | Same concrete token-user SID boundary as the tray pipe; owner/DACL/reparse checks and bounded read on one locked handle | 🟡 Windows tests cross-compiled; runtime unverified |
+
+Clean CLI turns and resource requests return dispatched plus bounded app reply, never verified success. Reply text is excluded from desktop durable receipts; legacy CLI success receipts cannot revive success authority.
+
+Windows ACL fixtures explicitly set/read back owner SID and inheritance protection; DACL-only edits preserve an administrator-group owner. Negative probes require the precise owner/world-write/null-DACL failure, and a real inherited Everyone-write ACE is rejected until protection removes it. Production ACL acceptance is unchanged; updated Windows runtime tests remain unverified locally.

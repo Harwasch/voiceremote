@@ -20,3 +20,5 @@ Base64/hex pattern tests also reject trailing control clusters. Apple execution 
 until the coordinator reruns macOS CI; the matcher is scalar-based by construction.
 
 Typed round trips include target preparation/readiness, dictation outcome/query and capture-control/result plus their shared negative vectors.
+
+Paired agent inventory, exact-session retained-preview dispatch and durable task queries are generated from SYS/protocol. Shared vectors cover the new typed records and reject added authority fields.
