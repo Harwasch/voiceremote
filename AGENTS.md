@@ -53,7 +53,7 @@ flowchart LR
 | `SW/desktop/` | Rust workspace: `core`, `inject-windows`, `inject-linux`, `agents`, `app` (Tauri tray; `--headless` for agent nodes) | `desktop-v*` → Windows + Linux installers |
 | `SW/relay/` | Cloudflare Worker + Durable Objects | `relay-v*` → Worker deploy |
 | `SW/bench/` | STT + brain benchmark tools and curated phrase/command sets (audio in Git LFS) | — |
-| `FW/` | Voice remote firmware (nRF5340, Zephyr), host tools, `docs/characterisation/` | `fw-v*` → firmware images |
+| `FW/` | Voice remote firmware (Proto 1 ESP32-C6; ESP32-S3 stand-in, ESP-IDF), host tools, `docs/characterisation/` | `fw-v*` → firmware images |
 | `HW/` | Remote PCB + mic array (KiCad), enclosure and stand CAD, `fixtures/` | `hw-v*` → fab and assembly package |
 | `DOCS/` | External references only | — |
 | `AI/` | Working material. Not authoritative until promoted. | — |
@@ -110,7 +110,8 @@ the folder, not an essay:
   firmware pin claims are checked against it by a script, not by reading a PDF.
   **TBD** until P3 starts.
 - The remote's physical OFF switch cuts microphone power in hardware. Firmware
-  must not be able to override it.
+  must not be able to override it. Test-board exception granted by the owner on
+  2026-11-02: see [the BLE contract](SYS/protocol/remote-ble.md).
 
 ## Style
 
@@ -129,7 +130,7 @@ the folder, not an essay:
 | `SW/desktop` | hwgeekom (Linux); Windows via CI | `cargo test --workspace` |
 | `SW/relay` | hwgeekom | `npm test` |
 | `SW/ios` | **GitHub Actions macOS runner only** (no Mac) | `xcodebuild test` in CI |
-| `FW/` | hwgeekom | `west build` + `west twister` |
+| `FW/` | hwgeekom | `idf.py build` + ESP-IDF Unity tests (runner TBD); ESP-IDF at `~/hw-tools/esp-idf` |
 
 - **Compute tiers (owner's machines).** On hwgeekom, builds and tests up to
   10 cores / 20 GB go through `heavy <command>` (lowest priority, capped), one

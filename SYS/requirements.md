@@ -103,7 +103,7 @@ flowchart LR
 | ID | Requirement | Phase | Verification | Source section |
 |---|---|---|---|---|
 | [REQ-49] | The remote's physical OFF switch shall cut microphone power independently of firmware; other capture sources shall remain independently controlled. | P3 | Test; owner on-device check | Design: Components; Product §§3.3, 8 |
-| [REQ-50] | The remote rig shall stream Opus audio over BLE to the phone and provide a display, PTT and a prototype array of three or four PDM MEMS microphones. | P3 | Test; owner on-device check | Design: Components; Product §3.1 |
+| [REQ-50] | The Proto 1 remote rig shall stream Opus audio over BLE to the phone and provide a display, PTT and the board's single microphone; a three-or-four PDM MEMS microphone array shall move to a later rig. | P3 | Test; owner on-device check | Design: Components; Product §3.1 |
 | [REQ-51] | Per-utterance source selection shall score valid streams for signal quality, clipping, proximity and dropouts; the rig shall be benchmarked against AirPods and iPhone microphone. | P3 | Bench run on named devices | Product §§3.2, 9 P3; Design: Plan task 14 |
 | [REQ-52] | The remote target control shall cycle named devices and Auto, and display recording state and destination. | P3 | Owner on-device check | Design: Modes; Product §3.3 |
 | [REQ-53] | Remote inclusion shall depend on measured whisper performance against the best off-the-shelf microphone and owner comfort. | P3 | Bench run; owner on-device check | Product §9 P3 |

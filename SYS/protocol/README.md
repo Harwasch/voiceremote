@@ -1,5 +1,6 @@
 ```mermaid
 flowchart LR
+    Remote[Voice remote] <-->|Binary GATT: remote-ble.md| Phone
     Phone[Phone: trusted input + policy] <-->|Noise session| Desktop[Desktop / agent]
     Phone <-->|RelayFrame: account + room + sender| Relay[Relay: routing metadata only]
     Relay <-->|opaque base64 ciphertext| Desktop
@@ -14,6 +15,7 @@ flowchart LR
 | File / folder | What it is | Status |
 |---|---|---|
 | [protocol.schema.json](protocol.schema.json) | Version 1 wire records, enums and discriminated unions | ✅ |
+| [remote-ble.md](remote-ble.md) | Binary remote ↔ iPhone BLE contract, UUIDs and hex examples; separate from JSON | 🟡 Draft; unimplemented / unverified |
 | [wire-contract.md](wire-contract.md) | Boundaries, encoding rules and runtime obligations | ✅ contract; runtime integration unverified |
 | [vectors/](vectors/) | Shared synthetic valid and invalid fixtures | ✅ |
 | [../tools/](../tools/) / [../codegen/](../codegen/) | Model proposal contract / reproducible generator and checks | ✅ |
