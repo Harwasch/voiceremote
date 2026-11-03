@@ -533,8 +533,12 @@ mod tests {
                 receive,
             )
             .await;
-        assert_eq!(result.finish, Finish::Unconfirmed);
-        assert!(!result.termination_confirmed);
+        // A systemd user bus confirms cleanup; without one the same stop stays unconfirmed.
+        if result.termination_confirmed {
+            assert_eq!(result.finish, Finish::TimedOut);
+        } else {
+            assert_eq!(result.finish, Finish::Unconfirmed);
+        }
         assert_eq!(result.signal, Some(9));
         assert!(!result.success);
         Ok(())
