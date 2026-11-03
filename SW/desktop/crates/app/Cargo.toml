@@ -27,16 +27,21 @@ voiceremote-protocol = { path = "../protocol" }
 
 [target.'cfg(windows)'.dependencies]
 voiceremote-inject-windows = { path = "../inject-windows" }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+voiceremote-inject-linux = { path = "../inject-linux" }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[target.'cfg(any(windows, target_os = "linux"))'.dependencies]
 async-trait = "0.1"
 if-addrs = "0.13"
 mdns-sd = "0.13"
 sha2 = "0.10"
 socket2 = { version = "0.6", features = ["all"] }
 futures-util = { version = "0.3", features = ["sink"] }
-tokio-tungstenite = { version = "0.28", features = ["native-tls"] }
+tokio-tungstenite = { version = "0.28", features = ["rustls-tls-webpki-roots"] }
 
 [dev-dependencies]
-voiceremote-inject-windows = { path = "../inject-windows" }
 tempfile = "3"
 zeroize = "1.8"
 async-trait = "0.1"

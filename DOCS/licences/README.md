@@ -3,14 +3,18 @@ flowchart LR
     Handy[Handy MIT] --> Clipboard[Windows clipboard adapter]
     Hex[Hex MIT] --> Input[Windows input plans / scan codes]
     Clipboard & Input --> Injector[SW/desktop/crates/inject-windows]
+    Handy & Hex --> Linux[SW/desktop/crates/inject-linux]
 ```
 
 | File / upstream | Local adaptation | Status |
 |---|---|---|
 | [Handy-MIT.txt](Handy-MIT.txt), copyright CJ Pais | `src/native/clipboard.rs`: HGLOBAL snapshot/allocation, delayed-render read receipt, privacy markers, owner window | ✅ licence retained |
 | [hex-MIT.txt](hex-MIT.txt), copyright Christopher Langton | `src/policy.rs`, `src/native/input.rs`: Ctrl+V event order, foreground-layout scan codes, partial-send key release; `src/native/clipboard.rs`: sequence ownership guard | ✅ licence retained |
+| [Handy-MIT.txt](Handy-MIT.txt), copyright CJ Pais | Linux `native.rs` helper protocol and `portal.rs` clipboard adaptation | ✅ licence retained |
+| [hex-MIT.txt](hex-MIT.txt), copyright Christopher Langton | Linux `x11.rs` clipboard preservation and conditional restore | ✅ licence retained |
 
-Paths above are relative to [inject-windows](../../SW/desktop/crates/inject-windows/).
+Windows paths are relative to [inject-windows](../../SW/desktop/crates/inject-windows/);
+Linux paths to [inject-linux](../../SW/desktop/crates/inject-linux/).
 No upstream file was copied wholesale; adaptation headers retain copyright and
 link these full notices. Other implementation, tests and app wiring are original
 to this repository. No GPL source was used.

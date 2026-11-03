@@ -1,4 +1,47 @@
 //! Synthetic data only. Reads text solely from this process's own test EDIT.
+// Acquisition is environmental; once it succeeds, wrong injection/readback
+// results must stay failures. Keep this boundary testable without a desktop.
+#[cfg(any(windows, test))]
+fn with_input_desktop<T>(
+    acquire: impl FnOnce() -> voiceremote_core::Result<T>,
+    exercise: impl FnOnce(&T) -> voiceremote_core::Result<()>,
+) -> voiceremote_core::Result<Option<String>> {
+    let desktop = match acquire() {
+        Ok(desktop) => desktop,
+        Err(error) => return Ok(Some(format!("cannot acquire input desktop: {error:#}"))),
+    };
+    exercise(&desktop)?;
+    Ok(None)
+}
+#[cfg(test)]
+mod environment_tests {
+    use super::*;
+    #[test]
+    fn denied_input_desktop_skips_without_exercising_input() {
+        let result = with_input_desktop(
+            || -> voiceremote_core::Result<()> {
+                Err(voiceremote_core::anyhow!(
+                    "input desktop inaccessible, HRESULT=0x80070005"
+                ))
+            },
+            |_| panic!("must not create windows or queue input"),
+        )
+        .unwrap();
+        assert!(result.unwrap().contains("0x80070005"));
+    }
+    #[test]
+    fn usable_desktop_wrong_readback_is_a_failure() {
+        assert!(
+            with_input_desktop(
+                || Ok(()),
+                |_| Err(voiceremote_core::anyhow!("synthetic readback mismatch"))
+            )
+            .is_err()
+        );
+        assert_eq!(with_input_desktop(|| Ok(()), |_| Ok(())).unwrap(), None);
+    }
+}
+
 #[cfg(not(windows))]
 fn main() {
     println!("SKIPPED: Windows desktop smoke requires Windows");
@@ -174,33 +217,37 @@ mod desktop {
             }
         }
     }
-    unsafe fn desktop_name(handle: HANDLE) -> windows::core::Result<Vec<u16>> {
-        unsafe {
-            let mut name = [0u16; 256];
-            let mut used = 0;
-            GetUserObjectInformationW(
-                handle,
-                UOI_NAME,
-                Some(name.as_mut_ptr().cast()),
-                size_of_val(&name) as u32,
-                Some(&mut used),
-            )?;
-            Ok(name[..used as usize / 2].to_vec())
+    struct InputDesktop {
+        input: HDESK,
+        previous: HDESK,
+    }
+    impl Drop for InputDesktop {
+        fn drop(&mut self) {
+            unsafe {
+                let _ = SetThreadDesktop(self.previous);
+                let _ = CloseDesktop(self.input);
+            }
         }
     }
-    fn desktop_skip_reason() -> Option<String> {
+    fn acquire_input_desktop() -> Result<InputDesktop> {
         unsafe {
-            let input = match OpenInputDesktop(DESKTOP_CONTROL_FLAGS(0), false, DESKTOP_READOBJECTS)
-            {
-                Ok(input) => input,
-                Err(error) => {
-                    return Some(format!(
-                        "input desktop inaccessible, HRESULT=0x{:08x}",
-                        error.code().0 as u32
-                    ));
-                }
-            };
-            let check = (|| -> windows::core::Result<Option<String>> {
+            // READOBJECTS alone can succeed on a runner that cannot create a
+            // window or bind this thread to the input desktop. Acquire the same
+            // rights the smoke needs before creating any HWND or queuing input.
+            let input = OpenInputDesktop(
+                DESKTOP_CONTROL_FLAGS(0),
+                false,
+                DESKTOP_ACCESS_FLAGS(
+                    DESKTOP_CREATEWINDOW.0 | DESKTOP_READOBJECTS.0 | DESKTOP_WRITEOBJECTS.0,
+                ),
+            )
+            .map_err(|e| {
+                voiceremote_core::anyhow!(
+                    "OpenInputDesktop failed, HRESULT=0x{:08x}",
+                    e.code().0 as u32
+                )
+            })?;
+            let acquired = (|| -> Result<HDESK> {
                 let station = GetProcessWindowStation()?;
                 let mut flags = USEROBJECTFLAGS::default();
                 GetUserObjectInformationW(
@@ -210,26 +257,28 @@ mod desktop {
                     size_of::<USEROBJECTFLAGS>() as u32,
                     None,
                 )?;
-                if flags.dwFlags & WSF_VISIBLE as u32 == 0 {
-                    return Ok(Some(
-                        "process window station is not visible (service session)".into(),
-                    ));
-                }
-                let current = GetThreadDesktop(GetCurrentThreadId())?;
-                if desktop_name(HANDLE(current.0))? != desktop_name(HANDLE(input.0))? {
-                    return Ok(Some(
-                        "runner thread is not on the input desktop (locked/secure desktop)".into(),
-                    ));
-                }
-                Ok(None)
+                ensure!(
+                    flags.dwFlags & WSF_VISIBLE as u32 != 0,
+                    "process window station is not visible (service session)"
+                );
+                let previous = GetThreadDesktop(GetCurrentThreadId())?;
+                // Retain the assigned desktop throughout the smoke. New worker
+                // threads also acquire it explicitly before UIA or injection.
+                SetThreadDesktop(input).map_err(|e| {
+                    voiceremote_core::anyhow!(
+                        "SetThreadDesktop failed, HRESULT=0x{:08x}",
+                        e.code().0 as u32
+                    )
+                })?;
+                Ok(previous)
             })();
-            let _ = CloseDesktop(input);
-            check.unwrap_or_else(|error| {
-                Some(format!(
-                    "desktop eligibility query failed, HRESULT=0x{:08x}",
-                    error.code().0 as u32
-                ))
-            })
+            match acquired {
+                Ok(previous) => Ok(InputDesktop { input, previous }),
+                Err(error) => {
+                    let _ = CloseDesktop(input);
+                    Err(error)
+                }
+            }
         }
     }
     pub fn run() -> Result<()> {
@@ -259,10 +308,13 @@ mod desktop {
             }
             return Ok(());
         }
-        if let Some(reason) = desktop_skip_reason() {
+        let skipped = super::with_input_desktop(acquire_input_desktop, |_| exercise())?;
+        if let Some(reason) = skipped {
             println!("SKIPPED: {reason}");
-            return Ok(());
         }
+        Ok(())
+    }
+    fn exercise() -> Result<()> {
         // This mode intentionally seeds the clipboard with synthetic fixtures.
         // Run it in an isolated test session (CI); use --manual on the laptop.
         unsafe {
@@ -328,7 +380,7 @@ mod desktop {
             let raw = parent.0.0 as usize;
             let raw_edit = edit.0 as usize;
             let worker = thread::spawn(move || {
-                let result = (|| -> Result<()> {
+                let result = super::with_input_desktop(acquire_input_desktop, |_| {
                     let deadline = Instant::now() + Duration::from_secs(3);
                     while !focus_snapshot().text_field_focused && Instant::now() < deadline {
                         thread::sleep(Duration::from_millis(20));
@@ -392,7 +444,7 @@ mod desktop {
                     check_clipboard(true)?;
                     SendMessageW(edit, EM_SETREADONLY, Some(WPARAM(0)), None);
                     Ok(())
-                })();
+                });
                 let _ = send.send(result);
             });
             let deadline = Instant::now() + Duration::from_secs(45);
@@ -431,7 +483,10 @@ mod desktop {
                     .join()
                     .map_err(|_| voiceremote_core::anyhow!("smoke worker failed"))?;
             }
-            result?;
+            if let Some(reason) = result? {
+                println!("SKIPPED: worker {reason}");
+                return Ok(());
+            }
             ensure!(
                 paste_count == 1,
                 "smoke must observe exactly one WM_PASTE and none in Unicode fallback"
