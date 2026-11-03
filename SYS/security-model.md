@@ -18,7 +18,7 @@ flowchart LR
 | Sources | [Product §4 and §7](product-definition-v0.2.md#4-activity-and-authorization-architecture), [design authorization](system-design-v1.md#pairing-security-and-authorization), [requirements](requirements.md#authorization-and-policy), [wire contract](protocol/wire-contract.md), [tools](tools/README.md) |
 | Trusted computing base | Phone input/registry and grant-settings code; trusted clock; Policy/TrustedInput/Protocol; OS authentication; journal and independent checkpoint adapter; downstream executor |
 | Untrusted | All model bytes, candidate IDs/state/hash/risk/confidence/destination hints, speech, playback, remote content, agent output, transport retries |
-| Not implemented here | Approval UI; pairing/session authentication; executor sandbox/deduplication; phone archive encryption/HTTP and secure checkpoint adapters; HIL policy |
+| Not implemented here | Device acceptance of approval/completion UI; pairing/session authentication; executor sandbox/deduplication; phone archive encryption/HTTP and secure checkpoint adapters; HIL policy |
 | Release status | **Unverified** on Apple devices; cross-review regressions fixed; independent re-review pending. This package alone does not establish complete REQ-29/32/34/35 compliance. |
 
 Start with `PolicyGate.submit` and the test map below. Scope excludes edits to the SYS
@@ -134,3 +134,15 @@ swift test -j 4 --package-path SW/ios/Packages/Policy --filter Gate
 Run through `HEAVY_CPUS=4 heavy` on hwgeekom. These are package tests, not evidence
 of real-device speaker authentication, phone approval UI, receiver execution, physical
 interlocks, encrypted relay backup or rollback-resistant storage. Those remain **unverified**.
+
+## AI Control audit boundaries
+
+| Path | Deterministic boundary / evidence |
+|---|---|
+| Deliberate Tier 2 | Phone HOLD qualification plus utterance EOS, exact `switch to` / `select` target grammar, and separately phone-armed account/actor/device/project grant. Only target selection executes without review. Continuous/remote/wake/ambiguous/revised suggestions remain inferred; sensitive work still requires exact phone approval and fresh LA. AppModel `AIControlGapTests` + Policy grant tests. |
+| Open capture | Stable STT slices may create non-executing hypotheses while `isComplete` stays false. Corrections invalidate review revisions and approved-but-undispatched permits/dependencies, including queue failures; dispatched independent tasks retain identity. Brain `SuggestionTests` + AppModel correction regressions. |
+| Routing | Authenticated inventory supplies full provider/host/project/session/profile identities. Explicit names constrain selected → dictation field → recent available project session → configured default. Local/cloud fallback obeys phone settings; machine/file-dependent work stays bound. Cloud independence is a one-action phone choice, cleared on queue/restart. Every changed destination needs a fresh exact preview and approval; no session continuity is inferred. AgentControl/Router tests. |
+| Linked completion | Agent reply, dispatch acknowledgement and process exit zero attest delivery only. The phone shows the retained instruction/task/full route and explains that the chain waits. An owner “This finished” tap creates sealed evidence bound to command, operation, current connection epoch and authenticated scope. Policy checks the durable reservation/preview, audits `ownerCompleted`, and issues a completion-only receipt. Router rechecks the exact binding and audit on restore; cancellation/stale/wrong-session input cannot release a successor. Each successor still needs its own approval. This is an owner attestation, not automated provider-effect verification. |
+| Account records | History and offline snapshots use version-2 account envelopes; history entries and offline records carry the validated account. Whole-file validation precedes display/dispatch/retention mutation. Legacy ownership is inherited from the protected installation pin. Audit appends `accountBound`, then hashes version-2 account wrappers into new records; all existing bytes/hashes remain unchanged. Recovery/archive/compaction retain that binding. Policy/Core/AppModel migration and round-trip tests. |
+
+These checks prove portable synthetic behavior. Apple UI/LocalAuthentication, protected storage on device, live providers and observed production effects remain **unverified**. Dictation continues through Core/STT/history/insertion independently of Brain. Argmax is unavailable until the licensed host installs a loaded adapter; no licence or provider acceptance is claimed.

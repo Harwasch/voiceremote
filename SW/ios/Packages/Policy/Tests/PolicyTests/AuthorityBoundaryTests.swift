@@ -16,6 +16,8 @@ import Testing
             _ = try JSONDecoder().decode(ApprovalEvidence.self, from: bytes)
             _ = try JSONDecoder().decode(GrantEvidence.self, from: bytes)
             _ = try JSONDecoder().decode(ExecutionPermit.self, from: bytes)
+            _ = try JSONDecoder().decode(OwnerCompletionEvidence.self, from: bytes)
+            _ = try JSONDecoder().decode(OwnerCompletionReceipt.self, from: bytes)
         }
         @MainActor func missingRegistryClassification() {
             _ = PhoneInput().session(account: "a", actor: "u", session: "s", device: "d", project: "p")
@@ -44,7 +46,7 @@ import Testing
         let text = try String(contentsOf: diagnostics, encoding: .utf8)
         #expect(process.terminationStatus != 0)
         #expect(text.contains("missing argument for parameter 'destinationKind'"))
-        for name in ["ActivationEvidence", "ApprovalEvidence", "GrantEvidence", "ExecutionPermit"] {
+        for name in ["ActivationEvidence", "ApprovalEvidence", "GrantEvidence", "ExecutionPermit", "OwnerCompletionEvidence", "OwnerCompletionReceipt"] {
             #expect(text.contains("'\(name)' conform to 'Decodable'"))
         }
         for name in ["ActivationEvidence", "ApprovalEvidence", "GrantEvidence"] {

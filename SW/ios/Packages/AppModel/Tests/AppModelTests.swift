@@ -85,7 +85,7 @@ actor BrainSpy: LlmBrain {
          delivery: (@MainActor (ExecutionPermit) throws -> [QueuedTask])? = nil) throws {
         brain = BrainSpy(sensitive: sensitive, tool: tool, additionalTool: additionalTool)
         gate = try policy ?? PolicyGate(audit: AuditLog(journal: Journal(), checkpoints: Checkpoint(), retention: AuditRetention()), biometric: bio, clock: { 1_000_000 })
-        history = try AppHistoryStore(now: 1_000_000)
+        history = try AppHistoryStore(now: 1_000_000, accountID: "fixture")
         registry = DeviceRegistry(accountID: "fixture", revocation: target)
         let capture = self.capture, brain = self.brain, execution = self.execution
         model = VoiceAppModel(accountID: "fixture", phoneID: "phone", actorID: "owner", registry: registry,
@@ -184,7 +184,7 @@ actor BrainSpy: LlmBrain {
     }
 }
 @Test @MainActor func historyExpiresAndDeletes() async throws {
-    let store = try AppHistoryStore(now: 1)
+    let store = try AppHistoryStore(now: 1, accountID: "fixture")
     try await store.append(.init(segmentID: "fixture", targetID: "phone", text: "invented", createdAt: 1), now: 1)
     #expect(try await store.entries(now: 604_800_001).isEmpty)
     try await store.append(.init(segmentID: "fixture", targetID: "phone", text: "invented", createdAt: 2), now: 2)
@@ -357,20 +357,25 @@ actor BrainSpy: LlmBrain {
     #expect(rig.model.approval == nil)
 }
 
-@Test @MainActor func commandCorrectionsAcrossSilenceSlicesWaitForUtteranceCompletion() async throws {
-    let rig = try Rig(script: [.final("synthetic correction")])
+@Test @MainActor func commandCorrectionsAcrossSilenceSlicesReplaceHypothesesWithoutDispatch() async throws {
+    var words = "synthetic request"
+    let rig = try Rig(scriptProvider: { [.final(words)] })
     rig.model.setMode(.ai_control); rig.model.setCapture(.continuous)
     try await rig.until { rig.model.isRecording }
-    rig.capture.channel.continuation.yield(.frame(try AudioFrame(samples: [1000], timestamp: 0)))
-    rig.capture.channel.continuation.yield(.frame(try AudioFrame(samples: Array(repeating: 0, count: 12_800), timestamp: 0.1)))
-    try await Task.sleep(for: .milliseconds(30))
-    #expect(await rig.brain.calls == 0)
-    #expect(rig.model.suggestions.isEmpty)
+    rig.capture.channel.continuation.yield(.frame(try AudioFrame(samples: Array(repeating: 1000, count: 320_000), timestamp: 0)))
+    try await rig.until { !rig.model.suggestions.isEmpty }
+    #expect(await rig.brain.calls == 1)
+    #expect(rig.model.suggestions.count == 1)
+    let prior = try #require(rig.model.suggestions.first)
+    await rig.model.review(prior)
+    words = "no, synthetic correction"
     rig.capture.channel.continuation.yield(.frame(try AudioFrame(samples: [1000], timestamp: 1)))
     rig.model.finishUtterance()
     try await rig.until { rig.model.listening == .idle }
-    #expect(await rig.brain.calls == 1)
-    let transcript = await rig.brain.requests.first?.transcript
-    #expect(transcript == "Synthetic correction. Synthetic correction.")
+    #expect(await rig.brain.calls == 2)
+    await rig.model.approve()
+    #expect(rig.model.controls.target == .auto)
+    let transcript = await rig.brain.requests.last?.transcript
+    #expect(transcript == "Synthetic request. No, synthetic correction.")
     #expect(rig.execution.permits.isEmpty)
 }

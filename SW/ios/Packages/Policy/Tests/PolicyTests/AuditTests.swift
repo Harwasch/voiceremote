@@ -134,3 +134,28 @@ import VoiceRemoteProtocol
         }
     }
 }
+
+extension GateAuditTests {
+    @Test func accountEnvelopeMigrationPreservesLegacyBytesHashesAndArchiveBinding() async throws {
+        let journal = MemoryJournal(), checkpoints = TestCheckpoint()
+        let legacy = try AuditLog(journal: journal, checkpoints: checkpoints, retention: AuditRetention())
+        try legacy.append(event: .suggested, subject: String(repeating: "a", count: 64), payloadHash: String(repeating: "b", count: 64), actor: "synthetic", now: 1)
+        let oldBytes = journal.bytes, oldHash = legacy.records[0].recordHash
+        let bound = try AuditLog(journal: journal, checkpoints: checkpoints, retention: AuditRetention(), accountID: "test-account")
+        #expect(journal.bytes.starts(with: oldBytes))
+        #expect(bound.records[0].recordHash == oldHash)
+        #expect(bound.records[0].accountEnvelope == nil)
+        #expect(bound.records[1].event == .accountBound)
+        #expect(bound.records[1].accountEnvelope?.version == 2)
+        #expect(throws: (any Error).self) { try AuditLog(journal: journal, checkpoints: checkpoints, retention: AuditRetention(), accountID: "wrong") }
+        let client = FakeAuditArchiveClient(), cipher = FixtureArchiveCipher(), archive = ArchiveStore()
+        _ = try await AuditArchive.replicate(log: bound, client: client, cipher: cipher, store: archive, now: 1)
+        let restored = try await AuditArchive.verifiedBytes(client: client, cipher: cipher, anchor: archive.state.anchor, against: checkpoints.value)
+        #expect(restored == journal.bytes)
+        #expect(try AuditLog.verify(restored, against: checkpoints.value).last?.accountEnvelope?.accountHash == PayloadDigest.sha256(Data("test-account".utf8)))
+        let wrongArchive = ArchiveStore(account: "wrong")
+        await #expect(throws: (any Error).self) { try await AuditArchive.replicate(log: bound, client: client, cipher: cipher, store: wrongArchive, now: 1) }
+        let snapshot = try bound.compactionSnapshot()
+        #expect(try AuditLog.verify(snapshot.bytes, against: snapshot.checkpoint).contains { $0.event == .accountBound })
+    }
+}

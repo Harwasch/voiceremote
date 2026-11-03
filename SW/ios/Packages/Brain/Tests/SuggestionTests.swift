@@ -252,3 +252,89 @@ final class SuggestionTests: XCTestCase, @unchecked Sendable {
         XCTAssertEqual(update.routingNotice, .offlineUsingOnDevice)
     }
 }
+
+extension SuggestionTests {
+    func testAmbientHypothesesAreReplaceableWithoutCommittedCommandBoundaries() async throws {
+        let engine = try engine(EchoBrain())
+        func hypothesis(_ text: String, revision: Int) -> TranscriptSegment {
+            TranscriptSegment(id: "open-capture", revision: revision, text: text, isFinal: true, isComplete: false,
+                contextID: "ambient", hypothesis: true)
+        }
+        let initial = await engine.ingest(hypothesis("open synthetic dashboard", revision: 1), now: now)
+        let first = try XCTUnwrap(initial.cards.first)
+        _ = await engine.tap(.init(cardID: first.id, previewRevision: first.revision), now: now)
+        let authorized = await engine.authorized(cardID: first.id, revision: first.revision, now: now)
+        XCTAssertTrue(authorized)
+        // Authorization alone is not dispatch; a later correction invalidates it.
+        _ = await engine.ingest(hypothesis("no, do not open the dashboard", revision: 2), now: now)
+        let retried = await engine.authorized(cardID: first.id, revision: first.revision, now: now)
+        XCTAssertFalse(retried)
+        let history = await engine.history(now: now)
+        XCTAssertEqual(history.first(where: { $0.id == first.id })?.state, .expired)
+    }
+
+    func testCommittedIndependentCardSurvivesLaterSpeechAndLinkedTailNeedsCompletion() async throws {
+        let engine = try engine(EchoBrain(), max: 8)
+        let initial = await engine.ingest(TranscriptSegment(id: "open", revision: 1, text: "open synthetic dashboard then summarize it",
+            isFinal: true, isComplete: false, contextID: "ambient", hypothesis: true), now: now)
+        let first = try XCTUnwrap(initial.cards.first), last = try XCTUnwrap(initial.cards.last)
+        _ = await engine.tap(.init(cardID: first.id, previewRevision: 0), now: now)
+        _ = await engine.authorized(cardID: first.id, revision: 0, now: now)
+        await engine.executionCommitted(cardID: first.id, now: now)
+        let blocked = await engine.tap(.init(cardID: last.id, previewRevision: 0), now: now)
+        XCTAssertNil(blocked)
+        await engine.completed(cardID: first.id, succeeded: true, now: now)
+        let released = await engine.tap(.init(cardID: last.id, previewRevision: 0), now: now)
+        XCTAssertNotNil(released)
+        _ = await engine.ingest(TranscriptSegment(id: "open", revision: 2, text: "no, wait",
+            isFinal: true, isComplete: false, contextID: "ambient", hypothesis: true), now: now)
+        let history = await engine.history(now: now)
+        XCTAssertEqual(history.first(where: { $0.id == first.id })?.state, .succeeded)
+        XCTAssertEqual(history.first(where: { $0.id == last.id })?.state, .expired)
+    }
+}
+
+private actor RetryHypothesisBrain: LlmBrain {
+    var calls = 0
+    func propose(_ request: BrainRequest) throws -> BrainResponse {
+        calls += 1
+        if calls == 1 { throw BrainError.unavailable }
+        return BrainResponse(proposals: [proposal()])
+    }
+}
+extension SuggestionTests {
+    func testIdenticalFinalRetriesFailedHypothesis() async throws {
+        let brain = RetryHypothesisBrain(), engine = try engine(brain)
+        _ = await engine.ingest(TranscriptSegment(id: "s", revision: 1, text: "synthetic", isFinal: true, isComplete: false, contextID: "meeting", hypothesis: true), now: now)
+        let final = await engine.ingest(TranscriptSegment(id: "s", revision: 2, text: "synthetic", isFinal: true, isComplete: true, contextID: "meeting"), now: now)
+        XCTAssertEqual(final.cards.count, 1)
+        let calls = await brain.calls; XCTAssertEqual(calls, 2)
+    }
+    func testIdenticalFinalRetriesDeferredHypothesisAfterBudgetReopens() async throws {
+        let brain = TestBrain()
+        let engine = SuggestionEngine(brain: brain, accountID: "a", context: "synthetic", configuration: try .init(maximumInferenceRequestsPerWindow: 1))
+        _ = await engine.ingest(segment("first", id: "other"), now: now)
+        let deferred = await engine.ingest(TranscriptSegment(id: "s", revision: 1, text: "synthetic", isFinal: true, isComplete: false, contextID: "meeting", hypothesis: true), now: now)
+        XCTAssertEqual(deferred.deferred, .rateLimited)
+        _ = await engine.ingest(TranscriptSegment(id: "s", revision: 2, text: "synthetic", isFinal: true, isComplete: true, contextID: "meeting"), now: now.addingTimeInterval(31))
+        let calls = await brain.count; XCTAssertEqual(calls, 2)
+    }
+}
+
+extension SuggestionTests {
+    func testThenInNewCommittedIntentStillRequiresPredecessorCompletion() async throws {
+        let engine = try engine(EchoBrain())
+        let first = await engine.ingest(segment("Open synthetic dashboard", id: "first"), now: now)
+        let next = await engine.ingest(segment("Then summarize synthetic dashboard", id: "second"), now: now)
+        let predecessor = try XCTUnwrap(first.cards.first)
+        let successor = try XCTUnwrap(next.cards.last)
+        XCTAssertEqual(successor.dependsOn, [predecessor.id])
+        let blocked = await engine.tap(.init(cardID: successor.id, previewRevision: 0), now: now)
+        XCTAssertNil(blocked)
+        _ = await engine.tap(.init(cardID: predecessor.id, previewRevision: 0), now: now)
+        _ = await engine.authorized(cardID: predecessor.id, revision: 0, now: now)
+        await engine.completed(cardID: predecessor.id, succeeded: true, now: now)
+        let released = await engine.tap(.init(cardID: successor.id, previewRevision: 0), now: now)
+        XCTAssertNotNil(released)
+    }
+}

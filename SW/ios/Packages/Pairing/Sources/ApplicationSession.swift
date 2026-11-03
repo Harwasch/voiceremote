@@ -67,6 +67,7 @@ public actor ApplicationSession {
     public func send(_ message: InnerMessage, transport: any PairingTransport) async throws {
         guard !sending else { throw PairingError.invalidState }
         sending = true; defer { sending = false }
+        var revoking = false
         do {
             try await checkActive()
             let bytes = try ProtocolCodec.encode(message)
@@ -74,9 +75,10 @@ public actor ApplicationSession {
             guard bytes.count <= SessionWire.innerBytes else { throw PairingError.messageTooLarge }
             if case .revoke(let revoke) = message {
                 guard revoke.device_id == peer.device.device_id else { throw PairingError.invalidMessage }
+                revoking = true
             }
             if bytes.count + 16 <= SessionWire.packetBytes {
-                try await write(bytes, transport: transport)
+                try await write(bytes, transport: transport, verifyAfterDelivery: !revoking)
             } else {
                 for offset in stride(from: 0, to: bytes.count, by: SessionWire.chunkBytes) {
                     let chunk = bytes.subdata(in: offset..<min(offset + SessionWire.chunkBytes, bytes.count))
@@ -87,15 +89,25 @@ public actor ApplicationSession {
                 try await registry.revoke(peer)
                 await close(transport: transport)
             }
-        } catch { await close(transport: transport); throw error }
+        } catch {
+            // A valid local revoke retires enrollment even when its notification
+            // fails. EOF from the peer must never retain local resume authority.
+            if revoking {
+                do { try await registry.revoke(peer) }
+                catch { await close(transport: transport); throw error }
+            }
+            await close(transport: transport); throw error
+        }
     }
-    private func write(_ bytes: Data, transport: any PairingTransport) async throws {
+    private func write(_ bytes: Data, transport: any PairingTransport, verifyAfterDelivery: Bool = true) async throws {
         try await checkActive()
         await transport.retainedSession()
         let packet = try await noise.encrypt(bytes)
         try await checkActive()
         try await withTransportDeadline(transport, timeout: .seconds(10)) { try await transport.send(packet) }
-        try await checkActive()
+        // A peer may close immediately after receiving revoke; local retirement
+        // still runs in send even if the concurrent reader closed this session.
+        if verifyAfterDelivery { try await checkActive() }
     }
     public func receive(transport: any PairingTransport, timeout: Duration = .seconds(90)) async throws -> InnerMessage {
         guard !receiving else { throw PairingError.invalidState }

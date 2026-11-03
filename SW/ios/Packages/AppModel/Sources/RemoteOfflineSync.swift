@@ -1,5 +1,6 @@
 import Foundation
 import Crypto
+import Core
 import Stt
 
 // Draft 1.1 little-endian offline contract. No live Audio framing is reused here.
@@ -111,7 +112,8 @@ public actor RemoteOfflineSync {
     public typealias Request = @Sendable (Data) async throws -> Data
     public typealias Transcribe = @Sendable ([Data]) async throws -> String
     public typealias SaveText = @Sendable (String, String) async throws -> Void
-    private struct Record: Codable {
+    private struct Record: Codable, Sendable {
+        var accountID: String?
         let remote: String
         let metadata: OfflineMetadata
         var audio: Data? // one-time migration of the earlier base64 journal
@@ -123,20 +125,33 @@ public actor RemoteOfflineSync {
         var historySaved = false
         var deleted = false
     }
+    public nonisolated let accountID: String
     private let now: @Sendable () -> Int64
     private let url: URL
     private let audioDirectory: URL
     private var records: [String: Record]
     private var running = false
     public private(set) var audioBytesWritten: UInt64 = 0
-    public init(url: URL, now: @escaping @Sendable () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1000) }) throws {
-        self.now = now
+    public init(url: URL, accountID: String = "owner-local", now: @escaping @Sendable () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1000) }) throws {
+        try RecordAccount.validate(accountID)
+        self.accountID = accountID; self.now = now
         self.url = url; audioDirectory = url.appendingPathExtension("audio")
         try? FileManager.default.removeItem(at: url.appendingPathExtension("pending"))
-        records = FileManager.default.fileExists(atPath: url.path)
-            ? try JSONDecoder().decode([String: Record].self, from: Data(contentsOf: url)) : [:]
+        if FileManager.default.fileExists(atPath: url.path) {
+            let bytes = try Data(contentsOf: url)
+            let object = try JSONSerialization.jsonObject(with: bytes) as? [String: Any]
+            if object?["version"] != nil || object?["accountID"] != nil {
+                let envelope = try JSONDecoder().decode(AccountRecordEnvelope<[String: Record]>.self, from: bytes)
+                try envelope.validate(account: accountID)
+                guard envelope.records.values.allSatisfy({ $0.accountID == accountID }) else { throw CoreError.wrongAccount }
+                records = envelope.records
+            } else { records = try JSONDecoder().decode([String: Record].self, from: bytes) }
+        } else { records = [:] }
+        // Validate the whole file before display, transcription, audio mutation or C4.
+        guard records.values.allSatisfy({ $0.accountID == nil || $0.accountID == accountID }) else { throw CoreError.wrongAccount }
+        for key in records.keys { records[key]?.accountID = accountID }
         try Self.prepareDirectory(audioDirectory)
-        var migrated = false
+        var migrated = true
         for key in Array(records.keys) {
             guard var record = records[key] else { continue }
             if let old = record.audio {
@@ -166,7 +181,7 @@ public actor RemoteOfflineSync {
         let pendingAudio = Set(records.filter { !$0.value.deleted && !$0.value.discarded && !$0.value.historySaved && $0.value.text == nil }.keys)
         for file in try FileManager.default.contentsOfDirectory(at: audioDirectory, includingPropertiesForKeys: nil)
             where !pendingAudio.contains(file.lastPathComponent) { try FileManager.default.removeItem(at: file) }
-        if migrated { try PrivateJSONFile.write(JSONEncoder().encode(records), to: url) }
+        if migrated { try PrivateJSONFile.write(JSONEncoder().encode(AccountRecordEnvelope(accountID: accountID, records: records)), to: url) }
     }
     private static func prepareDirectory(_ url: URL) throws {
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
@@ -204,7 +219,7 @@ public actor RemoteOfflineSync {
     }
     private func save(_ record: Record, key: String) throws {
         var next = records; next[key] = record
-        try PrivateJSONFile.write(JSONEncoder().encode(next), to: url); records = next
+        try PrivateJSONFile.write(JSONEncoder().encode(AccountRecordEnvelope(accountID: accountID, records: next)), to: url); records = next
     }
     private func reply(_ request: Data, using send: Request) async throws -> Data {
         try Task.checkCancellation()
@@ -256,13 +271,13 @@ public actor RemoteOfflineSync {
             guard metadata.id > cursor else { throw RemoteContractError.malformed }; cursor = metadata.id
             let key = Self.historyID(remote: remote, recording: metadata.id)
             if visited.contains(key) { continue }
-            var record = records[key] ?? Record(remote: remote, metadata: metadata)
+            var record = records[key] ?? Record(accountID: accountID, remote: remote, metadata: metadata)
             if record.deleted { continue }
             do {
                 if record.metadata != metadata {
                     guard record.text == nil, !record.discarded, record.sttAttempted != true else { throw RemoteContractError.loss }
                     try? FileManager.default.removeItem(at: audioURL(key))
-                    record = Record(remote: remote, metadata: metadata)
+                    record = Record(accountID: accountID, remote: remote, metadata: metadata)
                 }
                 if let prior = record.issue, record.sttAttempted == true { _ = prior; failed = true; continue }
                 guard metadata.size <= 64 * 1024 * 1024 else {

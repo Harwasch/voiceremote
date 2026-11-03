@@ -63,3 +63,5 @@ The [delivery exchange](wire-contract.md#dictation-target-and-capture-exchange) 
 Agent inventory/query/dispatch records authenticate through paired Noise. AgentDispatch carries exact session metadata, retained preview bytes and expiry; types are regenerated in Swift/Rust/TypeScript and covered by shared round-trip/rejection vectors.
 
 `TaskStatus` distinguishes dispatched CLI turns from verified success and optionally carries a 4096-character `app_reply`. Dispatch outcomes never release success-dependent work.
+
+The [audit archive contract](audit-archive.md) documents local account-envelope migration inside opaque encrypted blocks. Outer generated wire messages remain unchanged; legacy record bytes/hashes are preserved and round-trip tested in Policy.

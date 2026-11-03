@@ -79,6 +79,9 @@ struct ContentView: View {
         .sheet(isPresented: Binding(get: { host.model.approval != nil }, set: { if !$0 { host.model.dismissApproval() } })) {
             ApprovalView(model: host.model)
         }
+        .sheet(isPresented: Binding(get: { host.model.completion != nil }, set: { if !$0 { host.model.dismissTaskCompletion() } })) {
+            TaskCompletionView(model: host.model)
+        }
         .alert("Voice Remote", isPresented: Binding(get: { host.error != nil }, set: { if !$0 { host.error = nil } })) {
             Button("OK") { host.error = nil }
         } message: { Text(host.error ?? "") }
@@ -229,6 +232,7 @@ private struct SuggestionsView: View {
             }
             if let agents = model.agentControl {
                 Section("Agent session") {
+                    Button("Use automatic session priorities") { agents.clearSelection(); model.settingsChanged() }
                     ForEach(Array(agents.destinations.enumerated()), id: \.offset) { _, destination in
                         Button {
                             try? agents.choose(destination.session)
@@ -239,14 +243,26 @@ private struct SuggestionsView: View {
                                 Text(destination.session.providerSessionID).font(.caption)
                                 Text(destination.available ? "Connected" : "Offline — commands held").font(.caption)
                                 if agents.selected == destination.session { Text("Selected").font(.caption) }
+                                if agents.routing.defaultSession == destination.session { Text("Default").font(.caption) }
                             }
                         }
+                        Button("Make default: \(destination.session.provider) / \(destination.session.providerSessionID)") {
+                            try? agents.makeDefault(destination.session)
+                        }.buttonStyle(.borderless)
                     }
+                    Toggle("Task is independent of machine and local files", isOn: Binding(
+                        get: { model.settings.routing.independentCloudTasks }, set: { model.settings.routing.independentCloudTasks = $0 }))
+                    Toggle("Allow configured cloud fallback", isOn: Binding(
+                        get: { model.settings.routing.allowCloudFallback }, set: { model.settings.routing.allowCloudFallback = $0 }))
+                    Text("Confirm independence for each action; this choice clears after queueing or restart. Each action shows its actual destination for approval. A cloud route starts independent work; it does not continue a local session.").font(.footnote)
                 }
             }
             ForEach(model.tasks, id: \.command.command_id) { task in
                 VStack(alignment: .leading) {
                     Text(task.visibleStatus)
+                    if model.agentControl?.completionEpoch(for: task) != nil {
+                        Button("Confirm observed completion…") { model.reviewTaskCompletion(task) }
+                    }
                     if task.hold == .reapprovalRequired, task.state == .queued {
                         Button("Review restored task") { model.reviewRestoredTask(task) }
                     }
@@ -258,7 +274,7 @@ private struct SuggestionsView: View {
                 }
             }
             Section("Scoped permissions") {
-                Text("Target selection only. Agent delegation always requires fresh Face ID or iPhone passcode. Permissions expire and are not restored after restart.").font(.footnote)
+                Text("Permission arms the exact device/project for deliberate phone HOLD commands: ‘switch to [destination]’ or ‘select [destination]’. Target selection only. Agent delegation always requires fresh Face ID or iPhone passcode. Permissions expire and are not restored after restart.").font(.footnote)
                 if let device = model.destination, device.capabilities.contains(.receive_text) {
                     Button("Allow target selection on \(device.display_name) for 15 minutes") {
                         model.grantTargetSelection(device: device, project: model.agentControl?.selected?.workspace ?? "default")
@@ -303,5 +319,25 @@ private struct ApprovalView: View {
                 }
             }.navigationTitle("Review action")
         }.interactiveDismissDisabled(approving)
+    }
+}
+
+private struct TaskCompletionView: View {
+    let model: VoiceAppModel
+    var body: some View {
+        NavigationStack {
+            Form {
+                if let card = model.completion {
+                    Section("Confirm the observed effect") {
+                        Text(card.instruction).textSelection(.enabled)
+                        Text(card.task.route?.label ?? "Session unavailable").font(.caption.monospaced())
+                        Text("Task: " + card.task.command.command_id).font(.caption.monospaced())
+                        Text("A reply or a successful process exit confirms delivery only. Check the actual result yourself. The linked chain waits until you confirm this finished; the next step still needs its own approval.")
+                        Button("This finished") { Task { await model.confirmTaskFinished() } }
+                        Button("Keep waiting") { model.dismissTaskCompletion() }
+                    }
+                }
+            }.navigationTitle("Owner completion")
+        }
     }
 }

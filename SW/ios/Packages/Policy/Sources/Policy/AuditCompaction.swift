@@ -3,7 +3,7 @@ import Foundation
 /// Capsule digest lives in the independent checkpoint. Replay reservations,
 /// cancellation ownership, dismissals and revocations outlive detailed history.
 struct AuditCompaction: Codable {
-    static let replayEvents: Set<AuditEvent> = [.queued, .dismissed, .grantRevoked, .sessionRevoked, .authorityReset]
+    static let replayEvents: Set<AuditEvent> = [.accountBound, .ownerCompleted, .queued, .dismissed, .grantRevoked, .sessionRevoked, .authorityReset]
     let base: AuditCheckpoint
     let timestamp: Int64
     let replay: [AuditRecord]

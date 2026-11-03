@@ -19,3 +19,7 @@ Routing identity includes optional canonical executionWorkspace, distinct from p
 TaskQueueStore exposes an app-owned retention filter for routing snapshots. RetainedTaskStore removes expired/tombstoned task payloads from live UI/reapproval views as well as disk; compare-and-swap persistence retains its original baseline.
 
 Authenticated `dispatched/dispatched` may finish a CLI handoff after running, with bounded app reply retained by the app store. It cannot satisfy `succeeded/ok` predecessor checks. Status-only queries do not erase a previously received reply.
+
+`TaskRouter.completionOperation` binds the command, immutable preview and full route session. `confirmOwnerCompletion` requires the matching audited Policy receipt; reopen corroborates `ownerConfirmed` against protected audit. `RoutingRules` includes full selected/default sessions; multiple enrolled providers per host are supported. A reviewed replacement keeps the instruction/project and respects the original machine constraint.
+
+`approvedSession` freezes the complete approved identity at enqueue. Dispatch and reload compare it against the chosen route; matching destination/provider-session strings alone do not authorize provider/profile changes.

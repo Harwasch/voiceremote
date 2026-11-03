@@ -28,16 +28,22 @@ public struct QueuedTask: Codable, Equatable, Sendable {
     public let permitExpiresAt: Int64
     public let rules: RoutingRules
     public let permittedDestinations: [Destination]
+    public var approvedSession: SessionIdentity? = nil
     public var state: ExecutionState = .queued
     public var hold: HoldReason?
     public var route: RouteChoice?
     public var cancellationRequested = false
     public var outcome: TaskStatusOutcome?
     public var appReply: String?
+    public var ownerConfirmed: Bool?
     public var updatedAt: Int64
 
     public var visibleStatus: String {
         if let hold { return "Held · \(hold.rawValue) · \(route?.label ?? rules.explicitTarget ?? rules.selectedTarget ?? rules.defaultTarget ?? "destination unavailable")" }
+        if (state == .dispatched || state == .running), outcome == .dispatched {
+            return "Delivered · waiting for your ‘This finished’ confirmation; linked steps wait · " + (route?.label ?? "session unavailable")
+        }
+        if ownerConfirmed == true { return "Owner confirmed completion · " + (route?.label ?? "session unavailable") }
         return "\(state.rawValue) · \(route?.label ?? "awaiting destination")" + (appReply.map { " · " + $0 } ?? "")
     }
 }
@@ -125,6 +131,11 @@ public final class FileTaskQueueStore: TaskQueueStore, @unchecked Sendable {
                 if task.state == .queued { tasks[index].hold = .reapprovalRequired }
                 else if task.state == .running || task.state == .dispatched { tasks[index].hold = .deliveryUnknown }
             }
+            if task.ownerConfirmed == true {
+                guard task.state == .succeeded, task.outcome == .ok,
+                      policy.hasOwnerCompletion(commandID: task.command.command_id, operationHash: try Self.completionOperation(task)) else { throw RouterError.invalidStatus }
+                confirmedSuccesses.insert(task.command.command_id)
+            }
             guard keys.insert(Self.key(task.command)).inserted,
                   commands.insert([task.command.account_id, task.command.command_id]).inserted else {
                 throw RouterError.conflictingKey
@@ -136,8 +147,9 @@ public final class FileTaskQueueStore: TaskQueueStore, @unchecked Sendable {
     private func verify(_ task: QueuedTask) throws {
         _ = try policy.verifyExecution(command: task.command, immutablePreview: task.immutablePreview, expiresAt: task.permitExpiresAt)
         try Self.validate(task.command, task.rules, task.permittedDestinations)
+        let approved = try Self.approvedDestination(command: task.command, rules: task.rules, allowed: task.permittedDestinations, explicit: task.approvedSession)
         if let route = task.route {
-            guard route.destination.id == task.command.destination_id,
+            guard route.destination.session == approved.session, route.destination.id == task.command.destination_id,
                   task.command.provider_session_id == nil || task.command.provider_session_id == route.destination.session.providerSessionID else {
                 throw RouterError.invalidAuthorization
             }
@@ -152,7 +164,7 @@ public final class FileTaskQueueStore: TaskQueueStore, @unchecked Sendable {
     private static func validate(_ c: AuthorizedCommand, _ r: RoutingRules, _ allowed: [Destination]) throws {
         _ = try ProtocolCodec.encode(c)
         guard c.execution_state == .queued, c.outcome == nil,
-              !allowed.isEmpty, Set(allowed.map(\.id)).count == allowed.count,
+              !allowed.isEmpty, Set(allowed.map(\.session)).count == allowed.count,
               allowed.allSatisfy({ $0.session.account == c.account_id && $0.session.workspace == r.project }),
               allowed.contains(where: { $0.id == c.destination_id }),
               c.provider_session_id == nil || allowed.contains(where: {
@@ -175,8 +187,18 @@ public final class FileTaskQueueStore: TaskQueueStore, @unchecked Sendable {
         }
     }
 
+    private static func approvedDestination(command: AuthorizedCommand, rules: RoutingRules, allowed: [Destination], explicit: SessionIdentity?) throws -> Destination {
+        let matching = allowed.filter { $0.id == command.destination_id && (command.provider_session_id == nil || $0.session.providerSessionID == command.provider_session_id) }
+        for identity in [explicit, rules.explicitSession, rules.selectedSession].compactMap({ $0 }) {
+            if let destination = matching.first(where: { $0.session == identity }) { return destination }
+            if explicit != nil { throw RouterError.invalidAuthorization }
+        }
+        guard matching.count == 1 else { throw RouterError.invalidAuthorization }
+        return matching[0]
+    }
+
     @discardableResult
-    public func enqueue(_ permit: ExecutionPermit, rules: RoutingRules, destinations allowed: [Destination], replacingCommandID: String? = nil) throws -> QueuedTask {
+    public func enqueue(_ permit: ExecutionPermit, rules: RoutingRules, approvedDestination: Destination? = nil, destinations allowed: [Destination], replacingCommandID: String? = nil) throws -> QueuedTask {
         let c = permit.command
         _ = try policy.verifyExecution(command: c, immutablePreview: permit.immutablePreview, expiresAt: permit.expiresAt)
         try Self.validate(c, rules, allowed)
@@ -187,20 +209,32 @@ public final class FileTaskQueueStore: TaskQueueStore, @unchecked Sendable {
             }
             return task
         }
-        let task = QueuedTask(command: c, immutablePreview: permit.immutablePreview, permitExpiresAt: permit.expiresAt, rules: rules, permittedDestinations: allowed, updatedAt: c.updated_at)
+        let approved = try Self.approvedDestination(command: c, rules: rules, allowed: allowed, explicit: approvedDestination?.session)
+        var task = QueuedTask(command: c, immutablePreview: permit.immutablePreview, permitExpiresAt: permit.expiresAt, rules: rules, permittedDestinations: allowed, updatedAt: c.updated_at)
+        task.approvedSession = approved.session
         var next = tasks
         if let replacing = replacingCommandID {
             guard let index = next.firstIndex(where: { $0.command.command_id == replacing }),
                   next[index].state == .queued, next[index].hold == .reapprovalRequired,
                   next[index].command.account_id == c.account_id,
                   next[index].command.authenticated_actor == c.authenticated_actor,
-                  next[index].command.destination_id == c.destination_id,
-                  next[index].command.immutable_task_payload == c.immutable_task_payload else { throw RouterError.invalidAuthorization }
+                  Self.sameOperation(next[index], replacement: c, rules: rules) else { throw RouterError.invalidAuthorization }
             next[index].state = .cancelled; next[index].hold = nil; next[index].cancellationRequested = true
         }
         next.append(task)
         try persist(next)
         return task
+    }
+
+    private static func sameOperation(_ old: QueuedTask, replacement: AuthorizedCommand, rules: RoutingRules) -> Bool {
+        if let host = old.rules.machineDependency,
+           (rules.machineDependency != host || !old.permittedDestinations.contains(where: { $0.id == replacement.destination_id && $0.session.host == host })) { return false }
+        switch (old.command.immutable_task_payload, replacement.immutable_task_payload) {
+        case (.delegateTaskTool(let a), .delegateTaskTool(let b)):
+            return a.account_id == b.account_id && a.project_id == b.project_id && a.instruction == b.instruction
+        default:
+            return old.command.destination_id == replacement.destination_id && old.command.immutable_task_payload == replacement.immutable_task_payload
+        }
     }
 
     public func snapshot() -> [QueuedTask] { store.retainedTasks(tasks) }
@@ -238,7 +272,8 @@ public final class FileTaskQueueStore: TaskQueueStore, @unchecked Sendable {
             }
             let requested = task.rules.explicitTarget ?? task.rules.selectedTarget ??
                 (task.rules.mode == .dictation ? task.rules.activeTextField : nil)
-            if let requested, requested != task.command.destination_id {
+            if let requested, requested != task.command.destination_id,
+               task.rules.selectedSession == nil {
                 var held = tasks; held[index].hold = .reapprovalRequired
                 try persist(held); continue
             }
@@ -258,7 +293,9 @@ public final class FileTaskQueueStore: TaskQueueStore, @unchecked Sendable {
                 try persist(next)
             case .dispatch(let choice):
                 // Routing chooses a candidate; it cannot change what was approved.
-                guard choice.destination.id == task.command.destination_id,
+                let approved = try Self.approvedDestination(command: task.command, rules: task.rules, allowed: task.permittedDestinations, explicit: task.approvedSession)
+                guard choice.destination.session == approved.session,
+                      choice.destination.id == task.command.destination_id,
                       task.command.provider_session_id == nil || task.command.provider_session_id == choice.destination.session.providerSessionID else {
                     next[index].hold = .reapprovalRequired
                     try persist(next); continue
@@ -327,12 +364,33 @@ public final class FileTaskQueueStore: TaskQueueStore, @unchecked Sendable {
         }
     }
 
+    /// Binds the exact operation and the full approved provider/host/project/session.
+    public static func completionOperation(_ task: QueuedTask) throws -> String {
+        guard let session = task.route?.destination.session else { throw RouterError.invalidStatus }
+        struct Operation: Encodable { let command: AuthorizedCommand; let preview: Data; let session: SessionIdentity }
+        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        return PayloadDigest.sha256(try encoder.encode(Operation(command: task.command, preview: task.immutablePreview, session: session)))
+    }
+    public func confirmOwnerCompletion(_ receipt: OwnerCompletionReceipt) throws {
+        guard let i = tasks.firstIndex(where: { $0.command.command_id == receipt.commandID }),
+              try Self.completionOperation(tasks[i]) == receipt.operationHash,
+              policy.hasOwnerCompletion(commandID: receipt.commandID, operationHash: receipt.operationHash),
+              !tasks[i].cancellationRequested else { throw RouterError.invalidStatus }
+        if tasks[i].ownerConfirmed == true { return }
+        guard tasks[i].state == .dispatched, tasks[i].outcome == .dispatched else { throw RouterError.invalidStatus }
+        var next = tasks
+        next[i].state = .succeeded; next[i].outcome = .ok; next[i].hold = nil
+        next[i].ownerConfirmed = true; next[i].updatedAt = receipt.occurredAt
+        try persist(next); confirmedSuccesses.insert(receipt.commandID)
+    }
+
     /// Only an authenticated adapter status for the dispatched identity can finish
     /// a task. UI/model state and dispatch acknowledgements cannot set success.
     public func receive(_ status: TaskStatus, from session: SessionIdentity) throws {
         _ = try ProtocolCodec.encode(status)
         guard let i = tasks.firstIndex(where: { $0.command.account_id == status.account_id && $0.command.command_id == status.command_id }),
               tasks[i].route?.destination.session == session else { throw RouterError.invalidStatus }
+        if tasks[i].ownerConfirmed == true { return }
         let old = tasks[i].state
         let new = status.execution_state
         if old == new && Self.terminal(old) {

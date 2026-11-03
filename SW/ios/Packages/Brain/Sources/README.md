@@ -15,7 +15,7 @@ flowchart LR
 | [BrainRouter.swift](BrainRouter.swift) | On-device/Hybrid/Cloud; visible offline and failure degradation | ✅ Linux |
 | [RelayBrainTransport.swift](RelayBrainTransport.swift) | Context-checked relay challenge over ClaudeBrain's exact final body; signed request to the same room | ✅ Linux + real local Worker |
 | [ClaudeBrain.swift](ClaudeBrain.swift) | Normalized relay-only HTTPS hosts; evolving metadata ignored, tool inputs closed | ✅ Current-shape fake server; live **unverified** |
-| [SuggestionEngine.swift](SuggestionEngine.swift) | Whole finalized utterances, segment-local invalidation, plan ordinals, bounded state/inference, edit and tap | ✅ Linux |
+| [SuggestionEngine.swift](SuggestionEngine.swift) | Committed utterances and non-executing ambient hypotheses, segment-local invalidation, plan ordinals, bounded state/inference, edit and tap | ✅ Linux |
 | [CommandSequence.swift](CommandSequence.swift) | Conservative linked instructions and ordinal cancellation | ✅ Linux |
 | [WakePhraseDetector.swift](WakePhraseDetector.swift) | Configured phrase; ambiguous/meeting/playback → suggestion evidence | ✅ Text tests; acoustic behavior **unverified** |
 | [BrainBenchmark.swift](BrainBenchmark.swift) | Run-v1 JSON export without execution/logging | ✅ Synthetic tests; phone bench **unverified** |
@@ -31,3 +31,9 @@ ClaudeBrain bounds HTTP accumulation per response/chunk (1 MiB, 60-second resour
 SuggestionEngine separates review, authorization and successful completion. Command context is supplied by the phone. BrainRouter tolerates terminal sentence punctuation for simple commands while linked/multi-step content still takes the complex route.
 
 `SuggestionEngine.authorized` returns acceptance; dismissed/expired/revised reviews return false. Exact approved-card retries are idempotent so uncertain queue persistence can be reconciled.
+
+`TranscriptSegment.hypothesis` permits bounded ambient inference before capture ends without setting `isComplete`. Equal-text EOS preserves the hypothesis instead of issuing duplicate inference. `executionCommitted` separates dispatch from approval; `releaseReview` creates a fresh review revision after an unavailable/changed route. Neither method grants execution authority.
+
+Segment revisions track whether inference produced cards. Identical EOS may reuse a successful hypothesis; failed/deferred inference remains eligible for final processing.
+
+An explicit “then” in a new committed intent retains a dependency on the preceding intent’s card. Missing/failed predecessors cannot become independent execution.

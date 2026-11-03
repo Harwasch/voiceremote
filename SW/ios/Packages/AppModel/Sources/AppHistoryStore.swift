@@ -43,32 +43,43 @@ public struct OfflineTextOrigin: Codable, Equatable, Sendable {
 
 /// Text-only store with explicit deletion. Apple host supplies a protected, backup-excluded URL.
 public actor AppHistoryStore: HistoryStore {
+    public nonisolated let accountID: String
     private var lastRetentionCheck: Int64
     private var values: [HistoryEntry]
     private var states: [String: TextDeliveryState] = [:]
     private var retentionChoices: [String: Int64] = [:]
     private var origins: [String: OfflineTextOrigin] = [:]
-    private struct Snapshot: Codable {
+    private struct Snapshot: Codable, Sendable {
         let entries: [HistoryEntry]
         let states: [String: TextDeliveryState]
         let origins: [String: OfflineTextOrigin]?
         let retentionChoices: [String: Int64]?
     }
     private let url: URL?
-    public init(url: URL? = nil, now: Int64) throws {
-        self.url = url; lastRetentionCheck = now
+    public init(url: URL? = nil, now: Int64, accountID: String = "owner-local") throws {
+        try RecordAccount.validate(accountID)
+        self.accountID = accountID; self.url = url; lastRetentionCheck = now
         if let url, FileManager.default.fileExists(atPath: url.path) {
             let data = try Data(contentsOf: url)
-            if let snapshot = try? JSONDecoder().decode(Snapshot.self, from: data) {
+            let snapshot: Snapshot?
+            let object = try JSONSerialization.jsonObject(with: data)
+            if let dictionary = object as? [String: Any], dictionary["version"] != nil || dictionary["accountID"] != nil {
+                let envelope = try JSONDecoder().decode(AccountRecordEnvelope<Snapshot>.self, from: data)
+                try envelope.validate(account: accountID)
+                _ = try envelope.records.entries.map { try RecordAccount.bind($0, to: accountID, legacy: false) }
+                snapshot = envelope.records
+            } else { snapshot = try? JSONDecoder().decode(Snapshot.self, from: data) }
+            if let snapshot {
                 values = snapshot.entries; states = snapshot.states; origins = snapshot.origins ?? [:]; retentionChoices = snapshot.retentionChoices ?? [:]
             } else { values = try JSONDecoder().decode([HistoryEntry].self, from: data) }
         } else { values = [] }
+        values = try values.map { try RecordAccount.bind($0, to: accountID) }
         values = Self.retained(values, states: states, choices: retentionChoices, now: now)
         let retainedIDs = Set(values.map(\.segmentID))
         states = states.filter { retainedIDs.contains($0.key) }
         origins = origins.filter { retainedIDs.contains($0.key) }
         retentionChoices = retentionChoices.filter { retainedIDs.contains($0.key) }
-        if let url { try Self.persist(values, states: states, origins: origins, choices: retentionChoices, url: url) }
+        if let url { try Self.persist(values, states: states, origins: origins, choices: retentionChoices, url: url, accountID: accountID) }
     }
     private static func retained(_ items: [HistoryEntry], states: [String: TextDeliveryState], choices: [String: Int64], now: Int64) -> [HistoryEntry] {
         items.filter {
@@ -77,21 +88,22 @@ public actor AppHistoryStore: HistoryStore {
             return start >= 0 && start <= now && now - start < 604_800_000
         }
     }
-    private static func persist(_ items: [HistoryEntry], states: [String: TextDeliveryState], origins: [String: OfflineTextOrigin], choices: [String: Int64], url: URL) throws {
+    private static func persist(_ items: [HistoryEntry], states: [String: TextDeliveryState], origins: [String: OfflineTextOrigin], choices: [String: Int64], url: URL, accountID: String) throws {
         let pending = url.appendingPathExtension("pending")
         try? FileManager.default.removeItem(at: pending)
         let descriptor = open(pending.path, O_WRONLY | O_CREAT | O_EXCL, mode_t(0o600))
         guard descriptor >= 0 else { throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno)) }
         let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
         defer { try? handle.close(); try? FileManager.default.removeItem(at: pending) }
-        try handle.write(contentsOf: JSONEncoder().encode(Snapshot(entries: items, states: states.filter { key, _ in items.contains { $0.segmentID == key } }, origins: origins.filter { key, _ in items.contains { $0.segmentID == key } }, retentionChoices: choices))); try handle.synchronize()
+        try handle.write(contentsOf: JSONEncoder().encode(AccountRecordEnvelope(accountID: accountID, records: Snapshot(entries: items, states: states.filter { key, _ in items.contains { $0.segmentID == key } }, origins: origins.filter { key, _ in items.contains { $0.segmentID == key } }, retentionChoices: choices)))); try handle.synchronize()
         guard rename(pending.path, url.path) == 0 else { throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno)) }
     }
     private func save(_ items: [HistoryEntry], states nextStates: [String: TextDeliveryState]? = nil, origins nextOrigins: [String: OfflineTextOrigin]? = nil) throws {
+        let items = try items.map { try RecordAccount.bind($0, to: accountID) }
         let next = (nextStates ?? states).filter { key, _ in items.contains { $0.segmentID == key } }
         let provenance = (nextOrigins ?? origins).filter { key, _ in items.contains { $0.segmentID == key } }
         let choices = retentionChoices.filter { key, _ in items.contains { $0.segmentID == key } }
-        if let url { try Self.persist(items, states: next, origins: provenance, choices: choices, url: url) }
+        if let url { try Self.persist(items, states: next, origins: provenance, choices: choices, url: url, accountID: accountID) }
         retentionChoices = choices
         values = items; states = next; origins = provenance
     }
@@ -137,7 +149,7 @@ public actor AppHistoryStore: HistoryStore {
     /// Accept only statuses received from the authenticated target session, and
     /// correlate desktop command_id to the original dictation segment ID.
     public func insertionStatus(_ status: TaskStatus, from deviceID: String, accountID: String) throws {
-        guard status.account_id == accountID, status.execution_state == .failed,
+        guard accountID == self.accountID, status.account_id == accountID, status.execution_state == .failed,
               values.contains(where: { $0.segmentID == status.command_id && $0.targetID == deviceID }),
               let state = states[status.command_id], [.unconfirmed, .failed].contains(state) else { return }
         switch status.outcome {
@@ -147,7 +159,7 @@ public actor AppHistoryStore: HistoryStore {
         }
     }
     public func dictationOutcome(_ status: DictationOutcome, from deviceID: String, accountID: String) throws {
-        guard status.account_id == accountID, status.target_device_id == deviceID,
+        guard accountID == self.accountID, status.account_id == accountID, status.target_device_id == deviceID,
               values.contains(where: { $0.segmentID == status.segment_id && $0.targetID == deviceID }),
               let state = states[status.segment_id], [.unconfirmed, .failed].contains(state) else { return }
         switch status.outcome {

@@ -11,3 +11,7 @@ flowchart LR
 | [RouterTests.swift](RouterTests.swift) | Journey E/preference tables; destination/session/hash binding; forged storage; cloud/ambiguity; cancellation isolation; skewed status; durable dedup | ✅ Linux tests |
 
 Start with `testJourneyETableAndNewApprovalForCloud`, then the `testReview*` regressions. Eight review scenarios failed before implementation. Fakes now retain exact commands, and hashes come from Policy's approved preview. REQ-28/31/34/42–45/60/61. Live provider behavior remains **unverified**.
+
+Owner-completion regressions reopen a corroborated success, reject copied success flags and changed operation/session bindings, and retain dependency/cancellation isolation. Production multi-host routing and actual phone replacement approvals are exercised in [AppModel AgentControlTests](../../AppModel/Tests/AgentControlTests.swift).
+
+`testSameIDProviderAndProfileVariantsRequireReapproval` starts with offline approved identity and same-ID/string provider/profile alternatives; neither variant dispatches.

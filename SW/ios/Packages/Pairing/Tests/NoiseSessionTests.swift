@@ -246,3 +246,22 @@ extension NoiseSessionTests {
         }
     }
 }
+
+private actor PeerClosesAfterRevoke: PairingTransport {
+    var session: ApplicationSession?
+    func attach(_ session: ApplicationSession) { self.session = session }
+    func send(_ frame: Data) async throws { await session?.close(transport: self) }
+    func receive() throws -> Data { throw PairingError.closedTransport }
+    func close() {}
+}
+extension NoiseSessionTests {
+    func testPeerEOFAfterRevokeDeliveryCannotUndoLocalRevocation() async throws {
+        let (noise, _) = try await noisePair(), registry = PeerRegistry(store: InMemoryKeyStore())
+        let session = try await application(noise, registry: registry), transport = PeerClosesAfterRevoke()
+        await transport.attach(session)
+        let peer = await session.peer
+        do { try await session.send(.revoke(.init(account_id: "synthetic", device_id: "desktop", command_id: "synthetic-revoke", idempotency_key: "synthetic-revoke", revoked_at: 1)), transport: transport) }
+        catch { XCTFail("Peer EOF raced a delivered revoke: \(error)") }
+        do { try await registry.require(peer); XCTFail("Local enrollment survived outgoing revoke") } catch {}
+    }
+}

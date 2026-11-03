@@ -7,11 +7,11 @@ import VoiceRemoteProtocol
 @Test func heldTextSurvivesRestartWithoutAutomaticDelivery() async throws {
     let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: url) }
-    let store = try AppHistoryStore(url: url, now: 1000)
+    let store = try AppHistoryStore(url: url, now: 1000, accountID: "fixture")
     let entry = HistoryEntry(segmentID: "synthetic", targetID: "desktop", text: "Invented fixture.", createdAt: 1000)
     try await store.saveText(entry, state: .held, now: 1000)
-    let reopened = try AppHistoryStore(url: url, now: 1001)
-    #expect(try await reopened.entries(now: 1001) == [entry])
+    let reopened = try AppHistoryStore(url: url, now: 1001, accountID: "fixture")
+    #expect(try await reopened.entries(now: 1001) == [try RecordAccount.bind(entry, to: "fixture")])
     #expect(await reopened.deliveryStates()["synthetic"] == .held)
 }
 
@@ -45,12 +45,12 @@ private actor HeldTarget: DictationAvailability, DeviceRevocationHandler {
     let desktop = DeviceInfo(account_id: "fixture", device_id: "desktop", display_name: "Synthetic PC", platform: .linux, role: .text_receiver, capabilities: [.receive_text])
     try await registry.register(desktop)
     var state = AppState(); state.setTarget(.device("desktop"))
-    let store = try AppHistoryStore(url: url, now: 1000)
+    let store = try AppHistoryStore(url: url, now: 1000, accountID: "fixture")
     let first = HeldDictationPipeline(history: store, target: target, registry: registry, accountID: "fixture", phoneID: "phone")
     _ = try await first.prepare(segmentID: "held-synthetic", state: state, picker: TargetPicker(accountID: "fixture", phoneID: "phone"), now: 1000)
     try await first.commit(segmentID: "held-synthetic", revision: 0, text: "Invented\ntext.", now: 1000)
     #expect(await store.deliveryStates()["held-synthetic"] == .held)
-    let reopened = try AppHistoryStore(url: url, now: 700_000_000)
+    let reopened = try AppHistoryStore(url: url, now: 700_000_000, accountID: "fixture")
     #expect(try await reopened.entries(now: 700_000_000).count == 1) // never age out undelivered text
     await target.setOnline(true)
     let second = HeldDictationPipeline(history: reopened, target: target, registry: registry, accountID: "fixture", phoneID: "phone")
@@ -68,7 +68,7 @@ private actor HeldTarget: DictationAvailability, DeviceRevocationHandler {
         let registry = DeviceRegistry(accountID: "fixture", revocation: target)
         let desktop = DeviceInfo(account_id: "fixture", device_id: "desktop", display_name: "Synthetic PC", platform: .linux, role: .text_receiver, capabilities: [.receive_text])
         try await registry.register(desktop)
-        let history = try AppHistoryStore(now: 1000)
+        let history = try AppHistoryStore(now: 1000, accountID: "fixture")
         let pipeline = HeldDictationPipeline(history: history, target: target, registry: registry, accountID: "fixture", phoneID: "phone")
         var state = AppState(); state.setTarget(.device("desktop"))
         _ = try await pipeline.prepare(segmentID: "fixture", state: state, picker: TargetPicker(accountID: "fixture", phoneID: "phone"), now: 1000)
@@ -83,7 +83,7 @@ private actor HeldTarget: DictationAvailability, DeviceRevocationHandler {
         let target = HeldTarget(); await target.setOnline(initiallyOnline)
         let registry = DeviceRegistry(accountID: "fixture", revocation: target)
         try await registry.register(DeviceInfo(account_id: "fixture", device_id: "desktop", display_name: "Synthetic PC", platform: .linux, role: .text_receiver, capabilities: [.receive_text]))
-        let history = try AppHistoryStore(now: 1000)
+        let history = try AppHistoryStore(now: 1000, accountID: "fixture")
         let pipeline = HeldDictationPipeline(history: history, target: target, registry: registry, accountID: "fixture", phoneID: "phone")
         var state = AppState(); state.setTarget(.device("desktop"))
         _ = try await pipeline.prepare(segmentID: "fixture", state: state, picker: TargetPicker(accountID: "fixture", phoneID: "phone"), now: 1000)
@@ -112,7 +112,7 @@ private actor BlockingTapTarget: DictationTarget, DeviceRevocationHandler {
 @Test func repeatedSendTapsCannotRaceIntoDuplicateInsertion() async throws {
     let target = BlockingTapTarget(), registry = DeviceRegistry(accountID: "fixture", revocation: target)
     try await registry.register(DeviceInfo(account_id: "fixture", device_id: "desktop", display_name: "Synthetic PC", platform: .linux, role: .text_receiver, capabilities: [.receive_text]))
-    let history = try AppHistoryStore(now: 1000)
+    let history = try AppHistoryStore(now: 1000, accountID: "fixture")
     try await history.saveText(HistoryEntry(segmentID: "held", targetID: "desktop", text: "Invented.", createdAt: 1000), state: .held, now: 1000)
     let pipeline = HeldDictationPipeline(history: history, target: target, registry: registry, accountID: "fixture", phoneID: "phone")
     let first = Task { try await pipeline.sendHeld(id: "held", now: 1000) }
@@ -125,7 +125,7 @@ private actor BlockingTapTarget: DictationTarget, DeviceRevocationHandler {
 @Test func oversizedDictationIsSplitAndDurableBeforeAnyDelivery() async throws {
     let target = HeldTarget(), registry = DeviceRegistry(accountID: "fixture", revocation: target)
     try await registry.register(DeviceInfo(account_id: "fixture", device_id: "desktop", display_name: "Synthetic PC", platform: .linux, role: .text_receiver, capabilities: [.receive_text]))
-    let store = try AppHistoryStore(now: 1000)
+    let store = try AppHistoryStore(now: 1000, accountID: "fixture")
     let pipeline = HeldDictationPipeline(history: store, target: target, registry: registry, accountID: "fixture", phoneID: "phone")
     var state = AppState(); state.setTarget(.device("desktop"))
     let text = String(repeating: "🦀e\u{301}", count: 12000), id = UUID().uuidString
@@ -143,7 +143,7 @@ private actor BlockingTapTarget: DictationTarget, DeviceRevocationHandler {
     let registry = DeviceRegistry(accountID: "fixture", revocation: target)
     let desktop = DeviceInfo(account_id: "fixture", device_id: "desktop", display_name: "Synthetic PC", platform: .linux, role: .text_receiver, capabilities: [.receive_text])
     try await registry.register(desktop)
-    let history = try AppHistoryStore(now: 1000)
+    let history = try AppHistoryStore(now: 1000, accountID: "fixture")
     let pipeline = HeldDictationPipeline(history: history, target: target, registry: registry, accountID: "fixture", phoneID: "phone")
     var state = AppState(); state.setTarget(.device("desktop"))
     _ = try await pipeline.prepare(segmentID: "uncertain-tap", state: state, picker: TargetPicker(accountID: "fixture", phoneID: "phone"), now: 1000)
@@ -158,7 +158,7 @@ private actor BlockingTapTarget: DictationTarget, DeviceRevocationHandler {
     let target = HeldTarget(); await target.setOnline(true); await target.certifyNeverClaimed()
     let registry = DeviceRegistry(accountID: "fixture", revocation: target)
     try await registry.register(DeviceInfo(account_id: "fixture", device_id: "desktop", display_name: "Synthetic", platform: .linux, role: .text_receiver, capabilities: [.receive_text]))
-    let history = try AppHistoryStore(now: 1000)
+    let history = try AppHistoryStore(now: 1000, accountID: "fixture")
     try await history.saveText(HistoryEntry(segmentID: "never-arrived", targetID: "desktop", text: "Synthetic.", createdAt: 1000), state: .unconfirmed, now: 1000)
     let pipeline = HeldDictationPipeline(history: history, target: target, registry: registry, accountID: "fixture", phoneID: "phone")
     try await pipeline.sendHeld(id: "never-arrived", now: 1000)

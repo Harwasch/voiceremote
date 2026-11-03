@@ -30,3 +30,5 @@ flowchart LR
 
 Start: `PairingConnection.swift`; [integration obligations and commands](../README.md).
 REQ-22–25/60/61. No action execution or model-controlled authorization fields.
+
+ApplicationSession skips the post-delivery active check only for a validated outgoing revoke. It still retires enrollment and closes locally, including notification failure; ordinary sends retain every active check.

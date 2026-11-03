@@ -24,3 +24,9 @@ ClaudeBrainTests also verifies that RelayBrainTransport signs the final body unc
 ClaudeBrainTests rejects oversized chunked responses without EOF and oversized Content-Length. BenchmarkTests exercises 50 distinct recognized spoken inputs and retains proposal-only behavior. Synthetic only; device/provider performance **unverified**.
 
 Suggestion regressions prove review/denial/edit cannot release linked successors; authorized completion can. Hybrid routing covers terminal STT punctuation.
+
+[SuggestionTests.swift](SuggestionTests.swift) covers replaceable open-capture hypotheses, approved-but-undispatched invalidation, committed independent cards and completion-gated linked tails. These use synthetic proposals and a controlled clock, not acoustic acceptance.
+
+`testIdenticalFinalRetriesFailedHypothesis` and `testIdenticalFinalRetriesDeferredHypothesisAfterBudgetReopens` reproduce and guard final-text retry after failure/rate deferral.
+
+`testThenInNewCommittedIntentStillRequiresPredecessorCompletion` guards completion gating across committed intent boundaries.

@@ -1,6 +1,6 @@
 import Foundation
 
-public enum SuggestionState: String, Sendable { case suggested, edited, reviewing, approved, succeeded, failed, dismissed, expired }
+public enum SuggestionState: String, Sendable { case suggested, edited, reviewing, approved, executing, succeeded, failed, dismissed, expired }
 
 public struct TranscriptSegment: Sendable {
     public let id: String
@@ -8,13 +8,15 @@ public struct TranscriptSegment: Sendable {
     public let text: String
     public let isFinal: Bool
     public let isComplete: Bool
+    /// Stable STT slice for review only; never a committed command boundary.
+    public let hypothesis: Bool
     /// Change this when conversation, target or speaker scope changes.
     public let contextID: String
     /// Supplied by the capture composition root, never inferred from model output.
     public let commandContext: Bool
-    public init(id: String, revision: Int, text: String, isFinal: Bool, isComplete: Bool, contextID: String, commandContext: Bool = false) {
+    public init(id: String, revision: Int, text: String, isFinal: Bool, isComplete: Bool, contextID: String, commandContext: Bool = false, hypothesis: Bool = false) {
         self.id = id; self.revision = revision; self.text = text; self.isFinal = isFinal
-        self.isComplete = isComplete; self.contextID = contextID; self.commandContext = commandContext
+        self.hypothesis = hypothesis; self.isComplete = isComplete; self.contextID = contextID; self.commandContext = commandContext
     }
 }
 
@@ -80,13 +82,16 @@ public struct SuggestionUpdate: Sendable {
     public let deferred: SuggestionDeferral?
 }
 
-public enum SuggestionDeferral: Equatable, Sendable { case rateLimited, busy, capacity }
+public enum SuggestionDeferral: Equatable, Sendable { case rateLimited, busy, capacity, predecessorRequired }
 
 public actor SuggestionEngine {
     private struct SegmentRevision {
         let revision: Int
+        let text: String
+        let hypothesis: Bool
         let token: UUID
         let expiresAt: Date
+        var producedCards = false
     }
     private let brain: any LlmBrain
     private let configuration: SuggestionConfiguration
@@ -131,8 +136,14 @@ public actor SuggestionEngine {
             revisions.removeAll(); revisionOrder.removeAll()
         }
         guard segment.revision > (revisions[segment.id]?.revision ?? -1) else { return update() }
+        if let prior = revisions[segment.id], prior.text == segment.text, prior.hypothesis, prior.producedCards,
+           segment.isComplete, CommandSequence.cancellationOrdinal(segment.text, wakePhrase: configuration.wakePhrase) == nil {
+            revisions[segment.id] = SegmentRevision(revision: segment.revision, text: segment.text, hypothesis: false,
+                token: prior.token, expiresAt: prior.expiresAt, producedCards: true)
+            return update()
+        }
         let token = UUID(), requestEpoch = epoch
-        revisions[segment.id] = SegmentRevision(revision: segment.revision, token: token,
+        revisions[segment.id] = SegmentRevision(revision: segment.revision, text: segment.text, hypothesis: segment.hypothesis, token: token,
             expiresAt: latestTime.addingTimeInterval(configuration.lifetime))
         revisionOrder.removeAll { $0 == segment.id }; revisionOrder.append(segment.id)
         while revisionOrder.count > configuration.maximumTrackedSegments {
@@ -145,8 +156,8 @@ public actor SuggestionEngine {
         }
         expireSegment(segment.id)
         guard revisions[segment.id]?.token == token else { return update(deferred: .capacity) }
-        guard !muted, segment.isFinal, segment.isComplete else { return update() }
-        if let ordinal = CommandSequence.cancellationOrdinal(segment.text, wakePhrase: configuration.wakePhrase) {
+        guard !muted, segment.isFinal, segment.isComplete || segment.hypothesis else { return update() }
+        if segment.isComplete, let ordinal = CommandSequence.cancellationOrdinal(segment.text, wakePhrase: configuration.wakePhrase) {
             if let latestPlanID { cancelInPlan(latestPlanID, ordinal: ordinal) }
             return update()
         }
@@ -158,6 +169,13 @@ public actor SuggestionEngine {
         guard storage.count < configuration.maximumRetainedCards else { return update(deferred: .capacity) }
         inferenceTimes.append(latestTime); inFlightTokens.insert(token)
         defer { inFlightTokens.remove(token) }
+        let continuation = segment.text.range(of: #"^\s*(?:then|and then)\b"#, options: [.regularExpression, .caseInsensitive]) != nil
+        var predecessor: UUID?
+        if continuation {
+            let previousIntent = revisionOrder.last(where: { $0 != segment.id })
+            predecessor = storage.last(where: { $0.segmentID == previousIntent })?.id
+            guard predecessor != nil else { return update(deferred: .predecessorRequired) }
+        }
         let linked = isLinkedPlan(segment.text)
         let request = BrainRequest(accountID: accountID, transcript: segment.text, context: context,
                                    workload: linked ? .multiStep : (segment.commandContext ? .automatic : .ambient))
@@ -188,11 +206,12 @@ public actor SuggestionEngine {
         for proposal in fresh {
             let id = UUID()
             storage.append(SuggestionCard(id: id, segmentID: segment.id, proposal: proposal, planID: planID,
-                dependsOn: planID == nil ? [] : order.last.map { [$0] } ?? [],
+                dependsOn: order.isEmpty ? predecessor.map { [$0] } ?? [] : (planID == nil ? predecessor.map { [$0] } ?? [] : order.last.map { [$0] } ?? []),
                 expiresAt: latestTime.addingTimeInterval(configuration.lifetime), revision: 0, state: .suggested))
             order.append(id); creationTimes.append(latestTime)
         }
         if let planID { plans[planID] = order; latestPlanID = planID }
+        revisions[segment.id]?.producedCards = !order.isEmpty
         return update(dropped: dropped)
     }
 
@@ -232,10 +251,29 @@ public actor SuggestionEngine {
         replace(index, state: .approved)
         return true
     }
+    /// A phone review that did not dispatch may be shown again with a new
+    /// revision. This creates no approval and invalidates dependent previews.
+    public func releaseReview(cardID: UUID, revision: Int, now: Date) -> SuggestionCard? {
+        advance(now)
+        guard let index = storage.firstIndex(where: { $0.id == cardID }), storage[index].revision == revision,
+              [.reviewing, .approved].contains(storage[index].state) else { return nil }
+        let old = storage[index]
+        expireDependents(of: old.id)
+        storage[index] = SuggestionCard(id: old.id, segmentID: old.segmentID, proposal: old.proposal, planID: old.planID,
+            dependsOn: old.dependsOn, expiresAt: old.expiresAt, revision: old.revision + 1, state: .edited)
+        return storage[index]
+    }
+    /// Phone queue reports that dispatch was durably reserved. Later speech can
+    /// replace an unqueued approval, but cannot undo an independently running task.
+    public func executionCommitted(cardID: UUID, now: Date) {
+        advance(now)
+        guard let index = storage.firstIndex(where: { $0.id == cardID }), storage[index].state == .approved else { return }
+        replace(index, state: .executing)
+    }
     /// Authenticated executor outcomes, never proposal/card state, release dependencies.
     public func completed(cardID: UUID, succeeded: Bool, now: Date) {
         advance(now)
-        guard let index = storage.firstIndex(where: { $0.id == cardID }), storage[index].state == .approved else { return }
+        guard let index = storage.firstIndex(where: { $0.id == cardID }), [.approved, .executing].contains(storage[index].state) else { return }
         replace(index, state: succeeded ? .succeeded : .failed)
         if !succeeded { expireDependents(of: cardID) }
     }
@@ -272,13 +310,13 @@ public actor SuggestionEngine {
     }
 
     private func expireSegment(_ id: String) {
-        for index in storage.indices where storage[index].segmentID == id && (storage[index].reviewable || storage[index].state == .reviewing) {
+        for index in storage.indices where storage[index].segmentID == id && (storage[index].reviewable || storage[index].state == .reviewing || storage[index].state == .approved) {
             let cardID = storage[index].id; replace(index, state: .expired); expireDependents(of: cardID)
         }
     }
     private func expireDependents(of id: UUID) {
         var unavailable: Set<UUID> = [id]
-        for index in storage.indices where storage[index].reviewable || storage[index].state == .reviewing {
+        for index in storage.indices where storage[index].reviewable || storage[index].state == .reviewing || storage[index].state == .approved {
             if storage[index].dependsOn.contains(where: unavailable.contains) {
                 unavailable.insert(storage[index].id); replace(index, state: .expired)
             }

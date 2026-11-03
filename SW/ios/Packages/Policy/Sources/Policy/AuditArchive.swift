@@ -105,6 +105,7 @@ public enum AuditArchive {
         cipher: any AuditArchiveCipher, store: any AuditArchiveAnchorStore,
         now: Int64 = Int64(Date().timeIntervalSince1970 * 1000)) async throws -> AuditArchiveAnchor {
         let state = try store.loadArchive(), anchor = state.anchor
+        guard log.accountHash == nil || log.accountHash == PayloadDigest.sha256(Data(anchor.account.utf8)) else { throw PolicyError.tampered }
         if state.pending?.isCheckpoint == true { return try await submit(log: log, client: client, cipher: cipher, store: store, now: now) }
         if anchor.count >= maximumBlocks { return try await rollover(log: log, client: client, cipher: cipher, store: store, now: now) }
         if state.pending == nil {
@@ -162,6 +163,7 @@ public enum AuditArchive {
     @MainActor public static func rollover(log: AuditLog, client: any AuditArchiveClient, cipher: any AuditArchiveCipher,
         store: any AuditArchiveAnchorStore, now: Int64 = Int64(Date().timeIntervalSince1970 * 1000)) async throws -> AuditArchiveAnchor {
         let state = try store.loadArchive(), anchor = state.anchor
+        guard log.accountHash == nil || log.accountHash == PayloadDigest.sha256(Data(anchor.account.utf8)) else { throw PolicyError.tampered }
         if state.pending?.isCheckpoint == true { return try await submit(log: log, client: client, cipher: cipher, store: store, now: now) }
         let trusted = try log.exportCheckpoint(), snapshot = try log.compactionSnapshot()
         if trusted.authorityID == anchor.journal.authorityID {
@@ -235,7 +237,8 @@ public enum AuditArchive {
             }
         }
         guard head == anchor.head else { throw PolicyError.tampered }
-        _ = try AuditLog.verify(result, against: anchor.verificationCheckpoint)
+        let records = try AuditLog.verify(result, against: anchor.verificationCheckpoint)
+        guard records.compactMap(\.accountEnvelope).allSatisfy({ $0.accountHash == PayloadDigest.sha256(Data(anchor.account.utf8)) }) else { throw PolicyError.tampered }
         return result
     }
 }

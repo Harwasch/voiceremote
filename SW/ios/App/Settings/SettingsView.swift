@@ -11,6 +11,8 @@ import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @Bindable var host: AppRuntime
+    @State private var localProviders = ProviderOrderDraft()
+    @State private var cloudProviders = ProviderOrderDraft()
     @State private var retentionWarnings: [HistoryEntry] = []
     var body: some View {
         @Bindable var model = host.model
@@ -22,6 +24,7 @@ struct SettingsView: View {
                     if ArgmaxBuild.engine != nil { Text("Argmax Pro (licensed, loaded)").tag("argmax") }
                     Text("ElevenLabs Scribe").tag("elevenlabs-scribe"); Text("AssemblyAI").tag("assemblyai")
                 }
+                if ArgmaxBuild.engine == nil { Text("Argmax unavailable — requires a licence and a loaded host adapter.").font(.footnote) }
                 Toggle("Allow cloud processing", isOn: $model.settings.cloudConsent)
                 Text("Cloud speech sends live audio to your configured proxy. Cloud brain sends text for proposals. Provider retention depends on your service. No vendor key is stored here.").font(.footnote)
                 Toggle("Maximum accuracy", isOn: $model.settings.maxAccuracy)
@@ -48,6 +51,13 @@ struct SettingsView: View {
                 TextField("Relay Claude model", text: $model.settings.cloudModel).textInputAutocapitalization(.never).autocorrectionDisabled()
                 TextField("Relay Anthropic API version", text: $model.settings.cloudAPIVersion).textInputAutocapitalization(.never).autocorrectionDisabled()
                 Text("Model and API version must match the relay deployment.").font(.footnote)
+            }
+            Section("Agent routing") {
+                TextField("Local providers in fallback order (comma separated)", text: $localProviders.text)
+                    .onChange(of: localProviders.text) { _, _ in model.settings.routing.localProviderOrder = localProviders.providers }
+                TextField("Cloud providers in fallback order (comma separated)", text: $cloudProviders.text)
+                    .onChange(of: cloudProviders.text) { _, _ in model.settings.routing.cloudProviderOrder = cloudProviders.providers }
+                Text("Choose the project, selected session and default in Suggestions. Named destinations stay constraints. Machine or file dependent work waits for its host.").font(.footnote)
             }
             Section("Vocabulary") {
                 TextField("One word or phrase per line", text: Binding(get: { host.model.settings.vocabulary.joined(separator: "\n") },
@@ -79,6 +89,10 @@ struct SettingsView: View {
             }
             Section { NavigationLink("Benchmark recorder") { RecorderView(host: host) } }
         }.navigationTitle("Settings")
+        .onAppear {
+            localProviders = ProviderOrderDraft(text: model.settings.routing.localProviderOrder.joined(separator: ","))
+            cloudProviders = ProviderOrderDraft(text: model.settings.routing.cloudProviderOrder.joined(separator: ","))
+        }
         .onChange(of: model.settings) { _, _ in host.saveSettings() }
         .task {
             while !Task.isCancelled {
