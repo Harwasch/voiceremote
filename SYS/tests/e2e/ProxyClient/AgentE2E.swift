@@ -189,8 +189,9 @@ import VoiceRemoteProtocol
         }
         let resource = try await permit(.openResourceTool(OpenResourceTool(account_id: account, device_id: "desktop", resource_uri: "https://example.invalid/synthetic")))
         _ = try control.enqueue(resource, expectedRoute: destination)
-        try await until { router.snapshot().last?.outcome == .dispatched }
-        try require(router.snapshot().last?.state == .dispatched && router.snapshot().last?.appReply != nil)
+        // The outcome and the app's reply arrive in separate updates.
+        try await until { router.snapshot().last?.outcome == .dispatched && router.snapshot().last?.appReply != nil }
+        try require(router.snapshot().last?.state == .dispatched)
         let successor = try await permit(.delegateTaskTool(DelegateTaskTool(account_id: account, device_id: "desktop", project_id: "arm-claude", provider_session_id: "test-claude", instruction: "Synthetic blocked successor")))
         _ = try control.enqueue(successor, dependencies: [resource.command.command_id], expectedRoute: destination)
         try require(router.snapshot().last?.state == .queued && router.snapshot().last?.hold == .predecessorRequired)
