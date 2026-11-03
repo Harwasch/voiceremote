@@ -28,9 +28,9 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y dbus-daemon libxkbcommon0 xkb-data
       - name: Test workspace
-        run: cargo test --workspace -j4
+        run: cargo test --locked --workspace -j4
       - name: Check OS keychain feature
-        run: cargo check --workspace --features os-keychain -j4
+        run: cargo check --locked --workspace --features os-keychain -j4
   windows-injection-smoke:
     runs-on: windows-latest
     timeout-minutes: 15
@@ -45,13 +45,13 @@ jobs:
         with:
           components: clippy
       - name: Lint Windows injector
-        run: cargo clippy -p voiceremote-inject-windows --no-deps --all-targets -j4 -- -D warnings
+        run: cargo clippy --locked -p voiceremote-inject-windows --no-deps --all-targets -j4 -- -D warnings
       - name: Test desktop acquisition outcomes
-        run: cargo test -p voiceremote-inject-windows --example desktop-smoke -j4
+        run: cargo test --locked -p voiceremote-inject-windows --example desktop-smoke -j4
       - name: Exercise an owned desktop edit control
         shell: pwsh
         run: |
-          $output = & cargo run -p voiceremote-inject-windows --example desktop-smoke -j4 2>&1
+          $output = & cargo run --locked -p voiceremote-inject-windows --example desktop-smoke -j4 2>&1
           $result = $LASTEXITCODE
           $output | ForEach-Object { Write-Output $_ }
           if ($result -ne 0) { exit $result }
@@ -73,7 +73,7 @@ jobs:
       - name: Install isolated X11 test server
         run: sudo apt-get update && sudo apt-get install -y xvfb xauth dbus-daemon libxkbcommon0 xkb-data
       - name: Inject into X11 field, read back, preserve clipboard, reject Enter
-        run: xvfb-run -a cargo test -p voiceremote-inject-linux --test x11_display -j4 -- --ignored --test-threads=1
+        run: xvfb-run -a cargo test --locked -p voiceremote-inject-linux --test x11_display -j4 -- --ignored --test-threads=1
 
   tray:
     name: Tray / ${{ matrix.os }}
@@ -95,6 +95,8 @@ jobs:
       WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-node@v4
         with:
@@ -105,25 +107,25 @@ jobs:
       - name: Guard release and bundle versions
         shell: python
         run: |
-          import json, os, pathlib, tomllib
-          root = pathlib.Path("SW/desktop")
-          version = tomllib.loads((root / "Cargo.toml").read_text())["workspace"]["package"]["version"]
-          bundle = json.loads((root / "crates/tray/tauri.conf.json").read_text())["version"]
-          assert bundle == version, "Tauri bundle version differs from Cargo.toml"
-          tag = os.environ["GITHUB_REF_NAME"]
-          if tag.startswith("desktop-v"):
-              assert tag == "desktop-v" + version, "release tag differs from Cargo.toml"
+          import os, subprocess, sys
+          subprocess.run([sys.executable, "SW/ios/ci/checks.py", "desktop-version", os.environ["GITHUB_REF_NAME"]], check=True)
+      - name: Require release commit accepted on main
+        if: startsWith(github.ref, 'refs/tags/desktop-v')
+        shell: bash
+        run: |
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          python3 SW/ios/ci/checks.py accepted-main "$GITHUB_REF_NAME" "$GITHUB_SHA"
       - name: Install Linux tray build dependencies
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf libfuse2
       - name: Test plain tray logic
         working-directory: SW/desktop
-        run: cargo test -p voiceremote-tray -j4
+        run: cargo test --locked -p voiceremote-tray -j4
       - name: Check dependency licenses
         shell: bash
         working-directory: SW/desktop
         run: |
-          cargo metadata --format-version 1 --all-features > "$RUNNER_TEMP/desktop-metadata.json"
+          cargo metadata --locked --format-version 1 --all-features > "$RUNNER_TEMP/desktop-metadata.json"
           python - "$RUNNER_TEMP/desktop-metadata.json" <<'PY'
           import json, re, sys
           packages = json.load(open(sys.argv[1], encoding="utf-8"))["packages"]
@@ -153,7 +155,7 @@ jobs:
           } finally { Remove-Item $path -Force }
       - name: Build the installed hotkey CLI
         working-directory: SW/desktop
-        run: cargo build -p voiceremote-app --release --features os-keychain,tray -j4
+        run: cargo build --locked -p voiceremote-app --release --features os-keychain,tray -j4
       - name: Stage CLI sidecar for the native target
         shell: python
         run: |
@@ -171,7 +173,7 @@ jobs:
           NO_STRIP: true
         with:
           projectPath: SW/desktop/crates/tray
-          args: --features gui --bundles ${{ matrix.bundles }} --config tauri.bundle.conf.json ${{ env.TRAY_SIGNING_ARGS }}
+          args: --locked --features gui --bundles ${{ matrix.bundles }} --config tauri.bundle.conf.json ${{ env.TRAY_SIGNING_ARGS }}
           tagName: ${{ startsWith(github.ref, 'refs/tags/desktop-v') && github.ref_name || '' }}
           releaseName: Voice Receiver ${{ github.ref_name }}
           releaseBody: Windows NSIS and Linux deb/AppImage. Native desktop and physical phone acceptance remain unverified. Unsigned Windows builds may trigger SmartScreen.

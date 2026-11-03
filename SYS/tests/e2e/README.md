@@ -34,7 +34,8 @@ sequenceDiagram
 | [relay.mjs](relay.mjs) | Bundle **production** `SW/relay/src/worker.ts`; start actual Miniflare SQLite DOs; optional synthetic cloud settings/provisioner/upstreams | ✅ no test fixture / no Worker source changes |
 
 Run at repo root: `bash SYS/tests/e2e/run.sh`. Requires cargo, Swift 6.2, Node 22,
-Python 3 and the relay's pinned npm dependencies (installed if absent).
+Python 3 and the relay's pinned npm dependencies (`npm ci` if absent).
+Rust builds use the committed workspace lockfile with `--locked`.
 REQ-22–25/61; plan task 2's two clients exchange messages **verified locally**.
 
 The Rust executable is the real `voiceremote` CLI. Its opt-in `e2e-test` feature

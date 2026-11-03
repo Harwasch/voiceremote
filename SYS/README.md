@@ -4,6 +4,7 @@
 flowchart LR
   Requirements[requirements.md] --> Design[system-design-v1.md]
   Design --> Protocol[protocol] --> E2E[tests/e2e]
+  Design --> HIL[hil-safety-review: approval pending]
 ```
 
 | File | What | Status |
@@ -16,3 +17,12 @@ flowchart LR
 | [figures/](figures/) | Architecture diagram and remote concept image | ✅ |
 
 ![Remote concept](figures/remote-concept.png)
+
+`make -C SYS check` verifies generated contracts and language round trips with
+locked Cargo/npm dependencies. The [HIL review](hil-safety-review.md) now links
+the implemented software agent boundary; it still grants no hardware authority.
+Remote BLE remains a draft contract in
+[AppModel](../SW/ios/Packages/AppModel/Sources/RemoteContract.swift) and its
+[synthetic tests](../SW/ios/Packages/AppModel/Tests/RemoteContractTests.swift),
+not an authoritative SYS wire schema or proven accessory implementation (REQ-45–55).
+No separate remote draft document exists in this checkout.

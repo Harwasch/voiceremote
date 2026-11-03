@@ -1,3 +1,7 @@
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { readFileSync } from "node:fs";
 import { parse } from "yaml";
 import { describe, expect, it } from "vitest";
@@ -11,6 +15,31 @@ describe("relay release guards", () => {
     expect(guard).toBeGreaterThan(-1);
     expect(steps[guard].run).toContain('"$GITHUB_SHA" origin/main');
     expect(guard).toBeLessThan(steps.findIndex((s: any) => s.run === "npm run deploy"));
+  });
+  it("refuses an unaccepted release commit using the actual workflow guard", () => {
+    const workflow = parse(readFileSync(new URL("../../../.github/workflows/relay.yml", import.meta.url), "utf8"));
+    const script = workflow.jobs.deploy.steps.find((s: any) => /merge-base --is-ancestor/.test(s.run ?? "")).run;
+    const root = mkdtempSync(join(tmpdir(), "relay-release-guard-"));
+    const git = (...args: string[]) => execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+    try {
+      git("init", "-b", "main");
+      git("config", "user.email", "synthetic@example.invalid");
+      git("config", "user.name", "Synthetic guard test");
+      git("commit", "--allow-empty", "-m", "accepted");
+      const accepted = git("rev-parse", "HEAD");
+      git("remote", "add", "origin", root);
+      git("checkout", "-b", "candidate");
+      git("commit", "--allow-empty", "-m", "unaccepted");
+      const candidate = git("rev-parse", "HEAD");
+      const run = (sha: string) => execFileSync("bash", ["-e", "-c", script], {
+        cwd: root, env: { ...process.env, GITHUB_SHA: sha }, stdio: "pipe",
+      });
+      expect(() => run(accepted)).not.toThrow();
+      expect(() => run(candidate)).toThrow();
+      expect(() => run("missing-commit")).toThrow();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
   it("requires the exact component version on release tags", () => {
     expect(() => checkReleaseVersion("relay-v0.1.0", "0.1.0")).not.toThrow();

@@ -33,9 +33,9 @@ Trace: REQ-16, REQ-22–25, REQ-27, REQ-34, REQ-60/61. Tests prove synthetic
 protocol behavior, not owner on-device acceptance or external network performance.
 
 ```sh
-RUST_TEST_THREADS=4 HEAVY_CPUS=4 heavy cargo test --workspace --manifest-path SW/desktop/Cargo.toml -j4
-HEAVY_CPUS=4 heavy cargo check --target x86_64-pc-windows-msvc --manifest-path SW/desktop/Cargo.toml -j4
-HEAVY_CPUS=4 heavy cargo check --workspace --features os-keychain --manifest-path SW/desktop/Cargo.toml -j4
+RUST_TEST_THREADS=4 HEAVY_CPUS=4 heavy cargo test --workspace --locked --manifest-path SW/desktop/Cargo.toml -j4
+HEAVY_CPUS=4 heavy cargo check --locked --target x86_64-pc-windows-msvc --manifest-path SW/desktop/Cargo.toml -j4
+HEAVY_CPUS=4 heavy cargo check --locked --workspace --features os-keychain --manifest-path SW/desktop/Cargo.toml -j4
 make -C SYS check
 ```
 
@@ -201,12 +201,12 @@ keychain adapter; Linux uses the core’s private file store.
 | Auto announcement | Current schema carries no explicit target-selection event. Flash is triggered by authenticated text addressed here; strict Auto-before-first-word timing is **unverified**. |
 | Windows signing | CI imports base64 PFX `WINDOWS_CERT` only when supplied, with `WINDOWS_CERT_PASSWORD`. Otherwise installers are unsigned and Windows SmartScreen may warn or block launch. Signing does not establish SmartScreen reputation. See [Tauri signing](https://v2.tauri.app/distribute/sign/windows/). |
 | Licensing | Original UI + Tauri 2 (MIT OR Apache-2.0); CI rejects GPL-only Cargo packages. Linux dynamically links GTK/WebKit and AppIndicator under their native LGPL terms; no GPL application code was reused. |
-| Release guard | Tag must equal `desktop-v` + workspace `Cargo.toml` version; Tauri config must match. Windows NSIS + Ubuntu 22.04 deb/AppImage attach to a **draft** release; `desktop-ci-*` keeps installers as workflow artifacts. |
+| Release guard | Tag must equal `desktop-v` + workspace `Cargo.toml` version; Tauri config must match; release commit must be accepted on `origin/main`. Builds use `--locked`. Windows NSIS + Ubuntu 22.04 deb/AppImage attach to a **draft** release; `desktop-ci-*` keeps installers as workflow artifacts. |
 
 **Unverified:** coordinator’s `desktop-ci-*` native Windows/Linux run, installation,
 tray visibility, autostart, overlay focus on real desktops, Windows cross-user pipe
 access, phone state/toggle handling, LAN/external-network pairing and remote relay
 cleanup. Unit tests are synthetic evidence only (REQ-18/21–25/57).
 
-The workspace lockfile is outside this task’s ownership and remains unchanged.
-The coordinator needs to refresh `Cargo.lock` before committing the new crate.
+The workspace lockfile includes the tray dependency graph. Local checks and CI
+use `--locked`; native GUI/installer acceptance remains **unverified**.
