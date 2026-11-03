@@ -41,6 +41,8 @@ inference or phone measurements available here; all remain **unverified**.
   before starting the stream, but the public [vocabulary documentation](https://app.argmaxinc.com/docs/examples/custom-vocabulary)
   does not prove partial/final streaming behavior for this pinned SDK/model. Verify term accuracy and
   updates on the licensed SDK/device; do not claim that streaming vocabulary works from this adapter alone.
-- The debug-only [EnginePickerView](../../App/Settings/EnginePickerView.swift) exposes routing, comparison
-  and proxy settings. App navigation/capture integration belongs to the later UI worker; this task's
-  scope excludes the app entrypoint, so the view is ready for embedding, not currently reachable.
+- Active [SettingsView](../../App/Settings/SettingsView.swift) exposes engine selection,
+  model preparation and the private recorder; the separate EnginePickerView is superseded.
+  Apple UI/device execution remains **unverified**.
+
+Licensed availability boundary: after SDK/model preparation, the host calls `ArgmaxBuild.install(loadedKit:)`. Runtime and active Settings list Argmax only while `ArgmaxBuild.engine` is present; `remove()` withdraws it. Both ENABLE_ARGMAX and an importable licensed SDK are required. This checkout supplies no licence, kit initialization or model; native API compatibility remains **unverified**.

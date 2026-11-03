@@ -43,6 +43,7 @@ import VoiceRemoteProtocol
     private var savedSettings: AppSettings?
 
     init() throws {
+        UIDevice.current.isBatteryMonitoringEnabled = true
         let defaults = UserDefaults.standard
         let phoneID = defaults.string(forKey: "phoneID") ?? UUID().uuidString
         defaults.set(phoneID, forKey: "phoneID")
@@ -91,7 +92,7 @@ import VoiceRemoteProtocol
                     onDevice: local, cloud: cloud, isOnline: { await MainActor.run { AppRuntime.shared?.network.online ?? false } })
             }, online: { AppRuntime.shared?.network.online ?? false }, power: {
                 let process = ProcessInfo.processInfo
-                return (process.thermalState == .serious || process.thermalState == .critical, process.isLowPowerModeEnabled)
+                return (process.thermalState == .serious || process.thermalState == .critical, EngineRouter.lowBattery(level: UIDevice.current.batteryLevel, lowPowerMode: process.isLowPowerModeEnabled))
             }, deliver: { permit in
                 guard let host = AppRuntime.shared else { throw RouterError.invalidAuthorization }
                 try RegisteredRouting.enqueue(permit, devices: host.model.devices, router: host.router)
@@ -140,6 +141,7 @@ import VoiceRemoteProtocol
         var result: [any SttEngine] = []
         if await apple.modelAvailable() { result.append(apple) }
         if await whisper.modelAvailable { result.append(whisper) }
+        if let argmax = ArgmaxBuild.engine { result.append(argmax) }
         if model.settings.cloudConsent, let client = try? link.cloudClient() {
             for (vendor, provider) in [(CloudEngine.Vendor.elevenLabs, "elevenlabs"), (.assemblyAI, "assemblyai")] {
                 guard let url = try? client.proxyURL(provider: provider),
@@ -155,7 +157,8 @@ import VoiceRemoteProtocol
     func transcribeOffline(_ packets: [Data]) async throws -> String {
         let snapshot = model.settings
         let engines = await availableEngines()
-        let conditions = EngineRouter.Conditions(online: network.online, hot: false, lowBattery: ProcessInfo.processInfo.isLowPowerModeEnabled,
+        let conditions = EngineRouter.Conditions(online: network.online, hot: ProcessInfo.processInfo.thermalState == .serious || ProcessInfo.processInfo.thermalState == .critical,
+            lowBattery: EngineRouter.lowBattery(level: UIDevice.current.batteryLevel, lowPowerMode: ProcessInfo.processInfo.isLowPowerModeEnabled),
             maxAccuracy: snapshot.maxAccuracy, cloudConsent: snapshot.cloudConsent)
         var finals: [String] = []
         defer { model.endOfflineCloudIndication() }

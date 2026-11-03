@@ -39,7 +39,7 @@ Contracts and assumptions:
 - The host lists only ready engines. Offline selection never chooses cloud or surfaces failures.
   Cloud consent defaults to denied; neither the picker nor power/accuracy rules can bypass it.
   The router emits `.selected(EngineDescriptor)` (including `isCloud`) before capture/text so the host
-  can show cloud use. Explicit debug choice overrides automatic routing only when consent/network permit it.
+  can show cloud use. Explicit choice applies after offline/consent and thermal/battery/accuracy conditions.
   A/B also requires explicit `cloudConsent: true` before either cloud engine consumes audio.
 - User identity/persistence come from the host. Vocabulary snapshots remain separate per utterance;
   matching cleanup terms changes case only. Engine-specific prompting is advisory.
@@ -58,7 +58,7 @@ Contracts and assumptions:
   mixed cohorts, repeated cases, changed engines/versions and incomplete result sets are rejected.
   Public initializers also allow recorder-driven assembly. A synthetic test aggregates 200 cases.
   `first_text_ms` measures first delivered audio → first nonempty text; `final_after_eos_ms` measures
-  capture-stream EOS → last final event on a monotonic clock (zero if the final already arrived).
+  capture-stream EOS → last final event on a monotonic clock (absent if the final arrived before EOS).
   Empty input/missing final measurements remain absent/TBD; no latency is invented for failed runs.
   Host capture marks EOS promptly at speech end and paces replay audio for representative measurements.
   Synthetic status, device, source, expected text and private export destination are explicit inputs.
@@ -99,3 +99,5 @@ remain unchanged. [InterruptedCaptureTests](Tests/InterruptedCaptureTests.swift)
 loss/late-frame rejection and A/B failure; Apple/BLE behavior is **unverified**.
 
 Relay integration: CloudEngine constructs canonical ordered form queries; `URLSessionSocketFactory(authorizer:provider:)` obtains a fresh signed relay challenge and sends its proof headers in the WebSocket URLRequest. No vendor key is supplied by the phone. [Linux fake-server regression](Tests/CloudTests.swift) and [production relay + fake upstream gate](../../../../SYS/tests/e2e/README.md) cover both providers. Deployed providers and native Apple WebSocket execution remain **unverified**.
+
+Measurement tooling ([REQ-10], [REQ-13], [REQ-15]): thermal/low-battery/max-accuracy conditions precede local preference when consented cloud is ready. Battery policy uses measured level ≤20% or Low Power Mode; unknown level alone is not low. A/B retains raw text, separately measures conservative cleanup, and accepts optional acoustic clipping, controlled battery cohort and correlated delivery/field offsets. Missing measurements stay TBD; no device target is proven.

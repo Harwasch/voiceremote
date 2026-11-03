@@ -28,3 +28,5 @@ loss/late-frame rejection and A/B failure; Apple/BLE behavior is **unverified**.
 `URLSessionSocketFactory(authorizer:provider:)` signs the CloudEngine URL using Pairing's shared relay contract, then opens a URLRequest carrying both proof headers. Its injected opening boundary is tested against a real Linux fake WebSocket server. CloudEngine builds ordered form queries so literal pluses, apostrophes and Unicode vocabulary retain their values. [Real relay proof](../../../../../SYS/tests/e2e/README.md). Native Apple WebSocket execution **unverified**.
 
 Deferred sync opts into `EngineRouter.transcribe(requireComplete: true)`: any engine failure suppresses final text and is reported even offline. Default live dictation retains its existing stable-final recovery behavior.
+
+ABRunner now exports optional clipping, cleaned text, ordered monotonic cleanup/delivery/field offsets and controlled battery cohort metadata. EngineRouter power/accuracy fallback precedes local preference without bypassing consent or offline rules. Device measurements remain **unverified**.

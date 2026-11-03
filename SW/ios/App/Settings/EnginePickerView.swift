@@ -15,7 +15,7 @@ struct EnginePickerView: View {
         ("automatic", "Automatic"), ("apple", "Apple SpeechAnalyzer"),
         ("whisperkit", "WhisperKit small.en"), ("elevenlabs-scribe", "ElevenLabs Scribe v2"),
         ("assemblyai", "AssemblyAI Universal-3.5")
-    ] + (ArgmaxBuild.enabled ? [("argmax", "Argmax Pro (unverified)")] : []) }
+    ] + (ArgmaxBuild.engine != nil ? [("argmax", "Argmax Pro (unverified)")] : []) }
     private func reconcileComparison() {
         if abEngine == engine || !choices.contains(where: { $0.0 == abEngine && $0.0 != "automatic" }) {
             abEngine = choices.first(where: { $0.0 != engine && $0.0 != "automatic" })?.0 ?? "apple"

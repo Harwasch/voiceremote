@@ -61,3 +61,19 @@ def validate_run(run):
         ids = [row["case_id"] for row in engine["results"]]
         if not cases or len(ids) != len(set(ids)) or set(ids) != {c["id"] for c in cases}:
             raise ValueError("each engine needs exactly one result per case of its kind")
+
+        for row in engine["results"]:
+            stages = row.get("stages", {})
+            order = ("cleanup_started_ms", "cleanup_completed_ms", "delivery_started_ms",
+                     "delivery_completed_ms", "field_confirmed_ms")
+            values = [stages[key] for key in order if key in stages]
+            if values != sorted(values):
+                raise ValueError("stage timestamps must be ordered on one monotonic capture clock")
+            for end, start in (("cleanup_completed_ms", "cleanup_started_ms"),
+                               ("delivery_completed_ms", "delivery_started_ms"),
+                               ("field_confirmed_ms", "delivery_started_ms")):
+                if end in stages and start not in stages:
+                    raise ValueError("completed stage requires its start timestamp")
+        spoken = ["recording_id" in case for case in cases] if engine["kind"] == "brain" else []
+        if any(spoken) and (not all(spoken) or any("transcript" not in row for row in engine["results"])):
+            raise ValueError("spoken commands require recording IDs and recognized transcripts for every case")

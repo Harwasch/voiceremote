@@ -24,3 +24,5 @@ on Linux. REQ-4/5/8/12/16/18/28/29/31/32/50/56. No real transcripts/audio/creden
 Cross-review fixes: first reproduced failed-HOLD auto-retry, stale Auto presentation,
 and consumed approval retry with failing tests; then repaired those transitions.
 No real transcripts, audio or keys. Apple adapter behavior and CI remain **unverified**.
+
+| [BenchmarkRecorderTests.swift](BenchmarkRecorderTests.swift) | Synthetic clipping/battery export and 50-recording command-to-proposal integration | ✅ Linux synthetic tests; device **unverified** |

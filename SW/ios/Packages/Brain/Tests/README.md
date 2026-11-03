@@ -20,3 +20,5 @@ Start with authority tests. `swift test -j 4 --package-path SW/ios/Packages/Brai
 Full suite: omit the filter. Trace: REQ-31/33/36–40. No accuracy, latency or battery claim follows from fixtures.
 
 ClaudeBrainTests also verifies that RelayBrainTransport signs the final body unchanged, preserves configured model/version and forwards proof headers without a vendor key. The [real relay gate](../../../../../SYS/tests/e2e/README.md) checks the same bytes against production relay verification and a synthetic upstream.
+
+ClaudeBrainTests rejects oversized chunked responses without EOF and oversized Content-Length. BenchmarkTests exercises 50 distinct recognized spoken inputs and retains proposal-only behavior. Synthetic only; device/provider performance **unverified**.

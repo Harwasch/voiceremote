@@ -40,3 +40,5 @@ loss/late-frame rejection and A/B failure; Apple/BLE behavior is **unverified**.
 [RelayQueryTests.swift](RelayQueryTests.swift) reproduces vocabulary escaping failure before the fix. CloudTests' signed scenario passes the factory's real URLRequest headers through a Linux loopback RFC6455 bridge to FakeWebSocket.py; missing proof headers fail. Actual Ed25519 acceptance is exercised by [SYS E2E](../../../../../SYS/tests/e2e/README.md). Only invented audio/text/proofs are used.
 
 InterruptedCaptureTests verifies complete-success mode for deferred STT: an offline engine failure after a partial result cannot become successful history and authorize deletion.
+
+ABRunnerTests covers optional measurement schema export and rejects invalid stages/battery intervals. RouterTests covers local-preference precedence and measured/unknown battery policy. Synthetic only; performance remains **unverified**.

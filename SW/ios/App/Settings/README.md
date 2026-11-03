@@ -19,3 +19,7 @@ Share completion is explicitly Sendable and sends only a success Bool to MainAct
 UIKit callback arguments remain inside the callback. SDK compilation **unverified**.
 
 Cloud URLs are derived from retained relay membership. Relay origin edits apply to new pairing; existing computers retain the paired origin. Settings decode older files with defaults for the new model/version fields.
+
+Recorder additions ([REQ-13], [REQ-15], [REQ-39]): listen to the last private capture and annotate clipping; enter an independently measured single-engine battery cohort; optionally attach correlated monotonic delivery/field offsets. Import `SW/bench/sets/commands.json` through Files before recording for a 50-command run, then export proposal-only Apple Foundation Models results plus A/B speech results. Actual microphone/SDK/UI execution is **unverified**. Argmax appears only after a licensed kit is registered and loaded.
+
+After a successful share, start a new cohort for another microphone or command set; source/engine/vocabulary changes never mix into the prior export.

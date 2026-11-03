@@ -14,26 +14,73 @@ public protocol BrainHTTPTransport: Sendable {
 }
 
 /// Ephemeral sessions avoid transcript caches and cookies; redirects cannot leak request bodies.
-public final class URLSessionBrainTransport: NSObject, BrainHTTPTransport, URLSessionTaskDelegate, Sendable {
+public final class URLSessionBrainTransport: BrainHTTPTransport, Sendable {
     private let protocolClasses: [AnyClass]?
-    public init(protocolClasses: [AnyClass]? = nil) { self.protocolClasses = protocolClasses; super.init() }
+    public init(protocolClasses: [AnyClass]? = nil) { self.protocolClasses = protocolClasses }
     public func send(_ request: URLRequest) async throws -> BrainHTTPResponse {
         let config = URLSessionConfiguration.ephemeral
         config.httpCookieStorage = nil; config.urlCache = nil; config.httpShouldSetCookies = false
+        config.timeoutIntervalForResource = 60
         if let protocolClasses { config.protocolClasses = protocolClasses }
-        let session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
+        let reader = BoundedBrainReader()
+        let session = URLSession(configuration: config, delegate: reader, delegateQueue: nil)
         defer { session.invalidateAndCancel() }
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse else { throw BrainError.invalidResponse }
-        guard data.count <= 1_048_576 else { throw BrainError.responseTooLarge }
-        return BrainHTTPResponse(data: data, statusCode: http.statusCode)
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                reader.start(session: session, request: request, continuation: continuation)
+            }
+        } onCancel: { reader.cancel() }
     }
-    public func urlSession(_ session: URLSession, task: URLSessionTask,
-                           willPerformHTTPRedirection response: HTTPURLResponse,
-                           newRequest request: URLRequest,
-                           completionHandler: @escaping @Sendable (URLRequest?) -> Void) {
-        completionHandler(nil)
+}
+
+/// One reader per request; enforce the cap on headers and every chunk before appending.
+private final class BoundedBrainReader: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<BrainHTTPResponse, any Error>?
+    private var task: URLSessionDataTask?
+    private var cancelled = false
+    private var data = Data()
+    private var status = 0
+    private let limit = 1_048_576
+    func start(session: URLSession, request: URLRequest,
+               continuation: CheckedContinuation<BrainHTTPResponse, any Error>) {
+        lock.lock()
+        if cancelled { lock.unlock(); continuation.resume(throwing: CancellationError()); return }
+        self.continuation = continuation
+        let task = session.dataTask(with: request); self.task = task
+        lock.unlock(); task.resume()
     }
+    func cancel() {
+        lock.lock(); cancelled = true; let task = task; lock.unlock()
+        task?.cancel(); finish(.failure(CancellationError()))
+    }
+    private func finish(_ result: Result<BrainHTTPResponse, any Error>) {
+        lock.lock(); let pending = continuation; continuation = nil; lock.unlock()
+        pending?.resume(with: result)
+    }
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse,
+                    completionHandler: @escaping @Sendable (URLSession.ResponseDisposition) -> Void) {
+        guard let http = response as? HTTPURLResponse else {
+            finish(.failure(BrainError.invalidResponse)); completionHandler(.cancel); return
+        }
+        guard response.expectedContentLength <= Int64(limit) else {
+            finish(.failure(BrainError.responseTooLarge)); completionHandler(.cancel); return
+        }
+        status = http.statusCode; completionHandler(.allow)
+    }
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive chunk: Data) {
+        guard chunk.count <= limit - data.count else {
+            dataTask.cancel(); finish(.failure(BrainError.responseTooLarge)); return
+        }
+        data.append(chunk)
+    }
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: (any Error)?) {
+        if let error { finish(.failure(error)) }
+        else { finish(.success(BrainHTTPResponse(data: data, statusCode: status))) }
+    }
+    func urlSession(_ session: URLSession, task: URLSessionTask,
+                    willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest,
+                    completionHandler: @escaping @Sendable (URLRequest?) -> Void) { completionHandler(nil) }
 }
 
 public struct ClaudeBrainConfiguration: Sendable {
