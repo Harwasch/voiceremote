@@ -39,8 +39,9 @@ CLI examples (from `SW/desktop`, replace the account; LAN interface selection is
 cargo run -p voiceremote-app -- pair --qr --account ACCOUNT
 # Explicit operator-only bootstrap; reads VOICEREMOTE_RELAY_BOOTSTRAP_SECRET.
 cargo run -p voiceremote-app -- relay-bootstrap --account ACCOUNT --room ROOM --relay https://RELAY-ORIGIN
-# Phone public signing key comes from a trusted prior exchange, never the relay.
-cargo run -p voiceremote-app -- pair --code --account ACCOUNT --relay https://RELAY-ORIGIN --room ROOM --phone-device PHONE --phone-relay-key PHONE_ED25519_BASE64
+# Fresh signed room/invite; phone chooses its own relay key when redeeming QR.
+cargo run -p voiceremote-app -- pair --code --account ACCOUNT --relay https://RELAY-ORIGIN
+# Existing room membership: add --room ROOM. Optional --phone-device asserts DeviceInfo.
 cargo run -p voiceremote-app -- devices
 cargo run -p voiceremote-app -- revoke DEVICE_NAME_OR_FINGERPRINT
 cargo run -p voiceremote-app -- run --headless --account ACCOUNT --peer PEER_KEY_FINGERPRINT
@@ -55,10 +56,10 @@ Relay config: `VOICEREMOTE_RELAY_URL` is an HTTPS/WSS **origin** (no path,
 credentials or query), plus `VOICEREMOTE_ACCOUNT`. Ordinary operation uses a stored
 Ed25519 signing key and signed challenges, **no bearer**. `relay-key --account
 ACCOUNT` prints only the public key for trusted provisioning. Provisioning-secret
-access is confined to the explicit `relay-bootstrap` operator command. Phone
-joins using the QR token/expiry and its invited key before starting Noise.
-The relay contract lacks remote discovery of that phone key; this prior trusted
-exchange is required. [Exact flow and limitations](../../SYS/protocol/noise.md).
+is optional for deployments requiring it: `relay-bootstrap` or signed fresh-room
+creation can supply it from `VOICEREMOTE_RELAY_BOOTSTRAP_SECRET`. Phone joins with
+the QR token/expiry and its own newly generated Ed25519 key before Noise.
+No trusted prior phone-key exchange is required. [Exact flow and limitations](../../SYS/protocol/noise.md).
 
 | Operational boundary | Behavior / limit |
 |---|---|
@@ -71,12 +72,9 @@ exchange is required. [Exact flow and limitations](../../SYS/protocol/noise.md).
 | Concurrency | One receiver lease per state directory; reuse the same state directory for every instance using the same keychain service. Embedders take `ReceiverLease` too. File journal claims are atomic across handles; keychain claims serialize within the leased process. Revocation/devices remain available from a second process. |
 | Idempotency | Durable, separate command and committed-segment namespaces. Reserve before dispatch/injection, never evict. Certified pre-input failure releases the segment claim for retry. Uncertain/partial delivery or a crash retains its claim for reconciliation; replay reports uncertainty, never false success. Failure TaskStatus uses segment_id as command_id; unavailable means retryable, error means uncertain. Journal disk growth is unbounded; quota/retention policy **TBD**. |
 | Dictation | Large JSON is split into independently encrypted packets ≤11,000 bytes; strict ordered reassembly precedes validation/injection. Maximum legal Unicode dictation fits the worker’s 16,384-byte frame cap. Malformed/interleaved fragments fail closed. Only validated committed text addressed to this desktop reaches `TextInjector`. C0/C1 controls and line/paragraph separators rejected; partial/stale/duplicate segments do not insert. Windows uses private clipboard paste (unconfirmed and retained after a queued chord), pre-chord restoration, Unicode fallback, UIA password/read-only denial and UIPI checks. Linux remains unavailable until its platform worker attaches it. No text logged. |
-| Windows focus | Windows app session adapter sends encrypted focus boolean + last input time on change with a 30-second heartbeat (sampled each second); no field values or titles. Its transport keeps partial LAN frames and relay heartbeat timers across focus polls. The core transport/supervisor APIs remain unchanged; adapters are Windows-only except synthetic Linux tests. Native behavior and phone UI remain **unverified**; see [manual checks](crates/inject-windows/manual-test.md). |
-| Commands | Schema approval invariants enforced and idempotency reserved; no execution queue or provider invocation exists. Trusted policy/preview/scope validation is P1, not inferred from model fields. `Target` and `AgentAdapter` are empty extension traits. |
-| Idempotency | Durable, separate command and committed-segment namespaces. Reserve before dispatch/injection, never evict. A crash or injection failure after reservation is at-most-once: delivery may be lost and needs explicit reconciliation. Journal disk growth is unbounded; quota/retention policy **TBD**. |
-| Dictation | Large JSON is split into independently encrypted packets ≤11,000 bytes; strict ordered reassembly precedes validation/injection. Maximum legal Unicode dictation fits the worker’s 16,384-byte frame cap. Malformed/interleaved fragments fail closed. Only validated committed text addressed to this desktop reaches `TextInjector`. C0/C1 controls and line/paragraph separators rejected; partial/stale/duplicate segments do not insert. CLI adapter deliberately reports unavailable until injection crates are attached. No text logged. |
+| Windows focus | Windows app session adapter sends encrypted focus boolean + last input time on change with a 30-second heartbeat (sampled each second); no field values or titles. Its transport keeps partial LAN frames and relay heartbeat timers across focus polls. The relay adapter shares core’s VRR1 codec and persistent keepalive; the LAN adapter retains partial framing. Native behavior and phone UI remain **unverified**; see [manual checks](crates/inject-windows/manual-test.md). |
 | Commands | Default receiver reserves commands without execution. Opt-in headless `--agents-config` attaches exact-session CLI adapters through paired Noise; see [agent nodes](#agent-nodes) for authority, lifetime and cancellation limits. Core `AgentAdapter` remains a marker extension trait. |
-| Relay gaps | The 32,768-byte offline queue cannot buffer the entire largest Unicode dictation; online fragmentation is tested, offline delivery of that size is not guaranteed. No anonymous first-pair key discovery, whole-room deletion or end-to-end fragment delivery acknowledgement is defined. Failed Noise pairing best-effort revokes the invited phone membership so a fresh invitation can be issued. |
+| Relay gaps | The 2,105,344-byte offline queue is bounded; whole-room deletion and end-to-end fragment acknowledgement are absent. First pairing uses QR redemption with the phone’s own signing key. Failed Noise pairing best-effort revokes the invited phone membership so a fresh invitation can be issued. |
 | Timing / deployment | Compute pairing under one minute tested over loopback TCP and fake relay. Human time, home/external network, physical iPhone, mDNS on actual LAN, live TLS and Windows runtime **unverified**. |
 | UI | `dictate toggle` explicitly reports a stub. `tray` feature reserved; no Tauri dependency. |
 
@@ -156,3 +154,4 @@ and `systemctl --user enable --now voiceremote-agent`. The service and task scop
 default to `MemoryMax=2G`, `CPUQuota=100%` (**TBC**). Logs contain no transcripts;
 provider CLI storage follows the provider's own retention policy. Service deployment
 and permission-setting behavior on the owner machine are **unverified**.
+[Actual local E2E](../../SYS/tests/e2e/README.md): `bash SYS/tests/e2e/run.sh` verifies the production Worker, real CLI and Swift phone over WS/TCP using the fixed synthetic injector feature.

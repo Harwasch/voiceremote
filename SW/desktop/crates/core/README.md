@@ -17,7 +17,7 @@ flowchart LR
 
 Start with [pairing.rs](src/pairing.rs), [tests](tests/security.rs) and the
 [Noise profile](../../../../SYS/protocol/noise.md). REQ-16/22–25/27/34/60/61.
-OS injection, deployed relay and phone interoperability remain **unverified**.
+The real local [E2E gate](../../../../SYS/tests/e2e/README.md) verifies the merged Worker with Swift over WebSocket and LAN. OS injection, deployed WAN relay and physical iPhone remain **unverified**.
 Embedders hold `ReceiverLease` for receiver lifetime, clone one `Registry`, and
 close the transport after a receive/pairing error. `deliver` never executes tools.
 Insertion failures are non-fatal: `TaskStatus.command_id = segment_id` with

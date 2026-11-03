@@ -5,7 +5,11 @@ use async_trait::async_trait;
 use base64::{Engine, engine::general_purpose::STANDARD as B64};
 use futures_util::{SinkExt, StreamExt};
 use sha2::{Digest, Sha256};
-use std::{net::SocketAddr, time::Duration};
+use std::{
+    net::SocketAddr,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
@@ -19,7 +23,10 @@ use tokio_tungstenite::{
 use voiceremote_core::{
     protocol::*,
     relay::{FRAME_BYTES, PACKET_BYTES, RelayClient},
-    transport::{SERVICE, Transport, lan_address, select_named_interface},
+    transport::{
+        RelayReceive, RelayRecords, RelaySend, SERVICE, Transport, lan_address,
+        select_named_interface,
+    },
 };
 const IO_TIMEOUT: Duration = Duration::from_secs(10);
 enum Outgoing {
@@ -33,6 +40,7 @@ pub struct PacketTransport {
     pending: Option<Vec<u8>>,
     reader: JoinHandle<()>,
     writer: JoinHandle<()>,
+    records: Option<Arc<Mutex<RelayRecords>>>,
 }
 impl Drop for PacketTransport {
     fn drop(&mut self) {
@@ -114,6 +122,7 @@ impl PacketTransport {
             pending: None,
             reader,
             writer,
+            records: None,
         })
     }
     pub async fn connect_relay(client: &RelayClient) -> Result<Self> {
@@ -166,11 +175,17 @@ impl PacketTransport {
         let (input, incoming) = mpsc::channel(4);
         let (outgoing, mut output) = mpsc::channel(4);
         let control = outgoing.clone();
+        let records = Arc::new(Mutex::new(RelayRecords::new()));
+        let read_records = records.clone();
+        let write_records = records.clone();
+        let acknowledged = Arc::new(tokio::sync::Notify::new());
+        let read_acknowledged = acknowledged.clone();
         let read_route = route.clone();
         let reader = tokio::spawn(async move {
             let result=async {
                 let mut ping=tokio::time::interval_at(tokio::time::Instant::now()+Duration::from_secs(10),Duration::from_secs(10));
                 let mut seen=tokio::time::Instant::now();
+                let mut established = false;
                 loop {
                     let message=tokio::select! {
                         message=read.next()=>message.ok_or_else(||anyhow::anyhow!("relay disconnected"))??,
@@ -188,10 +203,19 @@ impl PacketTransport {
                                 RelayFrame::RelayCiphertext(frame)=>{
                                     ensure!(frame.account_id==read_route.account && frame.room_id==read_route.room && frame.sender_device_id!=read_route.sender,"relay route mismatch");
                                     let packet=B64.decode(frame.ciphertext)?;
-                                    ensure!(!packet.is_empty() && packet.len()<=PACKET_BYTES,"invalid ciphertext size");
-                                    input.send(Ok(packet)).await?;
+                                    ensure!(!packet.is_empty() && packet.len()<=PACKET_BYTES+69,"invalid ciphertext size");
+                                    let action = read_records.lock().unwrap().receive(&packet)?;
+                                    match action {
+                                        RelayReceive::Packet(packet) => { established = true; input.send(Ok(packet)).await?; },
+                                        RelayReceive::Reply(reply) => { control.send(Outgoing::Socket(relay_record_message(&read_route, &reply)?)).await?; },
+                                        RelayReceive::Ack => { established = true; read_acknowledged.notify_one(); },
+                                        RelayReceive::Ignore => {},
+                                    }
                                 },
-                                RelayFrame::RelayPresence(frame)=>ensure!(frame.account_id==read_route.account && frame.room_id==read_route.room,"presence route mismatch"),
+                                RelayFrame::RelayPresence(frame)=>{
+                                    ensure!(frame.account_id==read_route.account && frame.room_id==read_route.room,"presence route mismatch");
+                                    ensure!(!(established && frame.sender_device_id != read_route.sender && frame.state == RelayPresenceState::Offline), "peer offline; reconnect socket epoch");
+                                },
                                 _=>anyhow::bail!("unexpected relay metadata"),
                             }
                         },
@@ -211,16 +235,21 @@ impl PacketTransport {
                 match message {
                     Outgoing::Packet(packet, ack) => {
                         let result = async {
-                            let frame = RelayCiphertext {
-                                kind: RelayCiphertextKind::Ciphertext,
-                                account_id: route.account.clone(),
-                                room_id: route.room.clone(),
-                                sender_device_id: route.sender.clone(),
-                                ciphertext: B64.encode(packet),
+                            let prepared = write_records.lock().unwrap().send(&packet)?;
+                            let record = match prepared {
+                                RelaySend::Packet(record) => record,
+                                RelaySend::Rendezvous(hello) => {
+                                    write.send(relay_record_message(&route, &hello)?).await?;
+                                    loop {
+                                        acknowledged.notified().await;
+                                        let next = write_records.lock().unwrap().send(&packet)?;
+                                        if let RelaySend::Packet(record) = next {
+                                            break record;
+                                        }
+                                    }
+                                }
                             };
-                            let text = encode(&frame).map_err(anyhow::Error::msg)?;
-                            ensure!(text.len() <= FRAME_BYTES, "relay frame bound");
-                            write.send(Message::Text(text.into())).await?;
+                            write.send(relay_record_message(&route, &record)?).await?;
                             Ok(())
                         }
                         .await;
@@ -248,11 +277,32 @@ impl PacketTransport {
             pending: None,
             reader,
             writer,
+            records: Some(records),
         })
     }
 }
+fn relay_record_message(
+    route: &voiceremote_core::transport::RelayRoute,
+    record: &[u8],
+) -> Result<Message> {
+    let frame = RelayCiphertext {
+        kind: RelayCiphertextKind::Ciphertext,
+        account_id: route.account.clone(),
+        room_id: route.room.clone(),
+        sender_device_id: route.sender.clone(),
+        ciphertext: B64.encode(record),
+    };
+    let text = encode(&frame).map_err(anyhow::Error::msg)?;
+    ensure!(text.len() <= FRAME_BYTES, "relay frame bound");
+    Ok(Message::Text(text.into()))
+}
 #[async_trait]
 impl Transport for PacketTransport {
+    fn retained_session(&mut self) {
+        if let Some(records) = &self.records {
+            records.lock().unwrap().retained_session();
+        }
+    }
     async fn send(&mut self, packet: &[u8]) -> Result<()> {
         ensure!(
             !packet.is_empty() && packet.len() <= PACKET_BYTES,

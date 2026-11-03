@@ -19,6 +19,8 @@ use tokio_tungstenite::{
 
 #[async_trait]
 pub trait Transport: Send {
+    /// Called only by an already-authenticated Session, never fresh XX.
+    fn retained_session(&mut self) {}
     async fn send(&mut self, packet: &[u8]) -> Result<()>;
     async fn recv(&mut self) -> Result<Vec<u8>>;
     async fn close(&mut self) -> Result<()>;
@@ -230,6 +232,12 @@ pub struct RelayRoute {
 pub struct RelayTransport {
     socket: WebSocketStream<MaybeTlsStream<TcpStream>>,
     route: RelayRoute,
+    records: RelayRecords,
+    pub dropped_frames: u64,
+    peer_sender: Option<String>,
+    last_sender: Option<String>,
+    ping: tokio::time::Interval,
+    last_seen: tokio::time::Instant,
 }
 impl RelayTransport {
     pub async fn connect(client: &crate::relay::RelayClient) -> Result<Self> {
@@ -250,7 +258,7 @@ impl RelayTransport {
         request: tokio_tungstenite::tungstenite::http::Request<()>,
         route: RelayRoute,
     ) -> Result<Self> {
-        let (socket, _) = tokio::time::timeout(
+        let (socket, response) = tokio::time::timeout(
             Duration::from_secs(10),
             connect_async_with_config(
                 request,
@@ -263,7 +271,25 @@ impl RelayTransport {
             ),
         )
         .await??;
-        let mut transport = Self { socket, route };
+        let dropped_frames = response
+            .headers()
+            .get("x-relay-dropped-frames")
+            .map(|v| v.to_str()?.parse::<u64>().map_err(anyhow::Error::from))
+            .transpose()?
+            .unwrap_or(0);
+        let mut transport = Self {
+            socket,
+            route,
+            records: RelayRecords::new(),
+            dropped_frames,
+            peer_sender: None,
+            last_sender: None,
+            ping: tokio::time::interval_at(
+                tokio::time::Instant::now() + Duration::from_secs(10),
+                Duration::from_secs(10),
+            ),
+            last_seen: tokio::time::Instant::now(),
+        };
         transport.presence(RelayPresenceState::Online).await?;
         Ok(transport)
     }
@@ -288,11 +314,10 @@ impl RelayTransport {
         Ok(())
     }
 }
-#[async_trait]
-impl Transport for RelayTransport {
-    async fn send(&mut self, packet: &[u8]) -> Result<()> {
+impl RelayTransport {
+    async fn raw_send(&mut self, packet: &[u8]) -> Result<()> {
         ensure!(
-            !packet.is_empty() && packet.len() <= crate::pairing::MAX_NOISE,
+            !packet.is_empty() && packet.len() <= crate::pairing::MAX_NOISE + 69,
             "invalid packet length"
         );
         let frame = RelayCiphertext {
@@ -314,21 +339,16 @@ impl Transport for RelayTransport {
         .await??;
         Ok(())
     }
-    async fn recv(&mut self) -> Result<Vec<u8>> {
-        let mut ping = tokio::time::interval_at(
-            tokio::time::Instant::now() + Duration::from_secs(10),
-            Duration::from_secs(10),
-        );
-        let mut last_seen = tokio::time::Instant::now();
+    async fn raw_recv(&mut self) -> Result<Vec<u8>> {
         loop {
             let message = tokio::select! {
                 message=self.socket.next()=>message.ok_or_else(||crate::anyhow!("relay disconnected"))??,
-                _=ping.tick()=>{
-                    ensure!(last_seen.elapsed()<Duration::from_secs(30),"relay keepalive timed out");
+                _=self.ping.tick()=>{
+                    ensure!(self.last_seen.elapsed()<Duration::from_secs(30),"relay keepalive timed out");
                     tokio::time::timeout(Duration::from_secs(5),self.socket.send(Message::Ping(Vec::new().into()))).await??;continue;
                 },
             };
-            last_seen = tokio::time::Instant::now();
+            self.last_seen = tokio::time::Instant::now();
             match message {
                 Message::Text(text) => {
                     ensure!(
@@ -344,18 +364,27 @@ impl Transport for RelayTransport {
                                     && frame.sender_device_id != self.route.sender,
                                 "relay route mismatch"
                             );
+                            self.last_sender = Some(frame.sender_device_id);
                             let bytes = B64.decode(frame.ciphertext)?;
                             ensure!(
-                                !bytes.is_empty() && bytes.len() <= crate::pairing::MAX_NOISE,
+                                !bytes.is_empty() && bytes.len() <= crate::pairing::MAX_NOISE + 69,
                                 "invalid ciphertext size"
                             );
                             return Ok(bytes);
                         }
-                        RelayFrame::RelayPresence(frame) => ensure!(
-                            frame.account_id == self.route.account
-                                && frame.room_id == self.route.room,
-                            "relay presence route mismatch"
-                        ),
+                        RelayFrame::RelayPresence(frame) => {
+                            ensure!(
+                                frame.account_id == self.route.account
+                                    && frame.room_id == self.route.room,
+                                "relay presence route mismatch"
+                            );
+                            ensure!(
+                                !(frame.state == RelayPresenceState::Offline
+                                    && self.peer_sender.as_deref()
+                                        == Some(&frame.sender_device_id)),
+                                "peer offline; reconnect socket epoch"
+                            );
+                        }
                         _ => crate::bail!("unexpected relay metadata"),
                     }
                 }
@@ -366,8 +395,176 @@ impl Transport for RelayTransport {
             }
         }
     }
-    async fn close(&mut self) -> Result<()> {
+    async fn raw_close(&mut self) -> Result<()> {
         let _ = self.presence(RelayPresenceState::Offline).await;
         Ok(self.socket.close(None).await?)
+    }
+}
+
+// Socket-generation rendezvous inside opaque ciphertext. See noise.md VRR1.
+fn relay_record(kind: u8, epoch: &[u8], packet: &[u8]) -> Vec<u8> {
+    let mut bytes = b"VRR1".to_vec();
+    bytes.push(kind);
+    bytes.extend_from_slice(epoch);
+    bytes.extend_from_slice(packet);
+    bytes
+}
+fn relay_record_parts(bytes: &[u8]) -> Option<(u8, &[u8])> {
+    (bytes.len() >= 5 && &bytes[..4] == b"VRR1").then(|| (bytes[4], &bytes[5..]))
+}
+/// Shared socket-generation codec for ordinary and full-duplex relay carriers.
+/// State survives cancellation; callers send Reply records before reading again.
+pub struct RelayRecords {
+    local_epoch: [u8; 32],
+    epoch: Option<Vec<u8>>,
+    step: u8,
+    retained: bool,
+}
+pub enum RelaySend {
+    Packet(Vec<u8>),
+    Rendezvous(Vec<u8>),
+}
+pub enum RelayReceive {
+    Ignore,
+    Reply(Vec<u8>),
+    Ack,
+    Packet(Vec<u8>),
+}
+impl Default for RelayRecords {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+impl RelayRecords {
+    pub fn new() -> Self {
+        use rand::RngCore;
+        let mut local_epoch = [0; 32];
+        rand::rngs::OsRng.fill_bytes(&mut local_epoch);
+        Self {
+            local_epoch,
+            epoch: None,
+            step: 0,
+            retained: false,
+        }
+    }
+    pub fn retained_session(&mut self) {
+        self.retained = true;
+    }
+    pub fn send(&mut self, packet: &[u8]) -> Result<RelaySend> {
+        ensure!(
+            !packet.is_empty() && packet.len() <= crate::pairing::MAX_NOISE,
+            "invalid Noise length"
+        );
+        if self.step == 0 && self.retained && self.epoch.is_none() {
+            let mut epoch = self.local_epoch.to_vec();
+            epoch.extend_from_slice(&[0; 32]);
+            let record = relay_record(6, &epoch, packet);
+            self.epoch = Some(epoch);
+            self.step = 3;
+            return Ok(RelaySend::Packet(record));
+        }
+        if self.step == 0 && self.epoch.is_none() {
+            ensure!(packet.len() == 32, "first XX record length");
+            return Ok(RelaySend::Rendezvous(relay_record(
+                0,
+                &self.local_epoch,
+                &[],
+            )));
+        }
+        let kind = if self.step < 3 { self.step + 2 } else { 5 };
+        let frame = relay_record(
+            kind,
+            self.epoch
+                .as_deref()
+                .ok_or_else(|| crate::anyhow!("missing socket epoch"))?,
+            packet,
+        );
+        self.step = (self.step + 1).min(3);
+        Ok(RelaySend::Packet(frame))
+    }
+    pub fn receive(&mut self, raw: &[u8]) -> Result<RelayReceive> {
+        let Some((kind, body)) = relay_record_parts(raw) else {
+            return Ok(RelayReceive::Ignore);
+        };
+        if self.step == 0
+            && self.retained
+            && kind == 6
+            && body.len() > 64
+            && body[32..64] == [0; 32]
+        {
+            self.epoch = Some(body[..64].to_vec());
+            self.step = 3;
+            return Ok(RelayReceive::Packet(body[64..].to_vec()));
+        }
+        if self.step == 0 {
+            if kind == 0 && body.len() == 32 {
+                let mut epoch = body.to_vec();
+                epoch.extend_from_slice(&self.local_epoch);
+                return Ok(RelayReceive::Reply(relay_record(1, &epoch, &[])));
+            }
+            if kind == 1 && body.len() == 64 && body[..32] == self.local_epoch {
+                self.epoch = Some(body.to_vec());
+                return Ok(RelayReceive::Ack);
+            }
+            if kind != 2 || body.len() != 96 || body[32..64] != self.local_epoch {
+                return Ok(RelayReceive::Ignore);
+            }
+            self.epoch = Some(body[..64].to_vec());
+        }
+        let Some(epoch) = &self.epoch else {
+            return Ok(RelayReceive::Ignore);
+        };
+        if body.len() <= 64 || &body[..64] != epoch {
+            return Ok(RelayReceive::Ignore);
+        }
+        let expected = if self.step < 3 { self.step + 2 } else { 5 };
+        ensure!(kind == expected, "out of order socket epoch record");
+        self.step = (self.step + 1).min(3);
+        Ok(RelayReceive::Packet(body[64..].to_vec()))
+    }
+}
+#[async_trait]
+impl Transport for RelayTransport {
+    fn retained_session(&mut self) {
+        self.records.retained_session();
+    }
+    async fn send(&mut self, packet: &[u8]) -> Result<()> {
+        loop {
+            match self.records.send(packet)? {
+                RelaySend::Packet(record) => return self.raw_send(&record).await,
+                RelaySend::Rendezvous(record) => {
+                    self.raw_send(&record).await?;
+                    loop {
+                        let raw = self.raw_recv().await?;
+                        match self.records.receive(&raw)? {
+                            RelayReceive::Ack => {
+                                self.peer_sender = self.last_sender.clone();
+                                break;
+                            }
+                            RelayReceive::Reply(reply) => self.raw_send(&reply).await?,
+                            RelayReceive::Ignore => {}
+                            RelayReceive::Packet(_) => crate::bail!("unexpected rendezvous packet"),
+                        }
+                    }
+                }
+            }
+        }
+    }
+    async fn recv(&mut self) -> Result<Vec<u8>> {
+        loop {
+            let raw = self.raw_recv().await?;
+            match self.records.receive(&raw)? {
+                RelayReceive::Packet(packet) => {
+                    self.peer_sender = self.last_sender.clone();
+                    return Ok(packet);
+                }
+                RelayReceive::Reply(reply) => self.raw_send(&reply).await?,
+                RelayReceive::Ack => self.peer_sender = self.last_sender.clone(),
+                RelayReceive::Ignore => {}
+            }
+        }
+    }
+    async fn close(&mut self) -> Result<()> {
+        self.raw_close().await
     }
 }

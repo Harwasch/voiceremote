@@ -10,13 +10,21 @@ use ed25519_dalek::{Signer, SigningKey};
 use rand::{RngCore, rngs::OsRng};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::time::Duration;
+use std::{
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
+};
 use tokio_tungstenite::tungstenite::{
     client::IntoClientRequest,
     http::{HeaderValue, Request},
 };
 use zeroize::Zeroizing;
 
+pub fn new_room_id() -> String {
+    let mut bytes = [0; 16];
+    OsRng.fill_bytes(&mut bytes);
+    hex::encode(bytes)
+}
 pub const FRAME_BYTES: usize = 16_384;
 /// Conservative packet budget including AEAD; leaves room for three maximum IDs.
 pub const PACKET_BYTES: usize = 11_000;
@@ -51,6 +59,7 @@ pub struct RelayClient {
     base: String,
     pub route: RelayRoute,
     identity: RelayIdentity,
+    server_clock: Arc<Mutex<Option<(u64, Instant)>>>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -58,6 +67,7 @@ struct Challenge {
     challenge: String,
     message: String,
     expires_at: u64,
+    server_time: u64,
 }
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -99,6 +109,14 @@ impl RelayClient {
         for id in [&route.account, &route.room, &route.sender] {
             relay_id(id)?;
         }
+        ensure!(
+            route.room.len() == 32
+                && route
+                    .room
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
+            "relay room must be 128-bit lowercase hex"
+        );
         let origin = origin
             .replacen("wss://", "https://", 1)
             .replacen("ws://", "http://", 1);
@@ -132,6 +150,7 @@ impl RelayClient {
             base,
             route,
             identity,
+            server_clock: Arc::new(Mutex::new(None)),
         })
     }
     async fn response(&self, request: reqwest::RequestBuilder) -> Result<String> {
@@ -157,18 +176,50 @@ impl RelayClient {
             .header("Content-Type", "application/json")
             .body(body)
     }
-    /// Privileged provisioning ONLY, never attempted implicitly by normal pairing.
+    /// Signed creation; an optional provisioner secret is used only when the
+    /// deployment requires it. Ordinary first-pair rooms need no phone key.
+    pub async fn create(&self, provisioner: Option<&str>) -> Result<u64> {
+        let body = serde_json::json!({"device_id":self.route.sender,"public_key":self.identity.public_key()}).to_string();
+        let proof = serde_json::to_vec(&serde_json::json!([
+            "voiceremote-relay-create-v1",
+            self.route.account,
+            self.route.room,
+            digest(body.as_bytes())
+        ]))?;
+        let mut request = self
+            .post("create", body)
+            .header("X-Relay-Signature", self.identity.sign(&proof));
+        if let Some(secret) = provisioner {
+            request = request.bearer_auth(secret);
+        }
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Created {
+            created: bool,
+            server_time: u64,
+            expires_at: u64,
+        }
+        let created: Created = serde_json::from_str(&self.response(request).await?)?;
+        ensure!(
+            created.created
+                && created.expires_at <= 9_007_199_254_740_991
+                && created.expires_at > created.server_time
+                && created.expires_at - created.server_time <= 120_000,
+            "invalid creation lifetime"
+        );
+        *self
+            .server_clock
+            .lock()
+            .map_err(|_| crate::anyhow!("clock lock"))? =
+            Some((created.server_time, Instant::now()));
+        Ok(created.expires_at)
+    }
     pub async fn bootstrap(&self, provisioning_secret: &str) -> Result<()> {
         ensure!(
             provisioning_secret.len() >= 32,
             "provisioning secret too short"
         );
-        let body=serde_json::json!({"device_id":self.route.sender,"public_key":self.identity.public_key()}).to_string();
-        self.response(
-            self.post("bootstrap", body)
-                .bearer_auth(provisioning_secret),
-        )
-        .await?;
+        self.create(Some(provisioning_secret)).await?;
         Ok(())
     }
     async fn authorization(&self, operation: &str, body: &str) -> Result<(String, String)> {
@@ -180,6 +231,7 @@ impl RelayClient {
             self.route.room,
             digest(request_body.as_bytes())
         ]))?;
+        let started = Instant::now();
         let response = self
             .response(
                 self.post("challenge", request_body)
@@ -188,12 +240,19 @@ impl RelayClient {
             .await?;
         let challenge: Challenge = serde_json::from_str(&response)?;
         canonical_base64(&challenge.challenge, 32)?;
-        let now = SystemClock.now_ms()?;
-        let remaining = challenge.expires_at.saturating_sub(now);
         ensure!(
-            remaining > 0 && remaining <= 60_000,
+            challenge.expires_at <= 9_007_199_254_740_991
+                && challenge.expires_at > challenge.server_time
+                && challenge.expires_at - challenge.server_time <= 60_000
+                && started.elapsed()
+                    < Duration::from_millis(challenge.expires_at - challenge.server_time),
             "expired/future relay challenge"
         );
+        *self
+            .server_clock
+            .lock()
+            .map_err(|_| crate::anyhow!("clock lock"))? =
+            Some((challenge.server_time, Instant::now()));
         let expected = serde_json::json!([
             "voiceremote-relay-auth-v1",
             self.route.account,
@@ -220,24 +279,50 @@ impl RelayClient {
         )
         .await
     }
-    pub async fn invite(&self, device: &str, key: &str, controller: bool) -> Result<Invitation> {
-        relay_id(device)?;
-        canonical_base64(key, 32)?;
-        let raw = self
-            .signed_post(
-                "invite",
-                serde_json::json!({"device_id":device,"public_key":key,"controller":controller})
-                    .to_string(),
-            )
-            .await?;
-        let invitation: Invitation = serde_json::from_str(&raw)?;
-        canonical_base64(&invitation.one_use_token, 32)?;
-        let remaining = invitation.expires_at.saturating_sub(SystemClock.now_ms()?);
+    pub async fn invite(&self) -> Result<Invitation> {
+        // An existing room obtains server time with a *consumed* connect proof,
+        // rather than leaking unused challenges and exhausting their two slots.
+        let known = self
+            .server_clock
+            .lock()
+            .map_err(|_| crate::anyhow!("clock lock"))?
+            .is_some();
+        if !known {
+            use crate::transport::Transport;
+            crate::transport::RelayTransport::connect(self)
+                .await?
+                .close()
+                .await?;
+        }
+        let (server_time, observed) = self
+            .server_clock
+            .lock()
+            .map_err(|_| crate::anyhow!("clock lock"))?
+            .ok_or_else(|| crate::anyhow!("server clock unavailable"))?;
         ensure!(
-            remaining > 0 && remaining <= 120_000,
-            "invalid relay invitation lifetime"
+            observed.elapsed() < Duration::from_secs(60),
+            "refresh server time before invitation"
         );
-        Ok(invitation)
+        let expires_at = server_time + observed.elapsed().as_millis() as u64 + 120_000;
+        let mut token = Zeroizing::new([0; 32]);
+        OsRng.fill_bytes(token.as_mut());
+        let one_use_token = B64.encode(*token);
+        let raw = self.signed_post("invite",serde_json::json!({"token_sha256":digest(one_use_token.as_bytes()),"expires_at":expires_at}).to_string()).await?;
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Registered {
+            registered: bool,
+            expires_at: u64,
+        }
+        let registered: Registered = serde_json::from_str(&raw)?;
+        ensure!(
+            registered.registered && registered.expires_at == expires_at,
+            "invitation context mismatch"
+        );
+        Ok(Invitation {
+            one_use_token,
+            expires_at,
+        })
     }
     pub async fn join(&self, invitation: &Invitation) -> Result<()> {
         canonical_base64(&invitation.one_use_token, 32)?;
@@ -257,7 +342,7 @@ impl RelayClient {
             invitation.expires_at
         ])
         .to_string();
-        self.response(self.post("join",serde_json::json!({"device_id":self.route.sender,"public_key":key,"one_use_token":invitation.one_use_token,"signature":self.identity.sign(message.as_bytes())}).to_string())).await?;
+        self.response(self.post("join",serde_json::json!({"device_id":self.route.sender,"public_key":key,"one_use_token":invitation.one_use_token,"expires_at":invitation.expires_at,"signature":self.identity.sign(message.as_bytes())}).to_string())).await?;
         Ok(())
     }
     pub async fn revoke(&self, device: &str) -> Result<()> {

@@ -65,6 +65,13 @@ public actor PairingConfirmation {
         finished = true
         return PairedPeer(device: remote, publicKey: publicKey, roomID: roomID, session: session)
     }
+    /// Persist only the result of both trusted confirmations.
+    public func finish(registry: PeerRegistry) async throws -> ApplicationSession {
+        guard let local else { throw PairingError.confirmationRequired }
+        let paired = try finish()
+        let enrollment = try await registry.enroll(paired)
+        return ApplicationSession(noise: session, registry: registry, peer: enrollment, localDeviceID: local.device_id)
+    }
     public func abort(transport: any PairingTransport) async {
         aborted = true
         await session.close(); await transport.close()

@@ -1,46 +1,50 @@
 ```mermaid
-sequenceDiagram
-  participant Phone
-  participant Desktop
-  Phone->>Phone: Validate QR via ProtocolCodec
-  Phone->>Desktop: XX message 1: e, empty payload
-  Desktop->>Phone: XX message 2: e, ee, s, es, empty payload
-  Phone->>Phone: Pin remote static key to QR
-  Phone->>Desktop: XX message 3: s, se, encrypted one-use token
-  Note over Phone,Desktop: Compare four words; confirm on each screen
-  Phone->>Desktop: Encrypted 01 || handshake hash || DeviceInfo JSON
-  Desktop->>Phone: Encrypted 01 || handshake hash || DeviceInfo JSON
-  Phone->>Phone: Expose PairedPeer only after both confirmations
+flowchart LR
+  QR[Validated QR] --> Pair[XX + two human confirmations]
+  Pair --> Registry[KeyStore + enrollment generation]
+  Registry --> Resume[Fresh session/v1 XX + ready]
+  Pair & Resume --> Session[Ordered encrypted application session]
+  Session --> LAN[LANTransport / TCP]
+  Session --> Relay[RelayTransport / WebSocket]
 ```
 
 | Path | What | Status |
 |---|---|---|
-| [Package.swift](Package.swift) / [Package.resolved](Package.resolved) | iOS 26 minimum; pinned swift-crypto 4.0.0 + generated Protocol | ✅ Linux tested |
-| [Sources/](Sources/README.md) | Noise XX, QR checks, phrase, confirmation gate and transport boundary | ✅ Unit tested |
-| [Tests/](Tests/README.md) | Published vectors, protocol framing and negative security tests | ✅ Linux tested |
+| [Package.swift](Package.swift) / [Package.resolved](Package.resolved) | iOS 26; pinned swift-crypto and generated Protocol | ✅ Linux compiled |
+| [Sources/](Sources/README.md) | Pairing, resume, fragments, relay join/auth, LAN, key storage | ✅ Linux tests; Apple adapters unverified |
+| [E2E/](E2E/README.md) | Actual socket phone client for the SYS real Worker/CLI gate | ✅ Linux |
+| [Tests/](Tests/README.md) | Shared SYS vectors, negative tests, real Rust/Swift process exchange | ✅ Linux |
 
-Start with [PairingConnection](Sources/PairingConnection.swift).
-Run `swift test -j 4 --package-path SW/ios/Packages/Pairing`.
-Trace: REQ-22/23/24/25/60/61; [wire contract](../../../../SYS/protocol/wire-contract.md).
+Start: [PairingConnection.swift](Sources/PairingConnection.swift), then
+[ApplicationSession.swift](Sources/ApplicationSession.swift).
+Trace: REQ-22–25/60/61; [authoritative wire profile](../../../../SYS/protocol/noise.md).
 
-| Wire choice | Definition |
+```sh
+export CLANG_MODULE_CACHE_PATH=/tmp/voiceremote-clang-cache
+export SWIFTPM_MODULECACHE_OVERRIDE=/tmp/voiceremote-swift-cache
+export HEAVY_CPUS=4
+heavy swift test -j 4 --package-path SW/ios/Packages/Pairing
+# Real process pair; Rust is built automatically with cargo -j4:
+heavy swift test -j 4 --package-path SW/ios/Packages/Pairing --filter NoiseInteropTests
+```
+
+Run from the repository root. Host tests need cargo and Python 3. No test skips.
+[Interop details and real local gate](../../../../SYS/protocol/noise.md#phone-session-and-process-interop).
+
+| Integration step | Trusted caller responsibility |
 |---|---|
-| Crypto | `Noise_XX_25519_ChaChaPoly_BLAKE2s`, [Noise revision 34](https://noiseprotocol.org/noise.html); X25519/AEAD from swift-crypto, unkeyed BLAKE2s + Noise HMAC/HKDF locally implemented. |
-| Prologue | `voiceremote/pair/v1` + NUL, u32-BE UTF-8 account length/account, u32-BE room length/room, raw 32-byte desktop key, u64-BE expiry. No JSON canonicalization. |
-| Phrase | First four handshake-hash bytes, each indexed into the desktop's 16-prefix × 16-suffix dictionary; four space-separated words. |
-| Confirmation | One encrypted transport message: byte `01`, raw 32-byte handshake hash, ProtocolCodec DeviceInfo JSON; same account, distinct device IDs. |
-| Ordering | One Noise message per frame, ordered reliable transport. Same session for LAN/relay. Adapter owns framing/reconnect; never reset a live nonce stream. |
+| Keys | Retain one `DeviceKeys` and one `PeerRegistry` over `KeychainStore`. In-memory fake is for tests. Keychain uses AfterFirstUnlockThisDeviceOnly for locked background audio/session work; explicit synchronizable=false excludes iCloud sync. `noiseKey()` persists X25519; `relayKey(account:room:)` and `relayDeviceID(account:room:)` create/persist a separate per-room Ed25519 identity. |
+| First pair | A lost join response is recovered by a signed member connect with the same retained key/ID. For expired/aborted Noise enrollment, authenticate with that membership, revoke self, then scan a fresh QR. Parse QR with `PairingInvitation`. Build `RelayClient` with that room's relay identity and `URLSessionRelayHTTP` / `URLSessionWebSocketConnector`; `redeem` once, then `connect`. LAN uses `LANTransport` with `NetworkLANStream`. |
+| Confirmation | Initiate XX; trusted UI compares both phrases and calls `confirmLocal`; `receiveConfirmation`, then `finish(registry:)`. No automatic confirmation or model authority. |
+| Application | `ApplicationSession.send/receive` validates strict `InnerMessage` and nested accounts. 11,000-byte encrypted packets; ordered `03` fragments, 2 MiB bound, 90-second whole-message receive deadline. No executor or insertion adapter in this package. |
+| Reconnect | Close the failed session/transport; `RelayClient.reconnect(registry:peer:)` surfaces permanent refusals and deletes enrollment on 403; transient failures back off 500 ms → 30 s and reports `droppedFrames`. Load enrollment with `lookup(publicKey:)`, then `SessionResume.initiate`. Do not retry an uncertain write. Dropped frames mean incomplete delivery, never insertion success. |
+| Path switch | Serialize sends/receives. An already-authenticated ApplicationSession can mark a new carrier as retained state and preserve nonce order. Fresh pairing/reconnect uses the two-socket epoch and fresh XX; those handshakes ignore retained-state records. Concurrent readers/writers on a direction are rejected. A failed path requires fresh resume; old packets are never replayed. |
+| Revoke | Delete enrollment through `PeerRegistry.revoke`; generation checks reject old sessions even after re-enrollment. Authenticated incoming revoke addressing this phone deletes the sender enrollment and closes the session. Relay membership removal is separate: signed `RelayClient.revoke`. |
 
-`SYS/protocol/noise.md` was absent on this base. The application profile above was
-matched to the desktop worker's `SW/desktop/crates/core/src/pairing.rs` in sibling
-worktree `codex-feat-desktop-core`; recheck against its authoritative document when integrated.
-Bundled Cacophony and desktop snow 0.10.0 vectors prove byte interoperability,
-including confirmations and application ciphertext. Actual desktop/phone
-network pairing, Apple Keychain storage and on-device behavior remain **unverified**.
-
-Trusted UI adapters supply identity keys, account, clock and confirmation taps;
-feed only `finish()` results into Core's registry. Desktop owns token consumption,
-replay rejection and the issuer monotonic deadline. Phone checks QR expiry twice
-and pins the responder before sending the token. All I/O must honor cancellation;
-closing transport must unblock I/O. Handshake deadline defaults to 30 seconds.
-Raw `NoiseXX.split` is a cryptographic primitive, not an enrollment API.
+Raw `NoiseXX`/`NoiseSession` are cryptographic primitives, not enrollment APIs.
+Synthetic Rust/Swift interop proves handshake, phrase, both confirmations,
+maximum Unicode fragments in both directions, resume, and revoke from either side.
+Real iPhone networks, Apple Keychain/Network execution, native WebSocket upgrade
+headers and deployed relay pairing remain **unverified**. The real local gate now verifies the merged Worker with corrected desktop
+and phone clients. Run `bash SYS/tests/e2e/run.sh`; it also tests persisted stale
+queue replay, real WebSocket/TCP resume, insertion and permanent refusal.
