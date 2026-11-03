@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "Brain",
-    platforms: [.iOS("26.0"), .macOS(.v14)],
+    platforms: [.iOS("26.0"), .macOS("26.0")],
     products: [.library(name: "Brain", targets: ["Brain"])],
     dependencies: [.package(path: "../Protocol")],
     targets: [
