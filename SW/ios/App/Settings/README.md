@@ -23,3 +23,5 @@ Cloud URLs are derived from retained relay membership. Relay origin edits apply 
 Recorder additions ([REQ-13], [REQ-15], [REQ-39]): listen to the last private capture and annotate clipping; enter an independently measured single-engine battery cohort; optionally attach correlated monotonic delivery/field offsets. Import `SW/bench/sets/commands.json` through Files before recording for a 50-command run, then export proposal-only Apple Foundation Models results plus A/B speech results. Actual microphone/SDK/UI execution is **unverified**. Argmax appears only after a licensed kit is registered and loaded.
 
 After a successful share, start a new cohort for another microphone or command set; source/engine/vocabulary changes never mix into the prior export.
+
+Privacy/consent: Settings shows the fixed installation account, participant/cloud policy and full expired held text with explicit Keep for seven days / Delete choices (REQ-56/58). Cloud consent remains off by default and is saved synchronously. Owner review of provider wording and Apple UI behavior remains **unverified**.

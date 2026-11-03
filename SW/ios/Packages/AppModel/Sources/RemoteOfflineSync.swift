@@ -116,18 +116,21 @@ public actor RemoteOfflineSync {
         let metadata: OfflineMetadata
         var audio: Data? // one-time migration of the earlier base64 journal
         var text: String?
+        var textCreatedAt: Int64?
         var sttAttempted: Bool?
         var issue: String?
         var discarded = false
         var historySaved = false
         var deleted = false
     }
+    private let now: @Sendable () -> Int64
     private let url: URL
     private let audioDirectory: URL
     private var records: [String: Record]
     private var running = false
     public private(set) var audioBytesWritten: UInt64 = 0
-    public init(url: URL) throws {
+    public init(url: URL, now: @escaping @Sendable () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1000) }) throws {
+        self.now = now
         self.url = url; audioDirectory = url.appendingPathExtension("audio")
         try? FileManager.default.removeItem(at: url.appendingPathExtension("pending"))
         records = FileManager.default.fileExists(atPath: url.path)
@@ -142,10 +145,27 @@ public actor RemoteOfflineSync {
                 }
                 record.audio = nil; records[key] = record; migrated = true
             }
-            if record.text != nil || record.discarded || record.deleted {
-                try? FileManager.default.removeItem(at: audioDirectory.appendingPathComponent(key))
+            if record.historySaved || record.deleted {
+                record.text = nil; record.textCreatedAt = nil; records[key] = record; migrated = true
+            } else if record.text != nil {
+                // Legacy pending text gets one bounded migration interval.
+                record.textCreatedAt = record.textCreatedAt ?? now()
+                if let created = record.textCreatedAt, created > now() || created < 0 || now() - created >= 604_800_000 {
+                    record.text = nil; record.textCreatedAt = nil; record.sttAttempted = true
+                    record.issue = "Pending transcript expired. Source remains on the remote; Retry or Discard explicitly."
+                }
+                records[key] = record; migrated = true
+            }
+            if record.text != nil || record.historySaved || record.discarded || record.deleted {
+                let completedAudio = audioDirectory.appendingPathComponent(key)
+                if FileManager.default.fileExists(atPath: completedAudio.path) { try FileManager.default.removeItem(at: completedAudio) }
             }
         }
+        // Audio without a resumable record can only be an abandoned local copy;
+        // the remote remains authoritative until history has been saved.
+        let pendingAudio = Set(records.filter { !$0.value.deleted && !$0.value.discarded && !$0.value.historySaved && $0.value.text == nil }.keys)
+        for file in try FileManager.default.contentsOfDirectory(at: audioDirectory, includingPropertiesForKeys: nil)
+            where !pendingAudio.contains(file.lastPathComponent) { try FileManager.default.removeItem(at: file) }
         if migrated { try PrivateJSONFile.write(JSONEncoder().encode(records), to: url) }
     }
     private static func prepareDirectory(_ url: URL) throws {
@@ -197,16 +217,32 @@ public actor RemoteOfflineSync {
         }
         return data
     }
+    /// Expire pending text even while no remote is connected. Never interrupt an
+    /// in-flight transcription; source audio still follows its STT disposition.
+    public func maintain() throws {
+        guard !running else { return }
+        try expirePendingText()
+    }
+    private func expirePendingText() throws {
+        for (key, value) in records where value.text != nil && !value.historySaved {
+            if let created = value.textCreatedAt, created < 0 || created > now() || now() - created >= 604_800_000 {
+                var expired = value; expired.text = nil; expired.textCreatedAt = nil; expired.sttAttempted = true
+                expired.issue = "Pending transcript expired. Source remains on the remote; Retry or Discard explicitly."
+                try save(expired, key: key)
+            }
+        }
+    }
     public func synchronize(remote: String, info: RemoteInfo, enrolled: Bool, progress: OfflineProgress,
                             utcMilliseconds: UInt64, interruption: OfflineSyncInterruption? = nil, allowAudioFetch: Bool = true,
                             request: Request, transcribe: Transcribe, saveText: SaveText) async throws {
         guard enrolled, info.supportsOfflineSync, !running, progress.status & 3 == 0 else { throw RemoteContractError.notReady }
         running = true; defer { running = false }
+        try expirePendingText()
         let clock = Data([1]) + OfflineWire.le(UInt64(progress.bootID), 4) + OfflineWire.le(progress.tick, 8) + OfflineWire.le(utcMilliseconds, 8)
         guard try await reply(clock, using: request).count == 2 else { throw RemoteContractError.malformed }
         var failed = false, visited = Set<String>()
         // A failed confirmation/history save must not starve a later recording.
-        for (key, record) in records.sorted(by: { $0.key < $1.key }) where record.remote == remote && !record.deleted && (record.text != nil || record.discarded) {
+        for (key, record) in records.sorted(by: { $0.key < $1.key }) where record.remote == remote && !record.deleted && (record.text != nil || record.historySaved || record.discarded) {
             visited.insert(key)
             do { try await finish(record, key: key, request: request, saveText: saveText) }
             catch { try Task.checkCancellation(); failed = true }
@@ -262,6 +298,7 @@ public actor RemoteOfflineSync {
                     }
                     record.text = text; record.sttAttempted = nil
                 }
+                record.textCreatedAt = record.text == nil ? nil : now()
                 record.issue = nil; try save(record, key: key)
                 try FileManager.default.removeItem(at: audioURL(key))
                 try await finish(record, key: key, request: request, saveText: saveText)
@@ -283,9 +320,11 @@ public actor RemoteOfflineSync {
     private func finish(_ value: Record, key: String, request: Request, saveText: SaveText) async throws {
         var record = value
         if let text = record.text, !record.historySaved {
-            try await saveText(key, text); record.historySaved = true; try save(record, key: key)
+            try await saveText(key, text); record.historySaved = true
+            record.text = nil; record.textCreatedAt = nil; try save(record, key: key)
         }
         guard record.discarded || record.historySaved else { throw RemoteContractError.notReady }
+        if FileManager.default.fileExists(atPath: audioURL(key).path) { try FileManager.default.removeItem(at: audioURL(key)) }
         let confirm = Data([4]) + OfflineWire.le(record.metadata.id, 8) + OfflineWire.le(UInt64(record.metadata.size), 4) + OfflineWire.le(UInt64(record.metadata.crc), 4)
         guard try await reply(confirm, using: request).count == 2 else { throw RemoteContractError.malformed }
         record.deleted = true; record.text = nil; record.issue = nil; try save(record, key: key)

@@ -2,6 +2,7 @@ import SwiftUI
 import UIKit
 import AVFoundation
 import AppModel
+import Core
 import Brain
 import Stt
 import SttApple
@@ -10,7 +11,7 @@ import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @Bindable var host: AppRuntime
-    @AppStorage("accountID") private var accountID = "owner-local"
+    @State private var retentionWarnings: [HistoryEntry] = []
     var body: some View {
         @Bindable var model = host.model
         Form {
@@ -55,13 +56,42 @@ struct SettingsView: View {
             }
             Section("Connection") {
                 TextField("Relay HTTPS URL", text: $model.settings.relayURL).textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
-                TextField("Account identifier for pairing", text: $accountID)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled()
-                Text("Changing account takes effect after restarting the app. Set the relay before pairing; saved computers retain their paired relay address.").font(.footnote)
+                LabeledContent("Account", value: model.accountID)
+                Text("This installation uses one account. Account switching is unavailable. Set the relay before pairing; saved computers retain their paired relay address.").font(.footnote)
+            }
+            Section("Privacy and recording consent") {
+                Text("Get permission from participants before recording. Ordinary live audio is not saved. Offline remote recordings stay on the remote and phone until transcribed, then audio is deleted; late text goes to history only. Text expires after seven days. Held or uncertain dictation is shown for a Keep or Delete choice before expiry can remove it. Benchmark audio requires a separate explicit recording action.")
+                Text("Cloud processing is optional and off by default. When enabled, speech sends audio and Brain sends text to the configured providers through the relay. The listening screen indicates cloud use. Provider retention and encryption policies require review before release.").font(.footnote)
+            }
+            ForEach(retentionWarnings, id: \.segmentID) { entry in
+                Section("Held text: retention choice required") {
+                    Text(entry.text).textSelection(.enabled)
+                    Text("This text has reached its seven-day retention limit. Sending waits for your choice.").font(.footnote)
+                    Button("Keep for seven more days") { resolveRetention(entry.segmentID, keep: true) }
+                    Button("Delete text", role: .destructive) { resolveRetention(entry.segmentID, keep: false) }
+                }
             }
             Section { NavigationLink("Benchmark recorder") { RecorderView(host: host) } }
         }.navigationTitle("Settings")
         .onChange(of: model.settings) { _, _ in host.saveSettings() }
+        .task {
+            while !Task.isCancelled {
+                await refreshRetention()
+                do { try await Task.sleep(for: .seconds(30)) } catch { return }
+            }
+        }
+    }
+    private func refreshRetention() async {
+        do { retentionWarnings = try await host.historyStore.retentionWarnings(now: Int64(Date().timeIntervalSince1970 * 1000)) }
+        catch { host.error = "Retention review is unavailable. Text has not been discarded." }
+    }
+    private func resolveRetention(_ id: String, keep: Bool) {
+        Task {
+            do {
+                try await host.historyStore.resolveRetention(id: id, keep: keep, now: Int64(Date().timeIntervalSince1970 * 1000))
+                await host.model.refresh(); await refreshRetention()
+            } catch { host.error = "The retention choice could not be saved." }
+        }
     }
 }
 private struct RecorderView: View {

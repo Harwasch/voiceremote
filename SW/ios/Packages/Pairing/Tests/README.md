@@ -31,3 +31,7 @@ All inputs are public test secrets or synthetic values generated in memory.
 [Real local gate](../../../../../SYS/tests/e2e/README.md) runs the production Worker, Rust CLI and Swift client over sockets, including persisted queue replay.
 
 [PhoneConnectionTests.swift](PhoneConnectionTests.swift) covers production readiness/outcome correlation, query without replay, state heartbeat with actual mic state, LAN preference, multiple candidates, browser-origin CancellationError fallback, and actual task cancellation without relay fallback. Rust interop now reads the positive insertion outcome before its text echo.
+
+| [TestDeadline.swift](TestDeadline.swift) | All async test bodies bounded (20 s; Rust interop 120 s); cancellation-ignoring wait and blocked-SIGTERM child cleanup regressions; cargo group killed/reaped within 90 s | ✅ Linux |
+
+The HTTP helper has its own 15 s lifetime cap. These are test bounds, not product latency targets. Six pre-change bounded runs passed; the original historical orphan cause is **unverified**. Existing production reconnect refusal/backoff/cancellation behavior remains covered without a speculative reconnect change.

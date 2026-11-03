@@ -50,79 +50,89 @@ final class PairingTests: XCTestCase, @unchecked Sendable {
         return try await PairingConfirmation(handshake: state, invitation: invitation)
     }
     func testImpostorAdvertisementDoesNotShadowPinnedDesktop() async throws {
-        let key = Curve25519.KeyAgreement.PrivateKey()
-        let invitation = try PairingInvitation(qr: qr(key: key.publicKey.rawRepresentation), expectedAccount: "synthetic", clock: TestClock(now: 1))
-        let (badPhone, badDesktop) = InMemoryPairingTransport.pair()
-        let (goodPhone, goodDesktop) = InMemoryPairingTransport.pair()
-        let bad = Task { try? await self.accept(invitation: invitation, key: .init(), transport: badDesktop) }
-        let good = Task { try? await self.accept(invitation: invitation, key: key, transport: goodDesktop) }
-        let candidates = AsyncThrowingStream<InMemoryPairingTransport, Error> { output in
-            output.yield(badPhone); output.yield(goodPhone); output.finish()
+        try await testDeadline(seconds: 20) { [self] in
+            let key = Curve25519.KeyAgreement.PrivateKey()
+            let invitation = try PairingInvitation(qr: qr(key: key.publicKey.rawRepresentation), expectedAccount: "synthetic", clock: TestClock(now: 1))
+            let (badPhone, badDesktop) = InMemoryPairingTransport.pair()
+            let (goodPhone, goodDesktop) = InMemoryPairingTransport.pair()
+            let bad = Task { try? await self.accept(invitation: invitation, key: .init(), transport: badDesktop) }
+            let good = Task { try? await self.accept(invitation: invitation, key: key, transport: goodDesktop) }
+            let candidates = AsyncThrowingStream<InMemoryPairingTransport, Error> { output in
+                output.yield(badPhone); output.yield(goodPhone); output.finish()
+            }
+            let confirmation = try await PreferredConnection.tryLAN(candidates: candidates) { transport in
+                try await PairingConnection.initiate(invitation: invitation, staticKey: .init(), clock: TestClock(now: 1), transport: transport, timeout: .seconds(1))
+            }
+            let rejected = await bad.value
+            XCTAssertNil(rejected)
+            let accepted = await good.value
+            XCTAssertNotNil(accepted)
+            await confirmation.abort(transport: goodPhone)
+            await accepted?.abort(transport: goodDesktop)
         }
-        let confirmation = try await PreferredConnection.tryLAN(candidates: candidates) { transport in
-            try await PairingConnection.initiate(invitation: invitation, staticKey: .init(), clock: TestClock(now: 1), transport: transport, timeout: .seconds(1))
-        }
-        let rejected = await bad.value
-        XCTAssertNil(rejected)
-        let accepted = await good.value
-        XCTAssertNotNil(accepted)
-        await confirmation.abort(transport: goodPhone)
-        await accepted?.abort(transport: goodDesktop)
     }
     func testInMemoryPairingRequiresBothConfirmationsThenExchangesText() async throws {
-        let key = Curve25519.KeyAgreement.PrivateKey()
-        let invitation = try PairingInvitation(qr: qr(key: key.publicKey.rawRepresentation), expectedAccount: "synthetic", clock: TestClock(now: 1))
-        let (phone, desktop) = InMemoryPairingTransport.pair()
-        async let incoming = accept(invitation: invitation, key: key, transport: desktop)
-        let outgoing = try await PairingConnection.initiate(invitation: invitation, staticKey: .init(), clock: TestClock(now: 1), transport: phone)
-        let pendingDesktop = try await incoming
-        let phrase = await outgoing.phrase; let desktopPhrase = await pendingDesktop.phrase
-        XCTAssertEqual(phrase, desktopPhrase); XCTAssertEqual(phrase.split(separator: " ").count, 4)
-        do { _ = try await outgoing.finish(); XCTFail() } catch {}
-        try await outgoing.confirmLocal(displayedPhrase: phrase, device: info("phone"), transport: phone)
-        try await pendingDesktop.receiveConfirmation(transport: desktop)
-        do { _ = try await outgoing.finish(); XCTFail("remote confirmation missing") } catch {}
-        try await pendingDesktop.confirmLocal(displayedPhrase: phrase, device: info("desktop"), transport: desktop)
-        try await outgoing.receiveConfirmation(transport: phone)
-        let peer = try await outgoing.finish(); let reverse = try await pendingDesktop.finish()
-        XCTAssertEqual(peer.device.device_id, "desktop"); XCTAssertEqual(peer.publicKey, key.publicKey.rawRepresentation)
-        let encrypted = try await peer.session.encrypt(Data("synthetic text".utf8))
-        let plain = try await reverse.session.decrypt(encrypted)
-        XCTAssertEqual(plain, Data("synthetic text".utf8))
-        do { _ = try await outgoing.finish(); XCTFail("enrolled twice") } catch {}
+        try await testDeadline(seconds: 20) { [self] in
+            let key = Curve25519.KeyAgreement.PrivateKey()
+            let invitation = try PairingInvitation(qr: qr(key: key.publicKey.rawRepresentation), expectedAccount: "synthetic", clock: TestClock(now: 1))
+            let (phone, desktop) = InMemoryPairingTransport.pair()
+            async let incoming = accept(invitation: invitation, key: key, transport: desktop)
+            let outgoing = try await PairingConnection.initiate(invitation: invitation, staticKey: .init(), clock: TestClock(now: 1), transport: phone)
+            let pendingDesktop = try await incoming
+            let phrase = await outgoing.phrase; let desktopPhrase = await pendingDesktop.phrase
+            XCTAssertEqual(phrase, desktopPhrase); XCTAssertEqual(phrase.split(separator: " ").count, 4)
+            do { _ = try await outgoing.finish(); XCTFail() } catch {}
+            try await outgoing.confirmLocal(displayedPhrase: phrase, device: info("phone"), transport: phone)
+            try await pendingDesktop.receiveConfirmation(transport: desktop)
+            do { _ = try await outgoing.finish(); XCTFail("remote confirmation missing") } catch {}
+            try await pendingDesktop.confirmLocal(displayedPhrase: phrase, device: info("desktop"), transport: desktop)
+            try await outgoing.receiveConfirmation(transport: phone)
+            let peer = try await outgoing.finish(); let reverse = try await pendingDesktop.finish()
+            XCTAssertEqual(peer.device.device_id, "desktop"); XCTAssertEqual(peer.publicKey, key.publicKey.rawRepresentation)
+            let encrypted = try await peer.session.encrypt(Data("synthetic text".utf8))
+            let plain = try await reverse.session.decrypt(encrypted)
+            XCTAssertEqual(plain, Data("synthetic text".utf8))
+            do { _ = try await outgoing.finish(); XCTFail("enrolled twice") } catch {}
+        }
     }
     func testWrongQRKeyStopsBeforeTokenAndClosesTransport() async throws {
-        let real = Curve25519.KeyAgreement.PrivateKey()
-        let invitation = try PairingInvitation(qr: qr(key: Curve25519.KeyAgreement.PrivateKey().publicKey.rawRepresentation), expectedAccount: "synthetic", clock: TestClock(now: 1))
-        let (phone, desktop) = InMemoryPairingTransport.pair()
-        let responder = Task {
-            let state = NoiseXX(role: .responder, staticKey: real, prologue: invitation.prologue)
-            _ = try await state.readMessage(desktop.receive())
-            try await desktop.send(state.writeMessage())
-            do { _ = try await desktop.receive(); XCTFail("token sent to mismatched static key") } catch {}
+        try await testDeadline(seconds: 20) { [self] in
+            let real = Curve25519.KeyAgreement.PrivateKey()
+            let invitation = try PairingInvitation(qr: qr(key: Curve25519.KeyAgreement.PrivateKey().publicKey.rawRepresentation), expectedAccount: "synthetic", clock: TestClock(now: 1))
+            let (phone, desktop) = InMemoryPairingTransport.pair()
+            let responder = Task {
+                let state = NoiseXX(role: .responder, staticKey: real, prologue: invitation.prologue)
+                _ = try await state.readMessage(desktop.receive())
+                try await desktop.send(state.writeMessage())
+                do { _ = try await desktop.receive(); XCTFail("token sent to mismatched static key") } catch {}
+            }
+            do { _ = try await PairingConnection.initiate(invitation: invitation, staticKey: .init(), clock: TestClock(now: 1), transport: phone); XCTFail() } catch {}
+            try await responder.value
         }
-        do { _ = try await PairingConnection.initiate(invitation: invitation, staticKey: .init(), clock: TestClock(now: 1), transport: phone); XCTFail() } catch {}
-        try await responder.value
     }
     func testPhraseMismatchAbortsAndRejectsFurtherUse() async throws {
-        let key = Curve25519.KeyAgreement.PrivateKey()
-        let invitation = try PairingInvitation(qr: qr(key: key.publicKey.rawRepresentation), expectedAccount: "synthetic", clock: TestClock(now: 1))
-        let (a, b) = InMemoryPairingTransport.pair()
-        async let accepted = accept(invitation: invitation, key: key, transport: b)
-        let pending = try await PairingConnection.initiate(invitation: invitation, staticKey: .init(), clock: TestClock(now: 1), transport: a)
-        _ = try await accepted
-        do { try await pending.confirmLocal(displayedPhrase: "wrong phrase", device: info("phone"), transport: a); XCTFail() } catch {}
-        do { _ = try await pending.finish(); XCTFail() } catch {}
-        do { try await a.send(Data()); XCTFail() } catch {}
+        try await testDeadline(seconds: 20) { [self] in
+            let key = Curve25519.KeyAgreement.PrivateKey()
+            let invitation = try PairingInvitation(qr: qr(key: key.publicKey.rawRepresentation), expectedAccount: "synthetic", clock: TestClock(now: 1))
+            let (a, b) = InMemoryPairingTransport.pair()
+            async let accepted = accept(invitation: invitation, key: key, transport: b)
+            let pending = try await PairingConnection.initiate(invitation: invitation, staticKey: .init(), clock: TestClock(now: 1), transport: a)
+            _ = try await accepted
+            do { try await pending.confirmLocal(displayedPhrase: "wrong phrase", device: info("phone"), transport: a); XCTFail() } catch {}
+            do { _ = try await pending.finish(); XCTFail() } catch {}
+            do { try await a.send(Data()); XCTFail() } catch {}
+        }
     }
     func testTransportCloseAndCancellationUnblockReceivers() async throws {
-        let (a, b) = InMemoryPairingTransport.pair()
-        let waiting = Task { try await a.receive() }
-        waiting.cancel()
-        do { _ = try await waiting.value; XCTFail() } catch {}
-        let next = Task { try await b.receive() }
-        await a.close()
-        do { _ = try await next.value; XCTFail() } catch {}
+        try await testDeadline(seconds: 20) { [self] in
+            let (a, b) = InMemoryPairingTransport.pair()
+            let waiting = Task { try await a.receive() }
+            waiting.cancel()
+            do { _ = try await waiting.value; XCTFail() } catch {}
+            let next = Task { try await b.receive() }
+            await a.close()
+            do { _ = try await next.value; XCTFail() } catch {}
+        }
     }
 }
 
@@ -154,54 +164,62 @@ extension PairingTests {
         return (try await PairingConfirmation(handshake: a, invitation: invitation), try await b.split(), hash)
     }
     func testMalformedNegativeWrongHashAndCrossAccountConfirmationsPoisonEnrollment() async throws {
-        for variant in 0..<5 {
-            let (pending, sender, hash) = try await rawPending()
-            let (a, b) = InMemoryPairingTransport.pair()
-            let plain: Data
-            switch variant {
-            case 0: plain = Data()
-            case 1: plain = Data([0]) + hash + (try ProtocolCodec.encode(info("desktop")))
-            case 2: plain = Data([1]) + Data(repeating: 0, count: 32) + (try ProtocolCodec.encode(info("desktop")))
-            case 3: plain = Data([1]) + hash + (try ProtocolCodec.encode(info("desktop", account: "other")))
-            default: plain = Data([1]) + hash + Data("{}".utf8)
+        try await testDeadline(seconds: 20) { [self] in
+            for variant in 0..<5 {
+                let (pending, sender, hash) = try await rawPending()
+                let (a, b) = InMemoryPairingTransport.pair()
+                let plain: Data
+                switch variant {
+                case 0: plain = Data()
+                case 1: plain = Data([0]) + hash + (try ProtocolCodec.encode(info("desktop")))
+                case 2: plain = Data([1]) + Data(repeating: 0, count: 32) + (try ProtocolCodec.encode(info("desktop")))
+                case 3: plain = Data([1]) + hash + (try ProtocolCodec.encode(info("desktop", account: "other")))
+                default: plain = Data([1]) + hash + Data("{}".utf8)
+                }
+                try await b.send(sender.encrypt(plain))
+                do { try await pending.receiveConfirmation(transport: a); XCTFail("invalid confirmation \(variant)") } catch {}
+                do { _ = try await pending.finish(); XCTFail() } catch {}
+                do { try await pending.confirmLocal(displayedPhrase: pending.phrase, device: info("phone"), transport: a); XCTFail() } catch {}
             }
-            try await b.send(sender.encrypt(plain))
-            do { try await pending.receiveConfirmation(transport: a); XCTFail("invalid confirmation \(variant)") } catch {}
-            do { _ = try await pending.finish(); XCTFail() } catch {}
-            do { try await pending.confirmLocal(displayedPhrase: pending.phrase, device: info("phone"), transport: a); XCTFail() } catch {}
         }
     }
     func testConcurrentRemoteConfirmationAndDuplicateLocalConfirmationAreRejected() async throws {
-        let (pending, sender, hash) = try await rawPending()
-        let (a, b) = InMemoryPairingTransport.pair(); let spy = ReceiveSpy(a)
-        let receiving = Task { try await pending.receiveConfirmation(transport: spy) }
-        await spy.waitUntilReceiving()
-        do { try await pending.receiveConfirmation(transport: spy); XCTFail("concurrent receive accepted") } catch {}
-        try await b.send(sender.encrypt(Data([1]) + hash + (try ProtocolCodec.encode(info("desktop")))))
-        try await receiving.value
-        let phrase = await pending.phrase
-        try await pending.confirmLocal(displayedPhrase: phrase, device: info("phone"), transport: a)
-        do { try await pending.confirmLocal(displayedPhrase: phrase, device: info("phone"), transport: a); XCTFail("duplicate local confirm accepted") } catch {}
-        _ = try await pending.finish()
+        try await testDeadline(seconds: 20) { [self] in
+            let (pending, sender, hash) = try await rawPending()
+            let (a, b) = InMemoryPairingTransport.pair(); let spy = ReceiveSpy(a)
+            let receiving = Task { try await pending.receiveConfirmation(transport: spy) }
+            await spy.waitUntilReceiving()
+            do { try await pending.receiveConfirmation(transport: spy); XCTFail("concurrent receive accepted") } catch {}
+            try await b.send(sender.encrypt(Data([1]) + hash + (try ProtocolCodec.encode(info("desktop")))))
+            try await receiving.value
+            let phrase = await pending.phrase
+            try await pending.confirmLocal(displayedPhrase: phrase, device: info("phone"), transport: a)
+            do { try await pending.confirmLocal(displayedPhrase: phrase, device: info("phone"), transport: a); XCTFail("duplicate local confirm accepted") } catch {}
+            _ = try await pending.finish()
+        }
     }
     func testDuplicateDeviceIdentityCannotFinish() async throws {
-        let (pending, sender, hash) = try await rawPending()
-        let (a, b) = InMemoryPairingTransport.pair()
-        try await b.send(sender.encrypt(Data([1]) + hash + (try ProtocolCodec.encode(info("same")))))
-        try await pending.receiveConfirmation(transport: a)
-        try await pending.confirmLocal(displayedPhrase: pending.phrase, device: info("same"), transport: a)
-        do { _ = try await pending.finish(); XCTFail("duplicate identity accepted") } catch {}
+        try await testDeadline(seconds: 20) { [self] in
+            let (pending, sender, hash) = try await rawPending()
+            let (a, b) = InMemoryPairingTransport.pair()
+            try await b.send(sender.encrypt(Data([1]) + hash + (try ProtocolCodec.encode(info("same")))))
+            try await pending.receiveConfirmation(transport: a)
+            try await pending.confirmLocal(displayedPhrase: pending.phrase, device: info("same"), transport: a)
+            do { _ = try await pending.finish(); XCTFail("duplicate identity accepted") } catch {}
+        }
     }
     func testInitiationCancellationAndTimeoutClosePendingIO() async throws {
-        let invitation = try PairingInvitation(qr: qr(key: Curve25519.KeyAgreement.PrivateKey().publicKey.rawRepresentation), expectedAccount: "synthetic", clock: TestClock(now: 1))
-        let (a, b) = InMemoryPairingTransport.pair(); let spy = ReceiveSpy(a)
-        let initiating = Task { try await PairingConnection.initiate(invitation: invitation, staticKey: .init(), clock: TestClock(now: 1), transport: spy) }
-        await spy.waitUntilReceiving(); initiating.cancel()
-        do { _ = try await initiating.value; XCTFail() } catch {}
-        do { _ = try await b.receive(); XCTFail("transport still open") } catch {}
-        let (c, d) = InMemoryPairingTransport.pair()
-        do { _ = try await PairingConnection.initiate(invitation: invitation, staticKey: .init(), clock: TestClock(now: 1), transport: c, timeout: .milliseconds(10)); XCTFail() } catch {}
-        do { _ = try await d.receive(); XCTFail("timeout left transport open") } catch {}
+        try await testDeadline(seconds: 20) { [self] in
+            let invitation = try PairingInvitation(qr: qr(key: Curve25519.KeyAgreement.PrivateKey().publicKey.rawRepresentation), expectedAccount: "synthetic", clock: TestClock(now: 1))
+            let (a, b) = InMemoryPairingTransport.pair(); let spy = ReceiveSpy(a)
+            let initiating = Task { try await PairingConnection.initiate(invitation: invitation, staticKey: .init(), clock: TestClock(now: 1), transport: spy) }
+            await spy.waitUntilReceiving(); initiating.cancel()
+            do { _ = try await initiating.value; XCTFail() } catch {}
+            do { _ = try await b.receive(); XCTFail("transport still open") } catch {}
+            let (c, d) = InMemoryPairingTransport.pair()
+            do { _ = try await PairingConnection.initiate(invitation: invitation, staticKey: .init(), clock: TestClock(now: 1), transport: c, timeout: .milliseconds(10)); XCTFail() } catch {}
+            do { _ = try await d.receive(); XCTFail("timeout left transport open") } catch {}
+        }
     }
 }
 

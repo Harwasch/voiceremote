@@ -5,15 +5,19 @@ import XCTest
 #if os(Linux) || os(macOS)
 final class NoiseURLSessionTests: XCTestCase, @unchecked Sendable {
     func testHTTPResponseCapRedirectTimeoutAndCancellation() async throws {
+        try await testDeadline(seconds: 20) { [self] in
         // Synthetic loopback sidecar, never a remote HTTP fallback. Native phone
         // URLs come only from RelayClient's validated HTTPS origin.
         let process = Process(); let pipe = Pipe()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = ["python3", "-u", "-c", #"""
-import http.server, signal, time
+import http.server, signal, time, threading, os
 # Foundation's Process may inherit a blocked signal mask from a Swift worker.
 # Ensure the helper can be reaped when the test's defer terminates it.
 signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGTERM})
+timer = threading.Timer(15, lambda: os._exit(124))
+timer.daemon = True
+timer.start()
 class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *args): pass
     def do_POST(self):
@@ -49,6 +53,7 @@ server.serve_forever()
         }
         let cancellation = Task { try await http.perform(request("slow")) }; cancellation.cancel()
         do { _ = try await cancellation.value; XCTFail("cancelled HTTP completed") } catch {}
+        }
     }
 }
 #endif

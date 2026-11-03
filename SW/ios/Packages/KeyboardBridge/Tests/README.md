@@ -19,3 +19,5 @@ corrupted on-disk queue contents before insertion. BridgePolicy already uses sca
 no bridge source change was needed. Apple execution remains **unverified** pending CI/device checks.
 
 A post-insertion receipt regression distinguishes enqueue, successful insertion and a throwing call after insertion; uncertain attempts are never drained twice. UIKit field acceptance **unverified**.
+
+`testDormantQueuePurgedFromDiskByRelaunchedWriter` verifies seven-day physical queue cleanup after inactivity (REQ-56); synthetic text only.
