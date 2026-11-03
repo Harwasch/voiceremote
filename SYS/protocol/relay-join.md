@@ -26,7 +26,7 @@ operation remain **unverified**.
 
 | Item | Contract |
 |---|---|
-| Base path | `https://<relay>/v1/accounts/{account_id}/rooms/{room_id}`; no query parameters. |
+| Base path | `https://<relay>/v1/accounts/{account_id}/rooms/{room_id}`; no query parameters on room controls. Cloud speech routes use the normalized query contract below. |
 | Account | Pre-sign-up namespace, supplied by clients; not proof of a human account. Nonempty ASCII `[A-Za-z0-9_-]{1,128}`. |
 | Room ID | Fresh CSPRNG 128 bits, encoded as exactly 32 lowercase hexadecimal digits. Desktop generates it. Account + room form the tenant boundary. |
 | Device ID | Client-generated opaque ASCII `[A-Za-z0-9_-]{1,128}`; unique within the room. |
@@ -36,7 +36,7 @@ operation remain **unverified**.
 | Other hashes | `base64(SHA256(exact UTF-8 bytes))`, padded standard base64. |
 | Signatures | Ed25519, 64 raw bytes, canonical padded standard base64. |
 | Time | Unix epoch milliseconds as safe JSON integer tokens, without fractions/exponents. Relay clock is authoritative; deadlines and clock high-water are persisted. |
-| JSON bodies | Strict, closed, flat objects: only listed fields. Reject duplicate decoded keys, malformed UTF-8, lone surrogates, nested objects, non-JSON whitespace and extra fields. Limit 4,096 bytes with a two-second read timeout. |
+| Room control JSON bodies | Strict, closed, flat objects: only listed fields. Reject duplicate decoded keys, malformed UTF-8, lone surrogates, nested objects, non-JSON whitespace and extra fields. Limit 4,096 bytes with a two-second read timeout. |
 
 For the signing arrays below, use compact JSON with no whitespace, ordinary JSON
 escaping and **no escaping of `/`**. All string elements are ASCII. Timestamp
@@ -75,7 +75,7 @@ only after expiration cleanup, although clients always generate fresh IDs.
 1. Prepare the exact subsequent operation body. For `connect`, body bytes are
    empty. Compute `body_sha256` from those exact bytes.
 2. `POST /challenge`, body exactly `device_id`, `operation`, `body_sha256`;
-   `operation` is `invite`, `connect` or `revoke`. `X-Relay-Signature` signs
+   `operation` is `invite`, `connect`, `revoke` or one of the cloud proxy operations below. `X-Relay-Signature` signs
    `["voiceremote-relay-challenge-v1", account_id, room_id, SHA256_BASE64(exact_challenge_body)]`.
    This proof permits challenge issuance only.
 3. Response 200: `challenge`, `message`, `expires_at`, `server_time`. `message` is
@@ -92,6 +92,108 @@ only after expiration cleanup, although clients always generate fresh IDs.
 | Connect | `GET /connect`, empty body, `Upgrade: websocket` and proof headers. 101 response includes `X-Relay-Dropped-Frames` as a decimal count. Native clients need upgrade header support. One socket per device; a new connection closes the previous one. |
 | Revoke | `POST /revoke`, body exactly `{"device_id":"target"}` and member proof. **Any current member may remove any member, including itself.** Relay cannot interpret product authority; phone policy remains authoritative at endpoints, and desktop also implements local revoke. |
 | Revocation effect | Persist removal, key/wake-registration deletion, challenge/invite invalidation and removal of queued frames both sent by and addressed to the device before replying 200. Close every socket of that device, including silent sockets. Every subsequent frame reloads membership and checks enrollment generation. Delivered/in-flight bytes cannot be recalled. |
+
+## Cloud proxy signing and admission
+
+Cloud proxy payloads are plaintext to the Worker and selected provider over TLS;
+room frames remain opaque ciphertext. The app displays when cloud is in use.
+No vendor credential goes on the phone, and the proxy grants no action authority.
+Trace: REQ-9/11, REQ-37, REQ-56/58. Live vendor/client integration is **unverified**.
+
+| Admission / configuration | Contract |
+|---|---|
+| Provisioning | Every cloud endpoint returns 503 `cloud_not_configured` unless `RELAY_PROVISION_SECRET` is configured with ≥32 characters. The room must also have been created through trusted provisioning, have completed signed token redemption (`paired=true`), and have ≥2 current members. An unpaired creator gets 403 before any budget reservation or vendor call. Legacy/unmarked and formerly open rooms are cloud-ineligible; recreate them using trusted provisioning and pair again. |
+| Current membership | Each request uses the requesting device's current Ed25519 relay key and a new one-use challenge. Revocation aborts that device's HTTP calls and closes its streams. Falling below two current members also closes remaining cloud streams and rejects new cloud requests. |
+| Provisioning bearer | Only trusted creation tooling sends `Authorization: Bearer <RELAY_PROVISION_SECRET>` to `/create`. **The phone does not send or receive this secret** when using cloud endpoints. |
+| Provider configuration | Missing vendor key: 503 `provider_not_configured`. Missing/zero/invalid policy: 503 `cloud_not_configured`. All checked-in limits are disabled/TBC. Model and API version must match deployment configuration. |
+| Output tokens | Configure `CLOUD_MAX_OUTPUT_TOKENS` in **2048–8192**, inclusive; lower values disable Anthropic. ClaudeBrain currently sends `max_tokens: 2048`. Align model/version vars with its selected configuration; availability is **unverified**. |
+
+All paths below are appended to the account/room base path. Queries are prohibited
+for Messages. Speech parameters must match the allowlist in
+[relay SECURITY.md](../../SW/relay/SECURITY.md#cloud-proxy-contract).
+
+| Method / route | Challenge `operation` | Bytes hashed into `body_sha256` | Operation headers |
+|---|---|---|---|
+| `GET /proxy/elevenlabs` | `proxy/elevenlabs` | Canonical query `Q` below, including leading `?`; not an empty GET body | `Upgrade: websocket`, `X-Relay-Challenge`, `X-Relay-Signature` |
+| `GET /proxy/assemblyai` | `proxy/assemblyai` | Canonical query `Q` below | Same WebSocket headers |
+| `POST /proxy/anthropic` | `proxy/anthropic` | Exact UTF-8 JSON body bytes, before any relay parse/reserialization | `Content-Type: application/json`, `anthropic-version: <configured version>`, `X-Relay-Challenge`, `X-Relay-Signature` |
+
+### Speech query normalization (Swift-compatible)
+
+Sign an **ordered application/x-www-form-urlencoded serialization**, not the raw
+URL string or Foundation's unmodified `percentEncodedQuery`. The Worker computes
+`Q` as `"?" + new URL(request.url).searchParams.toString()` for a nonempty query,
+and `""` for no pairs. Clients can generate the same bytes without JavaScript:
+
+1. Parse the query as ordered name/value pairs, preserving repeated parameters
+   and their order. Split on `&`, skip empty segments, and split each segment on
+   its first `=` (missing `=` means an empty value). Decode `+` as space, then
+   percent-decode valid `%HH` triples into UTF-8 bytes, leaving stray `%`
+   literal. A literal plus must arrive as `%2B`.
+2. For **each decoded name and value**, encode UTF-8 bytes: leave only ASCII
+   letters, digits, `*`, `-`, `.`, `_` unchanged; encode space as `+`; percent-encode
+   all other bytes as `%HH` with uppercase hex. Thus `'` becomes `%27`, `~` becomes
+   `%7E`, literal `+` becomes `%2B`, and `é` becomes `%C3%A9`. Do not sort or deduplicate.
+3. Join each encoded `name=value` pair with `&` and prefix the nonempty result
+   with `?`. Hash these ASCII bytes. Normalization is idempotent. Use this same
+   serialization when constructing new Swift query URLs from query items, so
+   literal pluses in vocabulary cannot become spaces.
+
+Swift adapters can implement step 2 over `String.utf8` with a byte allowlist;
+Foundation's general URL-query allowed-character set does not define this form.
+Both raw `keyterms=O'Brien` and `keyterms=O%27Brien` normalize to
+`keyterms=O%27Brien`. `%20` and `+` normalize identically for spaces; percent-escape
+case does not affect the signed digest. Parameter order and decoded values do.
+Clients generate valid UTF-8; WHATWG form parsing replaces invalid UTF-8 with
+U+FFFD, so a decoder handling arbitrary wire input uses replacement decoding.
+
+Synthetic interoperability vector (the newline after the code block is excluded):
+
+```text
+?model_id=scribe_v2_realtime&audio_format=pcm_16000&commit_strategy=manual&keyterms=O%27Brien
+```
+
+Its padded standard-base64 SHA-256 is
+`Pf3oZrkv9GShKRbUCijPMlzWfZn9dv4xDIoM51ydJvc=`.
+
+### Exact challenge and request sequence
+
+Use the identity/base64/signature rules above: Ed25519 signatures over UTF-8,
+canonical padded standard base64 for hashes/signatures, compact JSON signing
+arrays with **no escaped `/`**. Obtain a fresh challenge for every operation:
+
+1. Compute `H = base64(SHA256(operation_bytes))` using the table above.
+2. Serialize the flat challenge JSON, with exactly these fields, to bytes `C`:
+   `{"device_id":"<device>","operation":"proxy/<provider>","body_sha256":"<H>"}`.
+   Send `POST <base>/challenge`, `Content-Type: application/json`, and
+   `X-Relay-Signature: base64(Ed25519_sign(device_private_key, UTF8(J)))`, where
+   `J = compact_JSON(["voiceremote-relay-challenge-v1", account_id, room_id, base64(SHA256(C))])`.
+   The exact bytes sent as `C` must be those hashed; property order is otherwise free.
+3. The 200 response contains `challenge`, `message`, `expires_at`, `server_time`.
+   Decode/check `message` against
+   `["voiceremote-relay-auth-v1", account_id, room_id, device_id, operation, H, challenge, expires_at]`
+   and check the deadline before signing. Sign the **returned `message` string's
+   UTF-8 bytes**, without parsing and reserializing them for the signature.
+4. Send the final operation using `X-Relay-Challenge: <challenge>` and
+   `X-Relay-Signature: base64(Ed25519_sign(device_private_key, UTF8(message)))`,
+   with the method, body/query and extra headers in the table. No vendor key or
+   provisioning bearer is needed. Headers are case-insensitive. A successful
+   speech upgrade returns 101; Messages returns bounded nonstreaming JSON.
+
+Challenges expire after 60 seconds, with at most two pending per device and 16
+per room, and are single-use even on invalid operation proofs. Method/path fix
+the provider; changing the operation or canonical query/body invalidates proof.
+No vocabulary, audio, prompts or transcripts enter stored challenges, only their
+hash/context. Configuration rejection at ingress may precede challenge consumption.
+
+Inject a signing `SttSocketFactory` that uses a URLRequest with proof headers;
+CloudEngine's default URL-only factory cannot authenticate. Inject a signing
+`BrainHTTPTransport` around ClaudeBrain's final body. Client source is unchanged.
+The POST upload keeps its two-second read timeout; **upstream headers and body
+share the total `CLOUD_MAX_DURATION_MS` budget**, rather than a separate two-second
+response-body deadline. Response size remains bounded to 1 MiB. Spend caps and
+concurrency use the deployment's conservative reservations; see
+[relay SECURITY.md](../../SW/relay/SECURITY.md#cloud-configuration-and-spend).
 
 ## Frames and offline delivery
 

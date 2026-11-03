@@ -2,9 +2,11 @@ import { DurableObject } from "cloudflare:workers";
 import { failure, hash, id, json, LIMITS, requireThat, secretMatches, sourceBucket } from "./security.js";
 import { wake, type CachedToken, type WakeRegistration, type WakeSecrets } from "./apns.js";
 import { proxySocket } from "./socket-proxy.js";
+import { cloudProvisioned, type CloudEnv } from "./services.js";
+export { CloudBudget } from "./services.js";
 export { Room } from "./room.js";
 
-export interface Env extends WakeSecrets {
+export interface Env extends WakeSecrets, CloudEnv {
   ROOMS: DurableObjectNamespace;
   ADMISSION: DurableObjectNamespace;
   WAKE: DurableObjectNamespace;
@@ -14,12 +16,14 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     try {
       const url = new URL(request.url);
-      requireThat(url.search === "", 400);
-      const match = /^\/v1\/accounts\/([^/]+)\/rooms\/([^/]+)\/(create|challenge|join|invite|revoke|connect)$/.exec(url.pathname);
+      const cloud = /\/proxy\/(elevenlabs|assemblyai|anthropic)$/.test(url.pathname);
+      requireThat(url.search === "" || (cloud && !url.pathname.endsWith("/anthropic")), 400);
+      const match = /^\/v1\/accounts\/([^/]+)\/rooms\/([^/]+)\/(create|challenge|join|invite|revoke|connect|proxy\/(?:elevenlabs|assemblyai|anthropic))$/.exec(url.pathname);
       requireThat(match, 404, "not_found");
+      if (cloud) requireThat(cloudProvisioned(env), 503, "cloud_not_configured");
       const [, account, room, operation] = match;
       id(account); requireThat(/^[0-9a-f]{32}$/.test(room));
-      requireThat(request.method === (operation === "connect" ? "GET" : "POST"), 405, "method_not_allowed");
+      requireThat(request.method === ((operation === "connect" || operation === "proxy/elevenlabs" || operation === "proxy/assemblyai") ? "GET" : "POST"), 405, "method_not_allowed");
       const prefix = await hash(sourceBucket(request.headers.get("CF-Connecting-IP") ?? "local"));
       async function admission(key: string): Promise<boolean> {
         const gate = env.ADMISSION.get(env.ADMISSION.idFromName(key));
@@ -32,7 +36,7 @@ export default {
       }
       const stub = env.ROOMS.get(env.ROOMS.idFromName(JSON.stringify([account, room])));
       const headers = new Headers();
-      for (const name of ["upgrade", "content-type", "content-encoding", "x-relay-challenge", "x-relay-signature"]) {
+      for (const name of ["upgrade", "content-type", "content-encoding", "x-relay-challenge", "x-relay-signature", "anthropic-version"]) {
         const value = request.headers.get(name); if (value !== null) headers.set(name, value);
       }
       const response = await stub.fetch(new Request(request.url, { method: request.method, headers, body: request.body }));

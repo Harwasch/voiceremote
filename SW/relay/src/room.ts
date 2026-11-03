@@ -1,3 +1,4 @@
+import { CloudSessions, cloudBodyLimit, cloudProvisioned, cloudSigningQuery, type Provider } from "./services.js";
 import { DurableObject } from "cloudflare:workers";
 import type { RelayPresence } from "./protocol/generated.js";
 import { decodeFrame, encodeFrame } from "./codec.js";
@@ -13,14 +14,16 @@ interface Invite { digest: string; issuer: string; expires: number }
 interface Challenge { nonce: string; device: string; operation: string; digest: string; expires: number; message: string }
 interface State {
   account: string; room: string; members: Member[]; invites: Invite[]; usedInvites: Invite[];
-  challenges: Challenge[]; highWater: number; paired: boolean; orphanExpires: number;
+  challenges: Challenge[]; highWater: number; cloudProvisioned?: boolean; paired: boolean; orphanExpires: number;
 }
 interface Attachment { device: string; generation: string }
 
 export class Room extends DurableObject<Env> {
+  private readonly cloud: CloudSessions;
   protected readonly queue: CiphertextQueue;
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
+    this.cloud = new CloudSessions(env, task => ctx.waitUntil(task));
     this.queue = new CiphertextQueue(ctx.storage.sql);
   }
   protected stored(): State | undefined {
@@ -32,9 +35,33 @@ export class Room extends DurableObject<Env> {
     this.ctx.storage.sql.exec("INSERT INTO metadata(key, value) VALUES ('room', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", JSON.stringify(state));
   }
   async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url), provider = /\/proxy\/(elevenlabs|assemblyai|anthropic)$/.exec(url.pathname)?.[1] as Provider | undefined;
     let raw: string;
-    try { raw = request.method === "GET" ? "" : await body(request); }
+    try {
+      if (provider) requireThat(cloudProvisioned(this.env), 503, "cloud_not_configured");
+      raw = request.method === "GET" ? (provider ? cloudSigningQuery(url) : "") : await body(request, provider ? cloudBodyLimit(this.env, provider) : LIMITS.controlBytes);
+    }
     catch (error) { metric("rejected"); return failure(error); }
+    if (provider) {
+      try {
+        const authorization = await this.ctx.blockConcurrencyWhile(async () => {
+          try {
+            const state = await this.load();
+            const parts = url.pathname.split("/");
+            requireThat(parts[3] === state.account && parts[5] === state.room, 403, "forbidden");
+            const member = await this.authenticate(state, request, `proxy/${provider}`, raw);
+            requireThat(this.cloudEligible(state), 403, "forbidden"); return member;
+          } catch (error) { return failure(error); }
+        });
+        if (authorization instanceof Response) return authorization;
+        const member = authorization;
+        // Network waits stay outside the room lock so revoke can interrupt them.
+        return this.cloud.serve(request, raw, provider, member, () => {
+          const state = this.stored();
+          return this.cloudEligible(state) && state!.members.some(m => m.device === member.device && m.generation === member.generation);
+        });
+      } catch (error) { return failure(error); }
+    }
     return this.ctx.blockConcurrencyWhile(async () => {
       try { return await this.handle(request, raw); }
       catch (error) {
@@ -43,6 +70,9 @@ export class Room extends DurableObject<Env> {
         return response;
       }
     });
+  }
+  private cloudEligible(state?: State): boolean {
+    return state?.cloudProvisioned === true && state.paired && state.members.length >= 2;
   }
   private async load(join = false): Promise<State> {
     const state = this.stored(); requireThat(state, 403, join ? "invalid_join_token" : "forbidden");
@@ -58,6 +88,7 @@ export class Room extends DurableObject<Env> {
     return state;
   }
   private async destroy(): Promise<void> {
+    this.cloud.revoke();
     for (const socket of this.ctx.getWebSockets()) this.close(socket, "room_expired");
     await this.ctx.storage.deleteAll();
   }
@@ -92,7 +123,7 @@ export class Room extends DurableObject<Env> {
       this.queue.initialize();
       const now = Date.now(); requireThat(Number.isSafeInteger(now) && now > 0, 503, "clock_unavailable");
       await this.save({ account, room, members: [{ device: value.device_id, key: value.public_key as string, generation: randomToken() }],
-        invites: [], usedInvites: [], challenges: [], highWater: now, paired: false, orphanExpires: now + LIMITS.tokenTtlMs });
+        invites: [], usedInvites: [], challenges: [], highWater: now, cloudProvisioned: cloudProvisioned(this.env), paired: false, orphanExpires: now + LIMITS.tokenTtlMs });
       return json({ created: true, server_time: now, expires_at: now + LIMITS.tokenTtlMs }, 201);
     }
     const state = await this.load(operation === "join"); requireThat(account === state.account && room === state.room, 403, "forbidden");
@@ -114,7 +145,7 @@ export class Room extends DurableObject<Env> {
     value = operation === "connect" ? undefined : parseControl(raw); await this.save(state);
     if (operation === "challenge") {
       record(value, ["device_id", "operation", "body_sha256"]); id(value.device_id); const member = this.member(state, value.device_id);
-      requireThat(["connect", "invite", "revoke"].includes(value.operation as string)); unbase64(value.body_sha256, 32);
+      requireThat(["connect", "invite", "revoke", "proxy/elevenlabs", "proxy/assemblyai", "proxy/anthropic"].includes(value.operation as string)); unbase64(value.body_sha256, 32);
       requireThat(await verify(member.key, request.headers.get("x-relay-signature"),
         JSON.stringify(["voiceremote-relay-challenge-v1", account, room, await hash(raw)])), 403, "forbidden");
       requireThat(state.challenges.filter(c => c.device === member.device).length < 2 && state.challenges.length < LIMITS.challenges, 429, "rate_limited");
@@ -140,6 +171,8 @@ export class Room extends DurableObject<Env> {
       state.members = state.members.filter(m => m.device !== value.device_id); state.invites = state.invites.filter(i => i.issuer !== value.device_id);
       state.challenges = state.challenges.filter(c => c.device !== value.device_id);
       this.ctx.storage.transactionSync(() => { this.queue.revoke(value.device_id as string); this.write(state); }); await this.save(state);
+      this.cloud.revoke(value.device_id as string);
+      if (!this.cloudEligible(state)) this.cloud.revoke();
       for (const socket of this.ctx.getWebSockets()) if (this.attachment(socket).device === value.device_id) this.close(socket, "revoked");
       this.broadcastPresence(state, value.device_id, "offline"); metric("revoked"); return json({ revoked: true });
     }

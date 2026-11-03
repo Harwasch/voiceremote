@@ -8,6 +8,7 @@ export function mutationPlugin(): Plugin {
       let contents = readFileSync(args.path, "utf8");
       const mutation = process.env.RELAY_TEST_MUTATION;
       const replacements: Record<string, [string, string, string]> = {
+        "cloud-revoke": ["room.ts", "this.cloud.revoke(value.device_id as string);", ""],
         membership: ["room.ts", "const member = this.member(state, attachment.device);", "const member = state.members.find(m => m.device === attachment.device) ?? { device: attachment.device, generation: attachment.generation };"] ,
         generation: ["room.ts", 'requireThat(member.generation === attachment.generation && socket.readyState === 1, 403, "forbidden");', ""],
         purge: ["room.ts", "this.queue.revoke(value.device_id as string);", ""],
