@@ -48,7 +48,9 @@ UserDemo pins M5IOE1 1.0.8, M5PM1 1.0.6, M5GFX 0.2.19; register references
 were supplied default-branch clones, so exact tag equivalence is **unverified**.
 Vendor uses 468 logical columns with x gap 6; this adapter exposes the requested
 466 with the same gap. Alignment, RGB order, touch orientation and scanout are
-**unverified** until flashed. Haptic is 20% PWM for 25 ms; perceived strength TBC.
+**unverified** until flashed. Haptic is 20% PWM for 25 ms; perceived strength TBC. Runtime PWM/start/stop
+I2C faults log instead of rebooting; a failed stop retries after 25 ms. Boot-time
+checks remain fatal. Fault injection is **unverified on hardware**.
 CPU now uses 240 MHz, as UserDemo `sdkconfig.defaults:10` does; both board
 builds use `-O2`. The C6 stub retains 160 MHz. QSPI switching power / shorter bus duty and
 net battery impact **need hardware to tell**; no current estimate is claimed.

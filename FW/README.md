@@ -106,7 +106,7 @@ directory, including with `-C`. Each build has its own generated sdkconfig. Afte
 build's `sdkconfig` aside and reconfigure so the defaults are regenerated. The
 StopWatch selects `partitions-stopwatch.csv`; C6 keeps the original single-app
 table. `python3 FW/tests/check_partitions.py` checks both generated tables and
-compares NVS against the captured generated baseline and IDF's old table. NVS
+compares NVS against fixed historical values and IDF's old table. NVS
 stays at **0x9000 / 0x6000**, so this update does not relocate bonds.
 The source manifests use normal registry dependencies. For offline builds, set
 the supplied mirror/cache environment variables in the shell only.
@@ -136,3 +136,9 @@ included in [the calculation](app/offline-storage.md). The bounded writer cannot
 prove absence of flash-cache stalls. [Handoff](../AI/FW/2026-11-02-offline-handoff.md) covers hardware-only
 measurements and re-enrollment protection. USB-hook unattended tests now live in
 [hil](tools/hil/README.md); no device or adapter was accessed by this worker.
+
+Fix-round host coverage includes factory-used partition initialization, recoverable
+torn headers, traversable corrupt-record lists, failed-store live/pairing fallback,
+OFF on touch-down, and acknowledged GATT layout delivery. The forget overlay commits
+OFF before opening. No iPhone pairing/cache behavior or I2C fault recovery is hardware
+verified; see [app](app/README.md) and [tests](tests/README.md).

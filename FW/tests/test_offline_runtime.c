@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "nvs.h"
 #include "../app/offline_runtime.c"
 
 vr_state_t remote_state;
@@ -17,8 +18,18 @@ static board_info_t board={.capabilities=128};
 static TaskFunction_t writer_task;
 static jmp_buf pump_exit;
 static bool pumping, send_ok=true, write_ok=true;
-static unsigned lock_depth, io_calls, result_packets, progress_packets;
+static unsigned lock_depth, io_calls, result_packets, progress_packets, ui_updates;
 static uint64_t fake_ms;
+static uint32_t storage_hold;
+static bool nvs_ok=true;
+int nvs_open(const char *name,int mode,nvs_handle_t *h)
+{ assert(!strcmp(name,"remote")); (void)mode; *h=1; return nvs_ok?ESP_OK:ESP_FAIL; }
+int nvs_get_u32(nvs_handle_t h,const char *key,uint32_t *v)
+{ (void)h; assert(!strcmp(key,"offline_hold")); *v=storage_hold; return ESP_OK; }
+int nvs_set_u32(nvs_handle_t h,const char *key,uint32_t v)
+{ (void)h; assert(!strcmp(key,"offline_hold")); storage_hold=v; return ESP_OK; }
+int nvs_commit(nvs_handle_t h) { (void)h; return ESP_OK; }
+void nvs_close(nvs_handle_t h) { (void)h; }
 static uint16_t mtu=23;
 static void (*write_hook)(void);
 typedef struct { uint8_t bytes[512]; uint16_t tx, total, used; unsigned complete; } received_t;
@@ -31,7 +42,7 @@ int64_t esp_timer_get_time(void) { return (int64_t)(fake_ms*1000); }
 uint32_t remote_now(void) { return (uint32_t)fake_ms; }
 void remote_lock(void) { assert(!lock_depth); ++lock_depth; }
 void remote_unlock(void) { assert(lock_depth==1); --lock_depth; }
-void ui_refresh(void) {}
+void ui_refresh(void) { ++ui_updates; }
 void ble_emit(uint8_t event,uint32_t sampled) { (void)event; (void)sampled; }
 uint16_t ble_audio_mtu(void) { return mtu; }
 const esp_partition_t *esp_partition_find_first(int type,int subtype,const char *label)
@@ -90,8 +101,8 @@ static void reset(bool erase)
     response_tx=response_n=response_at=progress_seq=progress_at=0; progress_dirty=true;
     result_rx=(received_t){0}; progress_rx=(received_t){0}; result_packets=progress_packets=io_calls=0;
     fake_ms=1000; mtu=23; send_ok=write_ok=true; write_hook=NULL; board.capabilities=128;
-    if(erase) memset(flash,255,sizeof flash);
-    offline_init(); assert(ready && store && jobs); offline_owner(true);
+    if(erase) { memset(flash,255,sizeof flash); storage_hold=0; nvs_ok=true; }
+    ui_updates=0; offline_init(); assert(ready && store && jobs); offline_owner(true);
 }
 static void control(uint8_t event,uint8_t value)
 { offline_control(event,value); vr_control(&remote_state,event,value,(uint32_t)fake_ms); }
@@ -225,9 +236,47 @@ static void live_preempts_sync(void)
     remote_state.input.streaming=1; offline_poll(); assert(!response_n && !pending_request && result_packets==sent);
     remote_state.input.streaming=0; request(c2,sizeof c2,32); pump(); send_ok=false; offline_poll(); assert(response_n);
     remote_state.input.streaming=1; send_ok=true; offline_poll(); assert(!response_n && result_packets==sent);
-    /* Partial progress is also abandoned before live acquisition. */
+    /* Partial progress must finish during capture, including MTU 23. */
     remote_state.input.streaming=0; offline_poll(); assert(progress_at);
-    remote_state.input.streaming=1; before=progress_packets; offline_poll(); assert(!progress_at && progress_packets==before);
+    remote_state.input.streaming=1; before=progress_rx.complete;
+    for(unsigned i=0;i<8;++i) offline_poll();
+    assert(!progress_at && progress_rx.complete==before+1);
+    before=progress_rx.complete; offline_progress_refresh();
+    for(unsigned i=0;i<8;++i) offline_poll();
+    assert(progress_rx.complete==before+1);
+}
+static void recovered_error_visible(void)
+{
+    static const uint8_t packet[]={0,1,2}; reset(true); start_local();
+    assert(offline_packet(packet,sizeof packet)); pump(); end_local();
+    flash[2*VR_STORE_SECTOR+64+8]^=1; reset(false);
+    assert(store->error && remote_state.input.full && ui_updates);
+}
+static void broken_mount(void)
+{
+    reset(true); free(jobs); jobs=NULL; ready=false;
+    /* A recognizable damaged journal must fail without wiping retained data. */
+    flash[40]^=1; free(store); store=NULL; ui_updates=0; offline_init();
+    assert(!ready && !jobs && remote_state.input.full && ui_updates);
+    assert(offline_enrollment_allowed() && offline_live_allowed());
+    control(VR_CAPTURE,VR_REC); control(VR_CAPTURE,VR_OFF);
+    assert(!finishing && offline_live_allowed());
+    control(VR_CAPTURE,VR_REC); control(VR_MODE,1);
+    assert(!finishing && offline_live_allowed());
+}
+static void re_enrollment_quarantine(void)
+{
+    recovered_error_visible();
+    assert(offline_enrollment_allowed());
+    nvs_ok=false; assert(!offline_prepare_enrollment()); nvs_ok=true;
+    assert(offline_prepare_enrollment() && storage_hold==1 && !ready && offline_live_allowed());
+    /* Repairing the old store after the new bond must not release old audio. */
+    flash[2*VR_STORE_SECTOR+64+8]^=1;
+    free(store); free(jobs); store=NULL; jobs=NULL; offline_init();
+    assert(!ready && !store && !jobs && remote_state.input.full);
+    connect_phone(); const uint8_t list[]={0,0,9,0,0,0,2,0,0,0,0,0,0,0,0};
+    assert(offline_request(list,sizeof list)==-1 && offline_live_allowed());
+    reset(true); /* Explicit local maintenance: erase old data and clear hold. */
 }
 static void unsupported_board(void)
 {
@@ -235,10 +284,11 @@ static void unsupported_board(void)
     remote_state=(vr_state_t){0}; board.capabilities=0; offline_init();
     assert(!ready && !store && !jobs && !io_calls && !remote_state.input.full && offline_enrollment_allowed());
 }
-int main(void)
+int main(int argc,char **argv)
 {
+    if(argc>1 && !strcmp(argv[1],"mount")) { broken_mount(); return 0; }
     pending_begin_off(); inflight_begin_off(); off_discards_volatile(); queue_overflow_stops(); storage_full_stops(); write_failure_stops();
-    sync_vectors_and_resume(); clock_and_progress(); live_preempts_sync(); unsupported_board();
+    sync_vectors_and_resume(); clock_and_progress(); live_preempts_sync(); recovered_error_visible(); broken_mount(); re_enrollment_quarantine(); unsupported_board();
     free(store); free(jobs);
     puts("offline runtime: production writer/queue, OFF, overflow, clock/progress, sync/resume/delete and live priority pass");
 }

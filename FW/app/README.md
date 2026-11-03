@@ -54,9 +54,9 @@ and `state.h`; [REQ-8], [REQ-18], [REQ-49–53] traceability only.
 
 `virtual_sliders` comes from `board.h`: M5 shows the ring; C6 metadata omits it.
 Layout scales and centres from board resolution. Pips and unassigned pixels do
-nothing. Touch selections give a light haptic on accepted release; physical buttons keep their flow.
-Capture and Orb previews use their existing selected styles on touch-down; leaving
-the original hit zone restores the prior view. Linked target taps stay inert.
+nothing. OFF commits on touch-down with a light haptic through `remote_event`; other touch selections keep release acceptance. Physical buttons keep their flow.
+PTT/REC and Orb previews use their existing selected styles on touch-down; leaving
+the original hit zone restores the prior view. OFF stays committed after a stray drag. Linked target taps stay inert.
 
 `vr_ui_listening` reads the producer streaming **or offline** bit. Live starts
 lighting after the first accepted Audio notification; local acquisition lights
@@ -89,12 +89,14 @@ native timing and RAM. Sub-50 ms control latency remains **hardware-unverified**
 
 REQ-18 waits for actual rendering and synchronous DMA before acknowledging a
 phone update; either modal blocks it. Scanout visibility remains **unverified**.
-Touch controls retain release acceptance, 25 ms debounce and `remote_event`.
+PTT/REC and mode retain release acceptance and 25 ms debounce. OFF bypasses both
+through `remote_event`; opening the forget overlay commits OFF before hiding the Orb.
 `board_touch` distinguishes an I2C failure from an observed release. A failed
 read preserves the previous gesture for less than 100 ms since the last good
 sample; at 100 ms it cancels without activation and requires an observed finger
 up before rearming. Invalid reads cannot recognize the target long hold.
-Previews never change capture/arm/streaming state; PTT→OFF still goes directly to OFF.
+PTT/REC and mode previews never change capture/arm/streaming state; OFF is an
+immediate authoritative transition. PTT→OFF still goes directly to OFF.
 
 `ui_poll` owns touch/I2C and gesture/debounce state in the input task. `ui_tick`
 reads a mailbox snapshot under the recursive app mutex, then owns all LVGL and
@@ -135,3 +137,21 @@ flash-cache stalls and unmeasured timing/wear assumptions.
 `REMOTE_TEST_HOOK=ON` adds USB input to the same slider mailbox/button debounce.
 It logs TEST BUILD and adds a top-layer magenta mark; release signals reject it.
 See [HIL](../tools/hil/README.md).
+
+A mount failure refreshes the existing red storage indicator and disables offline
+storage; it leaves pairing and live audio available. Healthy retained stores keep
+the existing re-enrollment guard. Re-enrollment around a broken store persists an
+offline hold across reboot; local erase then hold reset is required to enable
+storage again. NVS hold-write failure prevents that enrollment attempt. Both OFF/mode queue paths tolerate a missing
+writer. During capture, small-MTU progress completes without cancelling its tail;
+the phone snapshot-request flag refreshes progress after a missed reconnect notice.
+
+Service Changed uses the standard 0x1801/0x2a05 handle and saves the layout marker
+only on NimBLE's indication acknowledgment (`BLE_HS_EDONE`), retrying on subscription.
+It uses `gatt_acked`; the previous unacknowledged `gatt_layout` key is ignored.
+iPhone behavior is **unverified**. Enrollment origin is latched at CONNECT: rejected enrollment deletes persisted keys,
+including after timeout, while a rejected stranger preserves the owner bond. Boot
+ownership requires an authenticated SC bond with a 16-byte LTK. Local NimBLE source
+selects Just Works for NoIO even with MITM requested (`ble_sm_sc.c:174–192`), and
+persists keys before the encryption callback (`ble_sm.c:1272–1288`). Host BLE events
+cover cleanup, deletion failure and reboot ownership; real pairing remains unverified.

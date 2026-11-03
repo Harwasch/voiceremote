@@ -11,13 +11,15 @@ SemaphoreHandle_t remote_mutex;
 static OpusEncoder fake_encoder;
 static bool local_active, in_worker, stop_in_encode;
 static unsigned mic_starts, mic_stops, suspends, resumes, local_packets, sync_cancels, lock_depth;
+static uint32_t fake_now=1000;
+static uint8_t event_log[8]; static unsigned event_count;
 static jmp_buf worker_exit;
 static TaskHandle_t fake_worker=(void *)(uintptr_t)1;
 
-uint32_t remote_now(void) { return 1000; }
+uint32_t remote_now(void) { return fake_now; }
 int64_t esp_timer_get_time(void) { return 1000000; }
 void ui_refresh(void) {}
-void ble_emit(uint8_t event,uint32_t tick) { (void)event; (void)tick; }
+void ble_emit(uint8_t event,uint32_t tick) { (void)tick; assert(event_count<sizeof event_log); event_log[event_count++]=event; }
 bool offline_local_active(void) { return local_active; }
 bool offline_live_allowed(void) { return !local_active; }
 void offline_cancel_sync(void) { ++sync_cancels; }
@@ -60,6 +62,7 @@ int opus_encode(OpusEncoder *e,const int16_t *pcm,int samples,uint8_t *packet,in
 }
 static void reset(void)
 {
+    fake_now=1000; event_count=0; local_stop_snapshot=false; live_at=0;
     stream=(vr_stream_t){0}; remote_state=(vr_state_t){0}; encoder=&fake_encoder; worker=fake_worker;
     generation=worker_generation=closing_at=0; encode_us=0; encoded=max_us=notify_failures=0;
     source_error=0; internal_before=external_before=0; closing=reported=local_running=false;
@@ -88,6 +91,35 @@ static void off_discards_inflight_encoder(void)
     in_worker=false;
     assert(!local_running && !remote_state.input.offline && mic_stops==1 && !local_packets && !lock_depth);
 }
+static void stop_edge_precedes_snapshot(void)
+{
+    reset(); remote_state.input.capture=VR_REC; local_active=true; audio_poll(); event_count=0;
+    /* Same synchronous order as remote_event: control, stop, edge, poll. */
+    local_active=false; vr_control(&remote_state,VR_CAPTURE,VR_OFF,fake_now);
+    audio_sync(); assert(!event_count && !remote_state.input.offline);
+    ble_emit(VR_CAPTURE,fake_now); audio_poll();
+    assert(event_count==2 && event_log[0]==VR_CAPTURE && event_log[1]==VR_SNAPSHOT);
+    audio_poll(); assert(event_count==2);
+}
+static void recent_live_expiry(void)
+{
+    reset(); assert(!audio_recently_live());
+    /* Track a valid live stream, then simulate transport failure. */
+    assert(vr_stream_begin(&stream));
+    remote_state.secure=remote_state.input_sub=remote_state.audio_sub=remote_state.info_read=true;
+    remote_state.snapshot_sent=remote_state.has_phone=remote_state.armed=true;
+    remote_state.input.capture=VR_REC; remote_state.phone.capture=VR_REC; remote_state.phone.recording=1;
+    audio_poll(); assert(audio_recently_live());
+    audio_fault(); assert(!remote_state.input.streaming && audio_recently_live());
+    fake_now+=999; assert(audio_recently_live()); fake_now++; assert(!audio_recently_live());
+    reset(); fake_now=UINT32_MAX-20; assert(vr_stream_begin(&stream));
+    /* Set the live handshake again to exercise modulo elapsed-time expiry. */
+    remote_state.secure=remote_state.input_sub=remote_state.audio_sub=remote_state.info_read=true;
+    remote_state.snapshot_sent=remote_state.has_phone=remote_state.armed=true;
+    remote_state.input.capture=VR_REC; remote_state.phone.capture=VR_REC; remote_state.phone.recording=1;
+    audio_poll(); audio_fault(); fake_now+=999; assert(audio_recently_live());
+    fake_now++; assert(!audio_recently_live());
+}
 static void live_reset_changes_generation(void)
 {
     reset(); assert(vr_stream_begin(&stream)); remote_state.input.streaming=1;
@@ -97,6 +129,6 @@ static void live_reset_changes_generation(void)
 int main(void)
 {
     reconnect_preserves_local_encoder(); off_stops_local_immediately();
-    off_discards_inflight_encoder(); live_reset_changes_generation();
+    off_discards_inflight_encoder(); live_reset_changes_generation(); stop_edge_precedes_snapshot(); recent_live_expiry();
     puts("audio runtime: offline codec survives BLE resets, OFF stops/suspends and discards in-flight encoding, live reset passes");
 }

@@ -12,7 +12,8 @@ flowchart LR
 | Path | Purpose | Status |
 |---|---|---|
 | `freertos/` | Exact queue/task/semaphore subset used by runtime | ✅ Synthetic host harness |
-| `esp_*.h` | Partition, timer, allocation and logging boundary | ✅ No board or adapter |
+| `esp_*.h` | Partition, timer, allocation and I/W/E logging boundary | ✅ No board or adapter |
+| `nvs.h` | Persistent failed-store enrollment hold; synthetic reboot and write failure | ✅ No board access |
 | `opus.h` | Synthetic codec API; no real microphone input or Opus output | ✅ Audio lifecycle harness |
 
 Start with [the harness](../test_offline_runtime.c). Its writer runs until the

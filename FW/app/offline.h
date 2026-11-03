@@ -8,6 +8,8 @@ void offline_control(uint8_t event, uint8_t value);
 void offline_owner(bool enrolled);
 void offline_progress_refresh(void);
 bool offline_enrollment_allowed(void);
+/* Persist a storage hold before pairing around an unavailable/damaged store. */
+bool offline_prepare_enrollment(void);
 void offline_disconnect(bool was_live);
 bool offline_local_wanted(void);
 bool offline_local_active(void);

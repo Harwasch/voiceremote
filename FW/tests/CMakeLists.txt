@@ -63,3 +63,16 @@ add_test(NAME ui_without_psram COMMAND ui_preview --check)
 set_tests_properties(ui_without_psram PROPERTIES ENVIRONMENT "VR_UI_NO_CACHE=1")
 add_test(NAME release_hook_guard COMMAND ${Python3_EXECUTABLE} -m unittest discover
     -s ${CMAKE_CURRENT_SOURCE_DIR} -p test_config.py -v)
+
+add_executable(ble_tests test_ble.c ../app/protocol.c ../app/state.c)
+target_include_directories(ble_tests PRIVATE . offline_stubs ../app)
+target_compile_features(ble_tests PRIVATE c_std_11)
+target_compile_options(ble_tests PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+add_test(NAME ble_security_handoff COMMAND ble_tests)
+add_test(NAME offline_factory COMMAND offline_store_tests factory)
+add_test(NAME offline_corruption COMMAND offline_store_tests corruption)
+add_test(NAME offline_broken_mount COMMAND offline_runtime_tests mount)
+
+add_test(NAME offline_header_body COMMAND offline_store_tests headers)
+add_test(NAME offline_sparse_format COMMAND offline_store_tests sparse)
+add_test(NAME ble_enrollment_scope COMMAND ble_tests enrollment)

@@ -28,9 +28,9 @@ capacity, acoustic quality and hardware power-loss behavior.
 | Data sector | 64-byte CRC-protected committed header: ID, boot, start tick/UTC, mode, sector ordinal; first sector reserves immutable size/count/CRC and closed/interrupted bits |
 | Frame | 8-byte length/reserved/CRC, payload padded to four bytes, 4-byte commit word; export strips CRC, padding and commit, retaining only u16 length plus packet |
 | Recovery | Verify committed packets, export the prefix, mark interrupted, recompute summary; remove empty records. A torn final summary is retried with identical values. Finalized corruption stays retained and errored |
-| Invalid headers | Quarantine rather than recycle unknown data; a storage error disables new capture. No silent formatting or overwritten old audio |
+| Invalid headers | Reclaim an uncommitted header only when every byte after the 64-byte header is erased. Any invalid header with a dirty body (including an erased header) is quarantined with error, retaining its bytes. Committed invalid headers remain quarantined |
 | Deletion | Persist ID and physical sector before each erase, then clear intent before R4. Torn erase cannot orphan an unidentified tail. No historical tombstones; missing allocated IDs confirm successfully |
-| Exhaustion | Never wrap IDs/boot. Missing valid journal with dirty bytes fails closed, even with no records; continuity is unknowable. Explicit recovery requires a new enrollment identity; firmware does not silently reset counters |
+| Initialization / exhaustion | Never wrap IDs/boot. With no valid journal, scan all aligned words: format factory bytes only if no journal/sector magic survives anywhere. Only after the complete magic scan succeeds, erase dirty sectors; skip already-erased sectors. Interrupted formatting resumes on next mount. Recognizable damaged stores fail closed without erasure |
 | Boundaries | One sector cannot mix records. At most 128 simultaneous recordings; short recordings consume at least one sector. New capture needs a fresh trigger after full/failure |
 
 The two-bank journal survives power loss during bank rotation: erase the other bank
@@ -72,10 +72,32 @@ No throughput, commit-latency or power-loss-tail bound is measured.
 A writer task does **not** make SPI1 flash operations nonblocking: ESP32 flash
 writes/erases can disable caches and stall code on both CPUs, including the
 flash-resident encoder, BLE host and display/input work. The 16-frame queue
-absorbs writer scheduling delays only while the producer can execute. Erases are
+absorbs writer scheduling delays only while the producer can execute. Runtime erases are
 restricted to confirmed deletion while capture is idle; a trigger can race an
 already started erase and must wait for its completion. Hardware must measure
 maximum write/erase stalls, DMA overrun, BLE responsiveness and display/touch
 latency under simultaneous recording/UI activity. Timing safety is **unverified**.
 At-rest flash remains unencrypted under the prototype limitation; deletion is
 logical, with no forensic-erasure guarantee.
+
+Corrupt records remain in List with the existing interrupted flag (metadata bit 1),
+and the storage-error progress/Input indication stays set. Fetch and Confirm for
+that ID return status 5; the phone can show the error and continue List from its ID.
+Committed finalized size/count/CRC remain unchanged even when payload verification
+fails. No reserved flag or wire layout changes. The interrupted flag alone does not
+distinguish recoverable interruption from corruption; status 5 on Fetch does.
+
+Mount failure presents the existing storage-error indicator, disables the offline
+API and permits pairing/live audio. Before re-enrollment around a broken store, persist `remote/offline_hold=1` in
+NVS and disable the offline API across reboots. An NVS write failure refuses that
+enrollment attempt. Local maintenance must erase the old offline partition, then
+clear `remote/offline_hold` (or erase NVS/re-enroll); clearing it alone can expose
+previous-owner records. Healthy retained stores still require explicit erase
+before pairing. No previous-owner audio is automatically erased or transferred. Factory formatting and recovery erases run
+at boot, before audio tasks, in addition to idle confirmed-deletion erases.
+
+Factory formatting records its completed sector-erase count in RAM and emits one
+boot warning with that count when nonzero, including a failed mount after partial
+progress. This avoids whole-partition erases for sparse factory leftovers; the
+full read-only magic scan still precedes every formatting erase. First-boot elapsed
+time remains hardware-unmeasured and depends on the number of dirty sectors.

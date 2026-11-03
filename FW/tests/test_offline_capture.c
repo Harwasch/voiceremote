@@ -15,6 +15,9 @@ int main(void)
     vr_local_disconnect(&p,true); assert(p.wanted && p.mode==1);
     vr_local_failed(&p); assert(!p.wanted && p.block_live);
     vr_local_session(&p,false); assert(!p.wanted); /* space freed/reconnect never restarts */
+    vr_local_control(&p,VR_MODE,0); assert(!p.wanted); /* failure/full requires fresh REC selection */
+    p=(vr_local_capture_t){.owner=true,.capture=VR_REC,.usable=true};
+    vr_local_session(&p,false); vr_local_control(&p,VR_MODE,1); assert(!p.wanted); /* paused REC */
     vr_local_control(&p,VR_CAPTURE,VR_PTT); vr_local_control(&p,VR_DOWN,1); assert(p.wanted);
     vr_local_control(&p,VR_MODE,0); assert(!p.wanted && p.block_live);
     vr_local_control(&p,VR_DOWN,1); assert(!p.wanted); /* must release after mode change */

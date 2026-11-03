@@ -224,7 +224,10 @@ static void check(void)
     tap(233,233); assert(remote_state.input.mode==1); partial_matches_full();
     unsigned e=events;
     tap(320,140); assert(events==e); /* angular gap outside orb */
-    tap(42,210); assert(remote_state.input.capture==VR_OFF); partial_matches_full();
+    touched=true; touch_x=42; touch_y=210; advance(5);
+    assert(remote_state.input.capture==VR_OFF); /* OFF stops on DOWN, before release/debounce. */
+    advance(1000); assert(events==e+1);
+    touched=false; advance(50); partial_matches_full();
     assert(events==e+1); /* Direct PTT -> OFF: never passes through REC. */
     tap(233,40); assert(remote_state.input.capture==VR_PTT); partial_matches_full();
     tap(424,210); assert(remote_state.input.capture==VR_REC); partial_matches_full();
@@ -234,7 +237,7 @@ static void check(void)
     touch_y=233;advance(2200);touched=false;advance(50);
     assert(phone(&candidate) && haptics==before_hold && events==e);
     touched=true; touch_x=233;touch_y=407; advance(3100);
-    assert(haptics==before_hold+1 && events==e);
+    assert(haptics==before_hold+1 && events==e+1 && remote_state.input.capture==VR_OFF);
     assert(!phone(&candidate)); touched=false; advance(50);
     assert(revokes==0); tap(152,364); assert(revokes==0); assert(phone(&candidate));
     touched=true; touch_x=233;touch_y=407; advance(3100);
@@ -248,7 +251,7 @@ static void check(void)
     assert(haptics>=12);
     /* Offline capture keeps the same filled listening Orb after disconnect and
      * reconnect; its target stays Bluetooth-off until the local record closes. */
-    remote_state.input.offline=1; ui_refresh(); ui_tick();
+    tap(424,210); remote_state.input.offline=1; ui_refresh(); ui_tick();
     assert(pixels[(233*466+300)*4+2]>150); partial_matches_full();
     sent_pixels=0; advance(1000); assert(sent_pixels>0);
     uint32_t offline_target=target_hash();

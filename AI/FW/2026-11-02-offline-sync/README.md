@@ -17,7 +17,7 @@ Host/build results verified in the logs; no hardware, Bluetooth or serial access
 |---|---|---|
 | `verify.sh` | Serial host/preview/S3/C6 verification and size commands, ≤4 compiler jobs | ✅ Reproducible with local toolchain |
 | `baseline-*-{build,size}.log` | Both current builds rebuilt and sized before changes | ✅ Baseline |
-| `baseline-*-partition-table.bin` | Original generated tables; NVS offset/size comparison inputs | ✅ Baseline |
+| Historical partition baseline | Binary copies removed; `FW/tests/check_partitions.py` checks NVS constants `0x9000 / 0x6000` and IDF CSV | ✅ Reproducible without copies |
 | `final-*.log` | Final host, preview, both builds/sizes and generated table evidence | ✅ See logs |
 | `index-host.log`, `runtime-{red,green}.log` | Focused crash/write/delete/queue regression evidence | ✅ Synthetic |
 | `client-tests.log` | Initial 23-case Python client run; final host log includes later regressions | ✅ Synthetic |

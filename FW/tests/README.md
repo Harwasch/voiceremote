@@ -18,8 +18,8 @@ flowchart LR
 | `run.sh` | Single root-runnable host command | ✅ Reproducible |
 | `CMakeLists.txt` | Plain native C, warnings as errors, assertions enabled; Python ≥3.12 | ✅ No IDF/board needed |
 | `test.c` | I, E0–E5, P, A0–A2 round trips; malformed UTF-8/flags/enums/lengths, all split offsets, overflow, atomicity, transaction/input wrap, arm/OFF, debounce, scaled Orb sectors/disc/target/modals/dead zones, live/offline listening truth table, failed-touch-read hold/timeout/rearm/wrap, UTF-8 fallback, immediate preview/rollback and controls changing during a display wait | ✅ Host tested |
-| `test_offline_store.c` | Fake-flash power loss at every script write boundary, torn writes/erases/final frame, prefix recovery, full, resume, metadata/CRC, delete retry, ID/boot persistence, corruption and journal rotation | ✅ Host tested |
-| `test_offline_capture.c` | Fresh triggers, disconnect/reconnect, stored mode, OFF, owner/incompatibility/pause gates | ✅ Host tested |
+| `test_offline_store.c` | Factory-used partition initialization, damaged-magic preservation, corrupt List traversal/Fetch/Confirm errors, fake-flash power loss at every script write boundary across two data sectors, torn writes/erases/final frame, prefix recovery, full, resume, metadata/CRC, delete retry, ID/boot persistence, corruption and journal rotation | ✅ Host tested |
+| `test_offline_capture.c` | Mode taps cannot restart paused/full/failed REC; fresh triggers, disconnect/reconnect, stored mode, OFF, owner/incompatibility/pause gates | ✅ Host tested |
 | `check_partitions.py` | Generated StopWatch/C6 tables against original NVS offset/size and flash bounds | ✅ Build outputs required |
 | `../tools/ble_client/test_offline.py` | Contract offline hex/fragments, resume/integrity, durable copy and clock behavior | ✅ Host tested |
 | `test_config.py` | Rejects hook for explicit release and GitHub/GitLab firmware-tag signals before IDF setup | ✅ Host tested |
@@ -69,3 +69,31 @@ LVGL must exist). It models 175 ms redraw and a 450 ms completion racing wait
 expiry; matching completed DMA succeeds. Missing/failed/modal draws fail.
 Hook and PSRAM-free variants run too. Audio regressions cover one completely
 unsent queued frame at OFF and C→Python clean END, retaining partial-frame loss.
+
+| Fix-round regression | Evidence / boundary |
+|---|---|
+| `test_ble.c`, `ble_test_platform.h` | Production BLE callbacks with synthetic NimBLE/NVS: rejected bond removal, boot trust, delete retry, acknowledged layout marker/subscription retry despite a legacy marker, recently-live disconnect/reset, snapshot flag refreshing progress |
+| `offline_factory`, `offline_corruption`, `offline_broken_mount` | Focused CTest cases for factory bytes, protected damaged stores, List past corrupt IDs and queue/live/pairing fallback; mount/recovered corruption asserts UI refresh; re-enrollment holds damaged storage across reboot even after repair |
+| `test_audio_runtime.c` | Control edge before deferred local-stop snapshot; recent-live expiry and tick wrap after transport failure |
+| `test_offline_runtime.c` | MTU-23 progress finishes during capture, then explicit refresh emits another complete snapshot |
+| Native UI checks | OFF on DOWN while finger held; no extra release event; forget recognition commits OFF; PTT/REC release/debounce unchanged |
+
+The fixes first failed their synthetic regressions before implementation (factory,
+torn headers, corrupt List, failed-mount enrollment, mode restart, fragmented progress,
+OFF timing, rejected bond and premature layout marker). The write-cut loop now
+asserts no persistent error at all 529 mutation boundaries, whole and torn, including
+both record headers. Haptic I2C errors are hardware-bound: the driver logs start/PWM
+failures and retries a failed stop after 25 ms; bus fault injection remains unverified.
+
+| Follow-up regression | Evidence / boundary |
+|---|---|
+| `offline_header_body` | Torn/uncommitted headers with erased bodies recover; bad commit, garbage and erased headers with dirty bodies retain byte-identical sectors and quarantine/error, including dirt at the final byte |
+| `offline_sparse_format` | Three dirty sectors cause exactly three erases; magic at the partition end prevents all erases; cuts at each formatting erase, whole/torn, resume empty on next mount |
+| `ble_enrollment_scope` | Stranger's failed ENC_CHANGE preserves owner/bond; rejected enrollment removes persisted keys even after the 60-second window expires |
+
+All three follow-up tests failed on their target assertions before the fixes.
+NimBLE malformed-key-size handling sets `enc_cb` (`ble_sm.c:2287–2294`);
+`ble_sm_process_result` sends `ble_gap_enc_event` on failure (`ble_sm.c:1280–1287`),
+which publishes ENC_CHANGE (`ble_gap.c:11140–11149`). A pending local termination
+therefore does not protect the old cleanup predicate. Enrollment origin is now
+latched at CONNECT and retained until DISCONNECT/reset, independent of its timeout.

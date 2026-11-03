@@ -7,6 +7,7 @@
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "nvs.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
 #include <string.h>
@@ -128,20 +129,50 @@ static void writer(void *arg)
 void offline_init(void)
 {
     if(!(board_info()->capabilities&128)) return;
+    nvs_handle_t h; uint32_t hold=0;
+    esp_err_t status=nvs_open("remote",NVS_READONLY,&h);
+    if(status==ESP_OK) { status=nvs_get_u32(h,"offline_hold",&hold); nvs_close(h); }
+    if(hold || (status!=ESP_OK && status!=ESP_ERR_NVS_NOT_FOUND)) {
+        remote_state.input.full=1; ui_refresh();
+        ESP_LOGE("offline","storage held; local erase and hold reset required"); return;
+    }
     partition=esp_partition_find_first(ESP_PARTITION_TYPE_DATA,0x40,"offline");
     /* Board policy may prefer PSRAM, but this core works with internal memory.
      * Flash write buffers/queue/writer stack remain internal. */
     store=board_audio_alloc(sizeof *store);
-    if(!partition || !store || vr_store_init(store,(vr_store_flash_t){(void*)partition,rd,wr,er},partition->size) || vr_store_mount(store)) {
-        remote_state.input.full=1; ESP_LOGE("offline","mount failed; offline disabled, records retained"); return;
+    int mounted=(!partition || !store)?VR_STORE_ERROR:
+        vr_store_init(store,(vr_store_flash_t){(void*)partition,rd,wr,er},partition->size);
+    if(!mounted) {
+        mounted=vr_store_mount(store);
+        if(store->formatted_sectors) ESP_LOGW("offline","factory format ran: erased %lu sectors",(unsigned long)store->formatted_sectors);
+    }
+    if(mounted) {
+        remote_state.input.full=1; ui_refresh(); ESP_LOGE("offline","mount failed; offline disabled, records retained"); return;
     }
     jobs=xQueueCreate(18,sizeof(job_t));
-    if(!jobs || xTaskCreate(writer,"flash_writer",6144,NULL,2,NULL)!=pdPASS) { remote_state.input.full=1; return; }
-    ready=true; snapshot_store();
+    if(!jobs || xTaskCreate(writer,"flash_writer",6144,NULL,2,NULL)!=pdPASS) { remote_state.input.full=1; ui_refresh(); return; }
+    ready=true; snapshot_store(); ui_refresh();
     ESP_LOGI("offline","ready boot=%lu waiting=%lu free=%llu total=%llu queue_frames=16 store_ram=%u",
         (unsigned long)boot_id,(unsigned long)waiting,(unsigned long long)free_bytes,(unsigned long long)total_bytes,(unsigned)sizeof *store);
 }
-bool offline_enrollment_allowed(void) { return !(board_info()->capabilities&128) || (ready && !retained && !opening && !writing); }
+bool offline_prepare_enrollment(void)
+{
+    if(!(board_info()->capabilities&128) || (ready && !store->error)) return true;
+    /* Re-enrollment around a broken store cannot transfer the old owner's
+     * recordings if a subsequent boot recovers it. Maintenance clears the hold
+     * only after erasing the old partition. Never silently erase retained data. */
+    nvs_handle_t h;
+    if(nvs_open("remote",NVS_READWRITE,&h)!=ESP_OK) return false;
+    bool saved=nvs_set_u32(h,"offline_hold",1)==ESP_OK && nvs_commit(h)==ESP_OK;
+    nvs_close(h);
+    if(saved) {
+        ready=false; vr_local_owner(&policy,false); offline_cancel_sync();
+        if(jobs) xQueueReset(jobs);
+        remote_state.input.full=1; ui_refresh();
+    }
+    return saved;
+}
+bool offline_enrollment_allowed(void) { return !(board_info()->capabilities&128) || (!ready || ((!retained || store->error) && !opening && !writing && !finishing)); }
 /* A bonded reconnect can send progress before the phone is listening, as with Input snapshots. */
 void offline_progress_refresh(void) { progress_dirty=true; }
 void offline_owner(bool enrolled) { vr_local_owner(&policy,enrolled); }
@@ -154,15 +185,15 @@ void offline_control(uint8_t event,uint8_t value)
     if(event==VR_CAPTURE && value==VR_OFF) {
         offline_cancel_sync();
         if(jobs) xQueueReset(jobs); /* OFF discards volatile frames, never flushes them. */
-        if(was || writing || opening) { job_t j={.kind=JOB_END,.epoch=record_epoch}; xQueueSend(jobs,&j,0); finishing=true; }
-    } else if(was && epoch!=policy.epoch && (writing || opening)) {
+        if(jobs && (was || writing || opening)) { job_t j={.kind=JOB_END,.epoch=record_epoch}; xQueueSend(jobs,&j,0); finishing=true; }
+    } else if(jobs && was && epoch!=policy.epoch && (writing || opening)) {
         job_t j={.kind=JOB_END,.epoch=record_epoch}; xQueueSend(jobs,&j,0); finishing=true;
     }
     if(policy.wanted) { if(!was) local_error=false; offline_cancel_sync(); }
 }
 bool offline_local_wanted(void) { return ready && policy.wanted; }
 bool offline_local_active(void) { return ready && policy.wanted && writing && !finishing; }
-bool offline_live_allowed(void) { return !policy.block_live && !policy.wanted && !writing && !opening && !finishing; }
+bool offline_live_allowed(void) { return !ready || (!policy.block_live && !policy.wanted && !writing && !opening && !finishing); }
 void offline_capture_error(void)
 {
     vr_local_failed(&policy);
@@ -256,7 +287,7 @@ void offline_poll(void)
         job_t j={.kind=JOB_END,.epoch=record_epoch}; finishing=xQueueSend(jobs,&j,0)==pdTRUE;
     }
     if(capturing() && !(response_n==2 && (response[0]==1 || response[1]==3))) {
-        if(response_n || progress_at || remote_state.input.syncing) offline_cancel_sync();
+        if(response_n || remote_state.input.syncing) offline_cancel_sync();
         /* One small status message tells a reconnecting phone where things stand; audio bytes stay paused. */
         if(remote_state.secure && remote_state.info_read && result_sub && progress_sub) send_progress();
         return;

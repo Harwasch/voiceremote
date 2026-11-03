@@ -41,9 +41,8 @@ def main():
         if not path.exists():
             raise RuntimeError(f'build {board} first: {path}')
         table = binary(path)
-        baseline = ROOT / f'AI/FW/2026-11-02-offline-sync/baseline-{"s3" if board == "m5" else board}-partition-table.bin'
-        if baseline.exists():
-            assert table['nvs'] == binary(baseline)['nvs'], (board, 'generated baseline changed')
+        # Historical generated baseline: NVS type/subtype, offset and size.
+        assert table['nvs'] == (1, 2, 0x9000, 0x6000), (board, table['nvs'])
         assert table['nvs'][2:] == old['nvs'], (board, table['nvs'], old['nvs'])
         assert table['phy_init'][2:] == old['phy_init']
         assert table['factory'][2:] == old['factory']

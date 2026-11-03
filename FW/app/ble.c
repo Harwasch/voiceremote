@@ -2,6 +2,9 @@
 #include "offline.h"
 #include "board.h"
 #include "esp_log.h"
+#ifdef VR_BLE_HOST_TEST
+#include "ble_test_platform.h"
+#else
 #include "host/ble_hs.h"
 #include "host/ble_sm.h"
 #include "host/util/util.h"
@@ -13,6 +16,7 @@ void ble_store_config_init(void);
 #include "services/gatt/ble_svc_gatt.h"
 #include "store/config/ble_store_config.h"
 #include "nvs.h"
+#endif
 #include <string.h>
 /* NimBLE UUID128_INIT uses Bluetooth little-endian byte arrays. Generate from
    canonical UUID text, reversing bytes once at this API boundary only. */
@@ -22,21 +26,40 @@ static bool result_subscribed, progress_subscribed;
 static uint8_t own_address;
 static unsigned audio_pending;
 static uint32_t audio_sent_at;
-static bool synced, enrollment, comparison_pending, comparison_accepted, known_connection, revoke_pending;
+static bool synced, enrollment, comparison_pending, comparison_accepted, known_connection, enrollment_connection, revoke_pending;
 static uint32_t enrollment_started, comparison_started;
 /* Bump when characteristics change. Bonded phones cache the layout, so they must be told. */
 #define VR_GATT_LAYOUT 2
+/* Ignore the old gatt_layout key: older firmware saved it without delivery. */
+static uint16_t layout_handle;
+static bool layout_pending;
 static void announce_gatt_layout(void)
 {
+    const ble_uuid16_t service=BLE_UUID16_INIT(0x1801), changed=BLE_UUID16_INIT(0x2a05);
+    if(ble_gatts_find_chr(&service.u,&changed.u,NULL,&layout_handle)) return;
     nvs_handle_t h; uint32_t stored=0;
     if(nvs_open("remote",NVS_READWRITE,&h)) return;
-    nvs_get_u32(h,"gatt_layout",&stored);
+    nvs_get_u32(h,"gatt_acked",&stored); nvs_close(h);
     if(stored!=VR_GATT_LAYOUT) {
+        layout_pending=true;
         ble_svc_gatt_changed(0x0001,0xffff);
-        ESP_LOGI("ble","GATT layout %lu -> %d announced",(unsigned long)stored,VR_GATT_LAYOUT);
-        if(!nvs_set_u32(h,"gatt_layout",VR_GATT_LAYOUT)) nvs_commit(h);
+        ESP_LOGI("ble","GATT layout %lu -> %d pending acknowledgment",(unsigned long)stored,VR_GATT_LAYOUT);
     }
+}
+static void layout_delivered(void)
+{
+    nvs_handle_t h;
+    if(!layout_pending || nvs_open("remote",NVS_READWRITE,&h)) return;
+    if(!nvs_set_u32(h,"gatt_acked",VR_GATT_LAYOUT) && !nvs_commit(h)) layout_pending=false;
     nvs_close(h);
+}
+/* NimBLE can persist Just Works keys before ENC_CHANGE. A reboot must not
+ * turn an unauthenticated bond into offline ownership. */
+static bool trusted_bond(const ble_addr_t *peer)
+{
+    struct ble_store_key_sec key={.peer_addr=*peer}; struct ble_store_value_sec value;
+    return !ble_store_read_our_sec(&key,&value) && value.ltk_present &&
+        value.authenticated && value.sc && value.key_size==16;
 }
 static int gap_event(struct ble_gap_event *e,void *arg);
 static void lock(void) { xSemaphoreTakeRecursive(remote_mutex,portMAX_DELAY); }
@@ -105,8 +128,7 @@ static int access_value(uint16_t h,uint16_t attr,struct ble_gatt_access_ctxt *ct
             } else {
                 vr_apply_phone(&remote_state,&phone);
                 audio_sync();
-                if(phone.flags&1) offline_progress_refresh();
-            if(phone.flags&1) ble_emit(VR_SNAPSHOT,remote_now());
+                if(phone.flags&1) { offline_progress_refresh(); ble_emit(VR_SNAPSHOT,remote_now()); }
             }
         }
     } else if(which==5 && ctxt->op==BLE_GATT_ACCESS_OP_WRITE_CHR) {
@@ -146,9 +168,12 @@ static int gap_event(struct ble_gap_event *e,void *arg)
         if(e->connect.status) { advertise(); break; }
         audio_reset(); audio_pending=false;
         offline_connection_reset(); result_subscribed=progress_subscribed=false;
-        connection=e->connect.conn_handle; vr_session_reset(&remote_state);
+        connection=e->connect.conn_handle; layout_pending=false; vr_session_reset(&remote_state);
         comparison_pending=false; comparison_accepted=false;
         known_connection=known_peer(connection);
+        /* Enrollment may expire before SM reports failure; preserve origin until
+         * disconnect so a rejected stranger cannot erase the owner's bond. */
+        enrollment_connection=enrollment && !known_connection;
         if(revoke_pending) { disconnect(); break; }
         if(!known_connection && !enrollment) { disconnect(); break; }
         ui_link("Securing Bluetooth");
@@ -164,14 +189,22 @@ static int gap_event(struct ble_gap_event *e,void *arg)
             (audio_recently_live() && remote_state.has_phone && remote_state.phone.recording==1));
         result_subscribed=progress_subscribed=false;
         connection=BLE_HS_CONN_HANDLE_NONE; audio_pending=false; audio_reset(); vr_session_reset(&remote_state);
-        comparison_pending=false; comparison_accepted=false;
+        comparison_pending=false; comparison_accepted=false; enrollment_connection=false;
         ui_pair_hide(); ui_refresh(); ui_link("Disconnected"); advertise(); break;
     case BLE_GAP_EVENT_ENC_CHANGE: {
         struct ble_gap_conn_desc d;
         bool good=!e->enc_change.status && !ble_gap_conn_find(connection,&d) &&
             d.sec_state.encrypted && d.sec_state.authenticated && d.sec_state.bonded && d.sec_state.key_size==16 &&
             (known_connection || comparison_accepted);
-        if(!good) { disconnect(); break; }
+        if(!good) {
+            if(enrollment_connection) {
+                offline_owner(false); enrollment=false; comparison_pending=false;
+                /* Single-owner enrollment has no previous bond to preserve. */
+                int rc=ble_store_clear(); revoke_pending=rc!=0;
+                if(rc) ESP_LOGE("ble","rejected enrollment bond removal failed: %d",rc);
+            }
+            disconnect(); break;
+        }
         announce_gatt_layout();
         offline_owner(true);
         remote_state.secure=true; enrollment=false; comparison_pending=false;
@@ -198,6 +231,7 @@ static int gap_event(struct ble_gap_event *e,void *arg)
         e->authorize.out_response=secure(e->authorize.conn_handle)?BLE_GAP_AUTHORIZE_ACCEPT:BLE_GAP_AUTHORIZE_REJECT;
         break;
     case BLE_GAP_EVENT_SUBSCRIBE:
+        if(e->subscribe.attr_handle==layout_handle && e->subscribe.cur_indicate && secure(connection)) announce_gatt_layout();
         if(e->subscribe.attr_handle==input_handle) {
             remote_state.input_sub=e->subscribe.cur_notify;
             if(remote_state.input_sub && secure(connection)) ble_emit(VR_SNAPSHOT,remote_now());
@@ -214,6 +248,8 @@ static int gap_event(struct ble_gap_event *e,void *arg)
         ESP_LOGI("ble","negotiated ATT MTU=%u",e->mtu.value);
         break;
     case BLE_GAP_EVENT_NOTIFY_TX:
+        if(e->notify_tx.conn_handle==connection && e->notify_tx.attr_handle==layout_handle &&
+           e->notify_tx.indication && e->notify_tx.status==BLE_HS_EDONE && secure(connection)) layout_delivered();
         if(e->notify_tx.conn_handle==connection && e->notify_tx.attr_handle==audio_handle) {
             if(audio_pending) audio_pending--;
             if(e->notify_tx.status) audio_notify_failed();
@@ -237,6 +273,9 @@ void ble_pair_start(void)
     /* Never expose a previous owner's retained recordings to a new bond.
      * Explicit local data erase (documented maintenance) precedes re-enrollment. */
     if(!offline_enrollment_allowed()) { ESP_LOGE("offline","enrollment blocked: retained records require explicit local erase"); return; }
+    if(!offline_prepare_enrollment()) {
+        ESP_LOGE("offline","cannot persist storage hold for enrollment"); return;
+    }
     enrollment=true; enrollment_started=remote_now(); comparison_accepted=false;
     ui_link("Pairing open for 60 seconds"); advertise();
 }
@@ -274,7 +313,14 @@ static void on_sync(void)
     if(!rc) rc=ble_hs_id_infer_auto(0,&own_address);
     if(!rc) {
         ble_addr_t peers[1]; int count=0;
-        if(!ble_store_util_bonded_peers(peers,&count,1)) offline_owner(count==1);
+        offline_owner(false);
+        if(!ble_store_util_bonded_peers(peers,&count,1) && count==1) {
+            if(trusted_bond(&peers[0])) offline_owner(true);
+            else {
+                int removed=ble_store_clear(); revoke_pending=removed!=0;
+                if(removed) ESP_LOGE("ble","untrusted boot bond removal failed: %d",removed);
+            }
+        }
         synced=true; advertise();
     }
     else ESP_LOGE("ble","identity setup failed: %d",rc);
@@ -286,7 +332,7 @@ static void on_reset(int reason)
     offline_disconnect(remote_state.input.streaming || vr_capture_gate(&remote_state) ||
             (audio_recently_live() && remote_state.has_phone && remote_state.phone.recording==1));
     result_subscribed=progress_subscribed=false; audio_pending=0; audio_reset();
-    vr_session_reset(&remote_state); comparison_pending=false; enrollment=false;
+    vr_session_reset(&remote_state); comparison_pending=false; enrollment=false; enrollment_connection=false;
     ui_pair_hide(); ui_refresh(); ui_link("Bluetooth reset"); unlock();
 }
 static void host_task(void *arg) { (void)arg; nimble_port_run(); nimble_port_freertos_deinit(); }

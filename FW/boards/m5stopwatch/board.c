@@ -157,13 +157,15 @@ bool board_button(unsigned button)
 void board_haptic(uint32_t now)
 {
     /* 20% PWM for 25 ms; subjective strength remains unverified. */
-    ESP_ERROR_CHECK(write_reg(ioe,0x1b,0x33)); ESP_ERROR_CHECK(write_reg(ioe,0x1c,0x83));
+    if(write_reg(ioe,0x1b,0x33)!=ESP_OK) ESP_LOGE("board","haptic PWM write failed");
+    if(write_reg(ioe,0x1c,0x83)!=ESP_OK) ESP_LOGE("board","haptic start write failed");
     motor_started=now; motor_on=true;
 }
 void board_poll(uint32_t now)
 {
     if(motor_on && (uint32_t)(now-motor_started)>=25) {
-        ESP_ERROR_CHECK(write_reg(ioe,0x1c,0)); motor_on=false;
+        if(write_reg(ioe,0x1c,0)!=ESP_OK) { ESP_LOGE("board","haptic stop write failed"); motor_started=now; return; }
+        motor_on=false;
     }
 }
 

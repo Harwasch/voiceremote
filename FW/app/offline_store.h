@@ -41,6 +41,7 @@ typedef struct {
     uint16_t next_sector[VR_STORE_MAX_SECTORS];
     uint16_t exported_bytes[VR_STORE_MAX_SECTORS];
     uint32_t sector_count, boot_id, pending_erase;
+    uint32_t formatted_sectors; /* RAM-only count of completed factory erases this mount. */
     uint64_t allocated_id, journal_seq, pending_delete;
     uint16_t journal_sector, journal_slot, active_sector, active_offset;
     int active;

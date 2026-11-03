@@ -345,6 +345,13 @@ static void invalidate_changes(bool force_target)
            strcmp(view.phone.resolved,drawn.phone.resolved) || strcmp(view.phone.error,drawn.phone.error)) target();
     }
 }
+/* OFF bypasses release/debounce but uses the same event/capture stop path. */
+static void commit_off(uint32_t now)
+{
+    control_values[0]=VR_OFF;
+    control_filters[0]=(vr_debounce_t){VR_OFF,VR_OFF,now};
+    if(remote_state.input.capture!=VR_OFF) remote_event(VR_CAPTURE,VR_OFF,now);
+}
 static void act(vr_hit_t hit)
 {
     if(hit==VR_HIT_NONE) return;
@@ -485,6 +492,7 @@ void ui_poll(void)
     bool down=sample==BOARD_TOUCH_DOWN;
     timing_touch_poll(poll_start);
     vr_hit_t hit=down?vr_ui_hit(&layout,x,y,current.overlay!=0):press.hit;
+    bool first_down=down && !press.down;
     vr_hit_t previous=press.hit;
     vr_hit_t released=vr_ui_touch_sample(&press,sample!=BOARD_TOUCH_ERROR,down,hit,now);
     down=press.down;
@@ -493,9 +501,13 @@ void ui_poll(void)
         current.touch_id++; if(!current.touch_id) current.touch_id++;
         current.touch_at=now;
     }
+    if(first_down && press.hit==VR_HIT_OFF && !current.overlay) {
+        commit_off(now); board_haptic(now); vr_ui_press_cancel(&press);
+    }
     if(!down && !long_recognised) act(released);
     if(!press.down) long_recognised=false;
     if(sample!=BOARD_TOUCH_ERROR && !current.overlay && press.hit==VR_HIT_TARGET && !long_recognised && now-press.since>=3000) {
+        commit_off(now); /* Never hide an active listening state behind the bin. */
         long_recognised=true; current.overlay=2; forget_since=now;
         vr_ui_press_cancel(&press); cancel_barrier(); board_haptic(now);
     }

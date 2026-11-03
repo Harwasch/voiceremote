@@ -27,6 +27,17 @@ static int fail(vr_store_t *s) { s->error = true; return VR_STORE_ERROR; }
 static bool read_at(vr_store_t *s, uint32_t pos, void *p, size_t n) { return s->flash.read(s->flash.ctx, pos, p, n); }
 static bool write_at(vr_store_t *s, uint32_t pos, const void *p, size_t n) { return s->flash.write(s->flash.ctx, pos, p, n); }
 static bool erase_sector(vr_store_t *s, unsigned sector) { return s->flash.erase(s->flash.ctx, sector * VR_STORE_SECTOR, VR_STORE_SECTOR); }
+/* Check the entire requested range before deciding it contains no retained data. */
+static int range_erased(vr_store_t *s, uint32_t at, size_t size, bool *empty) {
+    uint8_t block[256]; *empty=true;
+    while (size) {
+        size_t n=size<sizeof block?size:sizeof block;
+        if (!read_at(s,at,block,n)) return fail(s);
+        if (!erased(block,n)) { *empty=false; break; }
+        at+=(uint32_t)n; size-=n;
+    }
+    return VR_STORE_OK;
+}
 static int record_index(vr_store_t *s, uint64_t id) {
     for (unsigned i = 0; i < VR_STORE_MAX_RECORDS; ++i) if (s->records[i].used && s->records[i].meta.id == id) return (int)i;
     return -1;
@@ -139,11 +150,11 @@ static int finish_record(vr_store_t *s, int idx, bool interrupted) {
 }
 int vr_store_mount(vr_store_t *s) {
     if (!s || s->mounted) return VR_STORE_INVALID;
-    uint8_t p[HEADER]; bool found = false, journal_dirty = false;
+    uint8_t p[HEADER]; bool found = false;
     unsigned selected_bank = 0, selected_end = 0, ends[2] = {0, 0};
     for (unsigned bank = 0; bank < 2; ++bank) for (unsigned slot = 0; slot < JOURNAL_SLOTS; ++slot) {
         if (!read_at(s, bank * VR_STORE_SECTOR + slot * ENTRY, p, ENTRY)) return fail(s);
-        if (!erased(p, ENTRY)) { ends[bank] = slot + 1; journal_dirty = true; }
+        if (!erased(p, ENTRY)) { ends[bank] = slot + 1; }
         if (get32(p) != JOURNAL_MAGIC || get32(p + 44) != COMMIT || get32(p + 40) != vr_store_crc32(p, 40)) continue;
         uint64_t seq = get64(p + 4);
         if (!found || seq > s->journal_seq) {
@@ -152,22 +163,37 @@ int vr_store_mount(vr_store_t *s) {
         }
     }
     selected_end = ends[selected_bank]; s->journal_sector = (uint16_t)selected_bank; s->journal_slot = (uint16_t)selected_end;
-    /* Invalid initial entries can be skipped; data without counters cannot safely
-     * establish a recording-ID namespace, so capture stays disabled. */
     if (!found) {
-        for (unsigned sec = 2; sec < s->sector_count; ++sec) {
-            if (!header(s, sec, p)) return fail(s);
-            if (!erased(p, HEADER)) return fail(s);
+        /* Factory firmware can occupy this region. Format only when no journal
+         * or sector magic survives anywhere; damaged stores retain their IDs. */
+        uint8_t block[256], dirty[(VR_STORE_MAX_SECTORS+7)/8]={0};
+        for (uint32_t at=0; at<s->sector_count*VR_STORE_SECTOR; at+=sizeof block) {
+            if (!read_at(s,at,block,sizeof block)) return fail(s);
+            for (unsigned off=0; off<sizeof block; off+=4)
+                if (get32(block+off)==JOURNAL_MAGIC || get32(block+off)==SECTOR_MAGIC) return fail(s);
+            unsigned sec=at/VR_STORE_SECTOR;
+            if (!erased(block,sizeof block)) dirty[sec/8] |= (uint8_t)(1u<<(sec%8));
         }
-        /* Neither journal authenticates the high-water ID. Even with no records,
-         * silently formatting could reuse deleted IDs. Require explicit recovery
-         * with a new enrollment identity instead of resetting the namespace. */
-        if (journal_dirty) return fail(s);
+        /* The complete magic scan must finish before the first erase. */
+        for (unsigned sec=0; sec<s->sector_count; ++sec) if (dirty[sec/8] & (1u<<(sec%8))) {
+            if (!erase_sector(s,sec)) return fail(s);
+            ++s->formatted_sectors;
+        }
+        s->journal_sector=0; s->journal_slot=0;
     }
     if (complete_delete(s)) return VR_STORE_ERROR;
     for (unsigned sec = 2; sec < s->sector_count; ++sec) {
         if (!header(s, sec, p)) return fail(s);
-        if (erased(p, HEADER)) continue;
+        if (get32(p + 44) != COMMIT) {
+            bool body_empty;
+            if (range_erased(s,sec*VR_STORE_SECTOR+HEADER,VR_STORE_SECTOR-HEADER,&body_empty)) return VR_STORE_ERROR;
+            if (!body_empty) { s->owners[sec]=QUARANTINE; s->error=true; continue; }
+            if (erased(p,HEADER)) continue;
+            /* Header writes precede every frame. Only an empty sector body
+             * proves an uncommitted allocation tail is safe to reclaim. */
+            if (!erase_sector(s,sec)) return fail(s);
+            continue;
+        }
         if (!header_valid(p)) { s->owners[sec] = QUARANTINE; s->error = true; continue; }
         uint64_t id = get64(p + 4); int idx = record_index(s, id);
         if (id > s->allocated_id || (idx < 0 && (idx = free_record(s)) < 0)) { s->owners[sec] = QUARANTINE; s->error = true; continue; }
@@ -202,6 +228,9 @@ int vr_store_mount(vr_store_t *s) {
         if (r->finalized) {
             if (!header(s, r->first, p)) return fail(s);
             if (get32(p + 48) != r->meta.bytes || get32(p + 52) != r->meta.frames || get32(p + 60) != r->meta.crc) r->corrupt = true;
+            if (r->corrupt) { /* Keep the immutable finalized export description. */
+                r->meta.bytes=get32(p+48); r->meta.frames=get32(p+52); r->meta.crc=get32(p+60);
+            }
         }
         if (r->corrupt) { r->finalized = true; s->error = true; continue; }
         if (!r->finalized && finish_record(s, (int)i, true)) return VR_STORE_ERROR;
@@ -271,8 +300,11 @@ int vr_store_next(vr_store_t *s, uint64_t cursor, vr_store_meta_t *meta) {
         if (r->used && r->finalized && r->meta.id > cursor && (best < 0 || r->meta.id < s->records[best].meta.id)) best = (int)i;
     }
     if (best < 0) return VR_STORE_END;
-    if (s->records[best].corrupt) return VR_STORE_ERROR;
-    *meta = s->records[best].meta; return VR_STORE_OK;
+    *meta = s->records[best].meta;
+    /* Existing interrupted flag advertises damage; Fetch/Confirm return storage
+     * error for this ID. List must remain traversable without a wire change. */
+    if (s->records[best].corrupt) meta->flags |= 2;
+    return VR_STORE_OK;
 }
 int vr_store_fetch(vr_store_t *s, uint64_t id, uint32_t offset, uint8_t *data, size_t max, size_t *size) {
     if (!s || !s->mounted || !data || !max || !size) return VR_STORE_INVALID;

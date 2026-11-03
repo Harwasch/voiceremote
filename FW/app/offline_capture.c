@@ -22,7 +22,7 @@ void vr_local_control(vr_local_capture_t *p, uint8_t event, uint8_t value)
     }
     if(event==VR_MODE && value!=p->mode) {
         bool local=p->wanted; end(p); p->mode=value;
-        if(p->capture==VR_REC && (local || !p->usable)) start(p);
+        if(p->capture==VR_REC && local) start(p);
         else if(p->capture==VR_PTT && p->ptt) p->block_live=true;
     }
     if(p->capture==VR_OFF) { end(p); p->block_live=false; }

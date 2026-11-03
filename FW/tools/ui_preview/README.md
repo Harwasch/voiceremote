@@ -44,8 +44,8 @@ Everything generated goes into ignored `FW/build-preview/`.
 ![Orb preview](../../build-preview/ptt-armed.png)
 ![Offline listening](../../build-preview/offline-waiting.png)
 
-`run.sh` first executes `ui_preview --check`: production touch sampling, immediate preview before release/debounce, preview rollback, direct capture
-selection, mode/target events, cancelled/recognised 3-second holds, haptics,
+`run.sh` first executes `ui_preview --check`: production touch sampling, immediate preview before release/debounce, preview rollback, OFF committing on touch-down before release/debounce, PTT/REC release
+selection, mode/target events, cancelled/recognised 3-second holds (forget recognition commits OFF), haptics,
 pair accept/reject, both modal display guards, failed/successful flush barriers, 175 ms realistic draw / 450 ms completed draw despite wait expiry, modal cancellation
 during DMA, lock-free flushes with interleaved input sampling, partial redraws
 matching forced full redraws, destination-only flush bounds,
