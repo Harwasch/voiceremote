@@ -1,43 +1,78 @@
-# BLE control bench client
+# BLE audio bench client
 
 ```mermaid
 sequenceDiagram
-    Operator->>Remote: Tap Pair
-    Client->>BlueZ: Register DisplayYesNo agent / pair
-    BlueZ->>Operator: Compare number, type yes
-    Operator->>Remote: Numbers match
-    Client->>Remote: Read Version/info, subscribe Input + Audio
-    Remote->>Client: Fresh Input snapshot
-    Client->>Remote: Phone state fragments (write with response)
-    Remote->>Client: Last response after display transfer
+    Operator->>Remote: Pair locally / compare numbers on both screens
+    Client->>Remote: Read info, subscribe Input and Audio
+    Client->>Remote: Request fresh snapshot / write phone state
+    Remote->>Client: Input transition or streaming snapshot
+    Client->>Remote: State with latest Input ack and arm decision
+    Remote->>Client: Opus START / fragments / END
+    Client->>WAV: Reassemble, decode, close one file per segment
 ```
 
 | File | Purpose | Status |
 |---|---|---|
-| `client.py` | Linux/BlueZ CLI and Numeric Comparison D-Bus agent | 🟡 Adapter unverified |
-| `wire.py`, `test_wire.py` | Independent synthetic wire codec/fixtures, no hardware imports | ✅ Host tested |
-| `pyproject.toml`, `uv.lock` | Python 3.12, Bleak 3.0.2 and dbus-fast, locked dependencies | ✅ Offline resolved |
+| `client.py` | BlueZ CLI, Numeric Comparison, serialized/coalesced state writes on every Input | 🟡 Adapter unverified |
+| `wire.py`, `test_wire.py` | Control codecs, sequence/trigger recovery policy, synthetic fixtures | ✅ Host tested |
+| `audio.py`, `test_audio.py` | Bounded reassembly, duplicate/gap detection, 1 s watchdog, Opus decode/WAV and C framing round trip | ✅ Host tested |
+| `pyproject.toml`, `uv.lock` | Python 3.12, Bleak 3.0.2, dbus-fast 5.2.0, opuslib-next 1.3.1 | ✅ Offline resolved |
 
-Start here; [REQ-8]/[REQ-18] bench aid, not an iPhone policy implementation.
-Only the coordinator/operator runs against hardware:
+Start here; [REQ-8]/[REQ-18]/[REQ-51] bench support. This records provisional
+PTT audio, including short presses; it does not implement iPhone STT/gesture policy.
+System `libopus.so.0` is required (`libopus0` on Debian); missing codec produces a
+clear error. No development headers, av or FFmpeg. See [licences](../../licences/).
+
+Set the supplied offline uv environment in this sandbox, then prepare dependencies:
+
+```sh
+export UV_CACHE_DIR=/tmp/voiceremote-uvc-s2 UV_OFFLINE=1 UV_LINK_MODE=copy
+uv sync --project FW/tools/ble_client
+uv run --project FW/tools/ble_client python -m unittest discover -s FW/tools/ble_client -p 'test_*.py' -v
+```
+
+Build `FW/build-host/audio_tests` first for the C/Python round trip
+(`heavy bash FW/tests/run.sh` prepares it). Only the coordinator/operator runs
+Bluetooth commands; substitute the scanned address:
 
 ```sh
 uv run --project FW/tools/ble_client python FW/tools/ble_client/client.py --scan-only
-uv run --project FW/tools/ble_client python FW/tools/ble_client/client.py --address AA:BB:CC:DD:EE:FF
+uv run --project FW/tools/ble_client python FW/tools/ble_client/client.py --address AA:BB:CC:DD:EE:FF --capture 1 --recording 1 --arm --save /tmp/ptt.wav --seconds 60
+uv run --project FW/tools/ble_client python FW/tools/ble_client/client.py --address AA:BB:CC:DD:EE:FF --capture 2 --recording 1 --arm --save /tmp/rec.wav --seconds 60
 ```
 
-Default state: disarmed, stopped/OFF, Auto resolved to synthetic `PC`. Default
-20-byte write budget exercises the small-MTU fragments. The client clamps this
-to `min(512, public MTU−3, --budget)`; BlueZ may report only 23 through Bleak's
-public API, which is conservative. No ATT long writes, real labels or secrets.
-The local BlueZ policy must allow registering a default agent (no sudo used).
-The agent rejects PIN/passkey/Just Works paths, and requires typed `yes` within
-25 s. Also confirm on the remote. Reconnect uses the stored bond; revoke on the
-remote and remove the stale BlueZ bond manually before fresh enrollment.
+| Recording | Physical action after connection/snapshot |
+|---|---|
+| PTT | Select PTT, release yellow, then hold yellow while speaking; release to close |
+| REC | Start OFF, deliberately select REC after client is ready; select OFF to close |
+| Loss / overflow | Release then repress PTT, or select OFF then REC; snapshots/reconnect never create a REC trigger |
 
-Optional synthetic controls: `--target`, `--error`, `--mode 0|1`,
-`--capture 0|1|2`, `--recording 0|1|2|3`, `--arm`, `--seconds`.
-These write phone decisions, never remote control positions. Arm uses the latest
-received Input sequence; a racing input correctly makes it stale. Stage 1 never
-produces Audio even if the phone says recording. Unexpected Audio is reported
-as an error. Full-v1 capability mismatch is printed explicitly.
+`--arm` keeps arm intent and follows the latest physical capture/mode state.
+It writes a new current-ack state after each Input (coalescing a burst to its newest
+ack); snapshot requests stop after resync, avoiding a write/snapshot loop. A racing
+ack disarms correctly and the next event rearms. Pause/error/loss clears effective
+arm. Data while OFF or an unqualified held/recovered trigger is rejected.
+The timed exit writes stop, allows END, then disconnects; unexpected disconnect
+closes any open segment as interrupted.
+
+`/tmp/ptt.wav` becomes `/tmp/ptt-seg00000001.wav`, etc. Interrupted segments gain
+`-interrupted.wav`; samples before loss are retained for diagnosis and never spliced
+with later audio. Existing files are never overwritten: choose a fresh prefix per
+connection. PCM is mono 16 kHz, 16-bit little-endian; each complete packet must
+decode to exactly 320 samples, with no PLC/FEC or inserted silence. Stats show
+frames, gap events, encoded/transport B/s, duration, public MTU and the lower bound
+inferred from received notification lengths. They contain no audio contents.
+
+| MTU API | Evidence / consequence |
+|---|---|
+| BlueZ public D-Bus `GattCharacteristic1.AcquireNotify` / `AcquireWrite` | Return FD + negotiated MTU; yes, BlueZ has a public way to obtain it. AcquireWrite applies to write-without-response, absent on Phone state here |
+| Bleak 3.0.2 default `StartNotify`, public `mtu_size` | Backend `bleak/backends/bluezdbus/client.py:643–651` returns 23 without `_mtu_size`; `_acquire_mtu:552–600` demonstrates D-Bus MTU in `reply.body[1]` but is private. Normal public start-notify code at 938–990 never stores MTU |
+| This client | Uses public Bleak APIs; no private MTU probe/FD subscription takeover. Prints public MTU and `audio_MTU_at_least`; exact negotiated Audio MTU comes from firmware serial log |
+| Phone writes | Default 20-byte value budget, clamped to `min(512, public MTU−3, --budget)`; six bytes are the application header. Conservative writes do **not** clamp firmware Audio |
+| Audio | Firmware fragments from actual `ble_att_mtu()` at each frame boundary; small-MTU inability stops visibly rather than accumulating latency |
+
+The API evidence above is inspected installed source, not an adapter measurement.
+The local BlueZ policy must permit registering a default `DisplayYesNo` agent.
+Type `yes` within 25 s and confirm on the remote. PIN/passkey/Just Works are
+rejected. Reconnect uses the stored bond; revoke on the remote and remove the
+stale BlueZ bond manually before fresh enrollment. No adapter was accessed here.

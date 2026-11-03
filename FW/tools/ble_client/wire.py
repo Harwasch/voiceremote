@@ -1,4 +1,4 @@
-"""Contract v1 control fixtures; synthetic labels only. No audio producer."""
+"""Contract v1 controls and bench arm recovery; synthetic labels only."""
 import struct
 import unicodedata
 
@@ -62,3 +62,75 @@ def version_info(data: bytes) -> dict:
     return dict(contract=f"{major}.{minor}", board=board, firmware=f"{a}.{b}.{c}",
                 capabilities=caps, mics=mics, slider=slider, width=w, height=h,
                 maximum_packet=maximum, full_v1_capabilities=(caps & 63 == 63))
+
+
+class BenchPolicy:
+    """Bench-only arm intent, with contract loss/reconnect trigger recovery."""
+    def __init__(self, arm=False):
+        self.intent = arm
+        self.latest = None
+        self.snapshot_needed = True
+        self.blocked = False
+        self.released = False
+        self.rec_selected = False
+        self.ptt_selected = False
+
+    def lose(self):
+        self.blocked = True
+        self.snapshot_needed = True
+        self.released = False
+        self.rec_selected = False
+        self.ptt_selected = False
+
+    def input(self, event):
+        previous = self.latest
+        if previous:
+            distance = (event['seq'] - previous['seq']) & 0xffffffff
+            if distance == 0 or distance >= 0x80000000:
+                return False, False
+            loss = distance != 1
+            kind = event['event']
+            if not loss:
+                expected = dict(previous)
+                if kind in (1, 2):
+                    expected['ptt'] = kind == 1
+                    loss = previous['ptt'] == expected['ptt']
+                elif kind == 4:
+                    expected['capture'] = event['capture']
+                    loss = previous['capture'] == event['capture']
+                elif kind == 5:
+                    expected['mode'] = event['mode']
+                    loss = previous['mode'] == event['mode']
+                loss |= any(event[k] != expected[k] for k in ('ptt', 'capture', 'mode'))
+            if loss:
+                self.lose()
+        else:
+            loss = False
+        self.latest = event
+        if event['event'] == 0:
+            self.snapshot_needed = False
+        if not event['ptt']:
+            self.released = True
+            self.ptt_selected = False
+        if not self.snapshot_needed:
+            if event['event'] == 1 and self.released:
+                self.blocked = False
+                self.released = False
+                self.ptt_selected = True
+            if event['event'] == 4 and event['capture'] == 2 and not loss:
+                self.blocked = False
+                self.rec_selected = True
+        if event['capture'] != 2:
+            self.rec_selected = False
+        return True, loss
+
+    def arm(self):
+        e = self.latest
+        return bool(self.intent and e and not self.blocked and not self.snapshot_needed
+                    and e['capture'] != 0
+                    and ((e['capture'] == 1 and (self.released or self.ptt_selected))
+                         or (e['capture'] == 2 and self.rec_selected)))
+
+    def streaming_allowed(self):
+        e = self.latest
+        return bool(self.arm() and e and (e['capture'] != 1 or e['ptt']))

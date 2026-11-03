@@ -20,3 +20,16 @@ void ui_pair_number(uint32_t number);
 void ui_pair_hide(void);
 void ui_link(const char *text);
 void ui_tick(void);
+
+void audio_init(void);
+void audio_sync(void);
+void audio_poll(void);
+void audio_reset(void);
+void audio_fault(void);
+bool ble_audio_ready(void);
+bool ble_audio_send(const uint8_t *value, size_t size);
+uint16_t ble_audio_mtu(void);
+void ble_audio_disconnect(void);
+bool audio_input_allowed(void);
+void audio_notify_failed(void);
+bool ble_audio_end(const uint8_t *value, size_t size);

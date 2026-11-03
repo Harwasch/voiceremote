@@ -263,8 +263,8 @@ static void layout(void)
     CHECK(r.scale==2 && vr_ui_hit(&r,466,466,false)==VR_HIT_ORB);
     CHECK(vr_ui_hit(&r,466,814,false)==VR_HIT_TARGET);
     for(unsigned link=0;link<2;link++) for(unsigned cap=0;cap<3;cap++) for(unsigned held=0;held<2;held++)
-        CHECK(vr_ui_stage1_listening(link,cap,held)==(bool)(link && (cap==2 || (cap==1 && held))));
-    CHECK(!vr_ui_stage1_listening(true,3,true));
+        CHECK(vr_ui_listening(held)==(bool)held);
+    CHECK(!vr_ui_listening(false));
     char ascii[32]; vr_ui_ascii(ascii,sizeof ascii,"Caf\xc3\xa9 \xf0\x9f\x92\xbb"); CHECK(!strcmp(ascii,"Caf? ?"));
     vr_ui_ascii(ascii,4,"Desktop"); CHECK(!strcmp(ascii,"Des"));
 }

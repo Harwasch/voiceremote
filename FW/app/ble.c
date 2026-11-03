@@ -17,6 +17,8 @@ void ble_store_config_init(void);
 static ble_uuid128_t uuids[5];
 static uint16_t connection=BLE_HS_CONN_HANDLE_NONE, input_handle, audio_handle;
 static uint8_t own_address;
+static unsigned audio_pending;
+static uint32_t audio_sent_at;
 static bool synced, enrollment, comparison_pending, comparison_accepted, known_connection, revoke_pending;
 static uint32_t enrollment_started, comparison_started;
 static int gap_event(struct ble_gap_event *e,void *arg);
@@ -50,7 +52,7 @@ static void advertise(void)
 }
 void ble_emit(uint8_t event,uint32_t sampled)
 {
-    if(!remote_state.input_sub || !secure(connection)) return;
+    if(!audio_input_allowed() || !remote_state.input_sub || !secure(connection)) return;
     vr_input_t input=vr_prepare_input(&remote_state,event,sampled); uint8_t bytes[14];
     if(!vr_input_encode(&input,bytes)) return;
     struct os_mbuf *om=ble_hs_mbuf_from_flat(bytes,sizeof bytes);
@@ -66,7 +68,7 @@ static int access_value(uint16_t h,uint16_t attr,struct ble_gatt_access_ctxt *ct
     if(which==1 && ctxt->op==BLE_GATT_ACCESS_OP_READ_CHR) {
         const board_info_t *b=board_info();
         vr_info_t info={.board=b->id,.caps=b->capabilities,.width=b->operational?b->width:0,
-            .height=b->operational?b->height:0,.max_packet=VR_MAX_PACKET,.fw={0,1,0},.mics=1,.slider=1};
+            .height=b->operational?b->height:0,.max_packet=VR_MAX_PACKET,.fw={0,2,0},.mics=1,.slider=b->virtual_sliders?1:0};
         uint8_t bytes[20];
         if(!vr_info_encode(&info,bytes) || os_mbuf_append(ctxt->om,bytes,sizeof bytes)) rc=BLE_ATT_ERR_INSUFFICIENT_RES;
         else remote_state.info_read=true;
@@ -85,6 +87,7 @@ static int access_value(uint16_t h,uint16_t attr,struct ble_gatt_access_ctxt *ct
                 remote_state.armed=false; rc=BLE_ATT_ERR_UNLIKELY;
             } else {
                 vr_apply_phone(&remote_state,&phone);
+                audio_sync();
                 if(phone.flags&1) ble_emit(VR_SNAPSHOT,remote_now());
             }
         }
@@ -107,7 +110,7 @@ static const struct ble_gatt_svc_def services[]={
 };
 static void disconnect(void)
 {
-    remote_state.secure=false; remote_state.armed=false;
+    remote_state.secure=false; remote_state.armed=false; audio_reset();
     if(connection!=BLE_HS_CONN_HANDLE_NONE) ble_gap_terminate(connection,BLE_ERR_REM_USER_CONN_TERM);
 }
 static int gap_event(struct ble_gap_event *e,void *arg)
@@ -116,6 +119,7 @@ static int gap_event(struct ble_gap_event *e,void *arg)
     switch(e->type) {
     case BLE_GAP_EVENT_CONNECT:
         if(e->connect.status) { advertise(); break; }
+        audio_reset(); audio_pending=false;
         connection=e->connect.conn_handle; vr_session_reset(&remote_state);
         comparison_pending=false; comparison_accepted=false;
         known_connection=known_peer(connection);
@@ -130,7 +134,7 @@ static int gap_event(struct ble_gap_event *e,void *arg)
             revoke_pending=rc!=0;
             if(rc) ESP_LOGE("ble","bond removal failed: %d",rc);
         }
-        connection=BLE_HS_CONN_HANDLE_NONE; vr_session_reset(&remote_state);
+        connection=BLE_HS_CONN_HANDLE_NONE; audio_pending=false; audio_reset(); vr_session_reset(&remote_state);
         comparison_pending=false; comparison_accepted=false;
         ui_pair_hide(); ui_refresh(); ui_link("Disconnected"); advertise(); break;
     case BLE_GAP_EVENT_ENC_CHANGE: {
@@ -140,7 +144,12 @@ static int gap_event(struct ble_gap_event *e,void *arg)
             (known_connection || comparison_accepted);
         if(!good) { disconnect(); break; }
         remote_state.secure=true; enrollment=false; comparison_pending=false;
-        ui_pair_hide(); ui_link("Bond secured | stage 1");
+        ui_pair_hide(); ui_link("Bond secured");
+        /* Apple QA1931: 15–30 ms, no latency, supervision 4 s. OS chooses. */
+        struct ble_gap_upd_params params={.itvl_min=12,.itvl_max=24,.latency=0,.supervision_timeout=400};
+        int update=ble_gap_update_params(connection,&params);
+        int mtu=ble_gattc_exchange_mtu(connection,NULL,NULL);
+        ESP_LOGI("ble","connection request=%d MTU request=%d",update,mtu);
         /* CCCDs can be restored from a bond before encryption. Still send a fresh snapshot. */
         if(remote_state.input_sub) ble_emit(VR_SNAPSHOT,remote_now());
         break;
@@ -167,8 +176,15 @@ static int gap_event(struct ble_gap_event *e,void *arg)
             if(!remote_state.audio_sub) remote_state.armed=false;
         }
         break;
+    case BLE_GAP_EVENT_MTU:
+        ESP_LOGI("ble","negotiated ATT MTU=%u",e->mtu.value);
+        break;
     case BLE_GAP_EVENT_NOTIFY_TX:
-        if(e->notify_tx.attr_handle==input_handle && e->notify_tx.status) {
+        if(e->notify_tx.conn_handle==connection && e->notify_tx.attr_handle==audio_handle) {
+            if(audio_pending) audio_pending--;
+            if(e->notify_tx.status) audio_notify_failed();
+        }
+        if(e->notify_tx.conn_handle==connection && e->notify_tx.attr_handle==input_handle && e->notify_tx.status) {
             remote_state.armed=false; remote_state.snapshot_sent=false;
             ui_link("Input transport failed; resync");
         }
@@ -176,6 +192,7 @@ static int gap_event(struct ble_gap_event *e,void *arg)
     case BLE_GAP_EVENT_ADV_COMPLETE: advertise(); break;
     default: break;
     }
+    audio_sync();
     unlock(); return 0;
 }
 void ble_pair_start(void)
@@ -224,6 +241,7 @@ static void on_sync(void)
 static void on_reset(int reason)
 {
     (void)reason; lock(); synced=false; connection=BLE_HS_CONN_HANDLE_NONE;
+    audio_pending=0; audio_reset();
     vr_session_reset(&remote_state); comparison_pending=false; enrollment=false;
     ui_pair_hide(); ui_refresh(); ui_link("Bluetooth reset"); unlock();
 }
@@ -249,8 +267,28 @@ void ble_start(void)
     ble_hs_cfg.sm_our_key_dist=BLE_SM_PAIR_KEY_DIST_ENC|BLE_SM_PAIR_KEY_DIST_ID;
     ble_hs_cfg.sm_their_key_dist=BLE_SM_PAIR_KEY_DIST_ENC|BLE_SM_PAIR_KEY_DIST_ID;
     ble_svc_gap_init(); ble_svc_gatt_init();
-    configASSERT(!ble_svc_gap_device_name_set("Voice Remote Stage 1"));
+    configASSERT(!ble_svc_gap_device_name_set("Voice Remote"));
     configASSERT(!ble_gatts_count_cfg(services)); configASSERT(!ble_gatts_add_svcs(services));
     ble_store_config_init();
     nimble_port_freertos_init(host_task);
 }
+
+uint16_t ble_audio_mtu(void) { return connection==BLE_HS_CONN_HANDLE_NONE?23:ble_att_mtu(connection); }
+bool ble_audio_ready(void)
+{
+    if(audio_pending && (uint32_t)(remote_now()-audio_sent_at)>200) audio_fault();
+    return !audio_pending && remote_state.audio_sub && secure(connection);
+}
+static bool audio_send(const uint8_t *value,size_t size,bool end)
+{
+    if(!remote_state.audio_sub || !secure(connection) || audio_pending>=(end?2u:1u) ||
+       size>(unsigned)(ble_audio_mtu()-3)) return false;
+    struct os_mbuf *om=ble_hs_mbuf_from_flat(value,size);
+    if(!om) return false;
+    audio_pending++; audio_sent_at=remote_now();
+    if(ble_gatts_notify_custom(connection,audio_handle,om)) { audio_pending--; return false; }
+    return true;
+}
+bool ble_audio_send(const uint8_t *value,size_t size) { return audio_send(value,size,false); }
+bool ble_audio_end(const uint8_t *value,size_t size) { return audio_send(value,size,true); }
+void ble_audio_disconnect(void) { disconnect(); }

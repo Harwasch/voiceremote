@@ -36,7 +36,7 @@ static uint32_t ticks(void) { return remote_now(); }
 static bool linked(void) { return remote_state.secure && shown_valid; }
 static bool listening(void)
 {
-    return vr_ui_stage1_listening(linked(),remote_state.input.capture,remote_state.input.ptt);
+    return vr_ui_listening(remote_state.input.streaming);
 }
 static int sx(float x) { return (int)lroundf(layout.ox+x*layout.scale); }
 static int sy(float y) { return (int)lroundf(layout.oy+y*layout.scale); }

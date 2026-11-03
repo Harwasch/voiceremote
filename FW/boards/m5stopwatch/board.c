@@ -20,8 +20,8 @@
 
 /* Swap only this constant if the physical colours are reversed. */
 static const gpio_num_t BUTTON_GPIOS[2]={GPIO_NUM_2,GPIO_NUM_1}; /* yellow PTT, blue cycle */
-static const board_info_t info={1,466,466,0x3e,true,true,true}; /* Opus deliberately absent */
-static i2c_master_dev_handle_t ioe, pm, touch;
+static const board_info_t info={1,466,466,0x3f,true,true,true};
+static i2c_master_dev_handle_t ioe, pm, touch, codec;
 static esp_lcd_panel_handle_t panel;
 static SemaphoreHandle_t dma_done;
 static uint32_t motor_started;
@@ -70,6 +70,7 @@ esp_err_t board_init(void)
     ESP_ERROR_CHECK(i2c_master_bus_add_device(bus,&dc,&ioe));
     dc.device_address=0x6e; ESP_ERROR_CHECK(i2c_master_bus_add_device(bus,&dc,&pm));
     dc.device_address=0x15; ESP_ERROR_CHECK(i2c_master_bus_add_device(bus,&dc,&touch));
+    dc.device_address=0x18; ESP_ERROR_CHECK(i2c_master_bus_add_device(bus,&dc,&codec));
     /* Keep awake at 100 kHz. Preserve all unrelated PM and IOE state, including AU_EN. */
     ESP_ERROR_CHECK(update(pm,0x09,0x1f,0));
     ESP_ERROR_CHECK(update(pm,0x06,0x16,0x06)); /* DCDC/LDO on, redundant LED off */
@@ -81,6 +82,7 @@ esp_err_t board_init(void)
     ESP_ERROR_CHECK(ioe_output(10,false));
     gpio_config_t amp={.pin_bit_mask=1ULL<<14,.mode=GPIO_MODE_OUTPUT};
     ESP_ERROR_CHECK(gpio_config(&amp)); ESP_ERROR_CHECK(gpio_set_level(14,0));
+    ESP_ERROR_CHECK(ioe_output(3,true)); /* Vendor hal_ioe: AU_EN stays high. */
     ESP_ERROR_CHECK(write_reg(ioe,0x25,0x88)); /* PWM 5000 Hz */
     ESP_ERROR_CHECK(write_reg(ioe,0x26,0x13));
     gpio_config_t cs={.pin_bit_mask=1ULL<<39,.mode=GPIO_MODE_OUTPUT};
@@ -149,4 +151,93 @@ void board_poll(uint32_t now)
     if(motor_on && (uint32_t)(now-motor_started)>=25) {
         ESP_ERROR_CHECK(write_reg(ioe,0x1c,0)); motor_on=false;
     }
+}
+
+/* ES8311 register sequence adapted from Espressif esp_codec_dev es8311.c
+ * SPDX-FileCopyrightText: 2023 Espressif Systems (Shanghai) CO LTD
+ * SPDX-License-Identifier: Apache-2.0
+ * Same slave/analog-mic/MCLK/Philips/16-bit setup as vendor hal_audio; 16 kHz
+ * replaces its 44.1 kHz. 4.096 MHz MCLK uses the driver's 16 kHz/256 coefficient.
+ * ADC left is mic; right is DAC reference (0x44=0x58), deliberately ignored.
+ */
+#include "driver/i2s_std.h"
+#include "esp_heap_caps.h"
+#include <stdatomic.h>
+#include <string.h>
+static i2s_chan_handle_t mic_rx;
+static bool mic_enabled;
+static atomic_bool mic_overflow;
+static int16_t mic_stereo[640];
+static size_t mic_used;
+static bool mic_q_overflow(i2s_chan_handle_t h,i2s_event_data_t *e,void *ctx)
+{ (void)h; (void)e; (void)ctx; atomic_store(&mic_overflow,true); return false; }
+static esp_err_t mic_init(void)
+{
+    i2s_chan_config_t channel=I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0,I2S_ROLE_MASTER);
+    channel.dma_desc_num=4; channel.dma_frame_num=320;
+    esp_err_t err=i2s_new_channel(&channel,NULL,&mic_rx); if(err) return err;
+    i2s_std_config_t cfg={
+        .clk_cfg=I2S_STD_CLK_DEFAULT_CONFIG(16000),
+        .slot_cfg=I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT,I2S_SLOT_MODE_STEREO),
+        .gpio_cfg={.mclk=18,.bclk=17,.ws=15,.dout=21,.din=16},
+    };
+    err=i2s_channel_init_std_mode(mic_rx,&cfg); if(err) goto fail;
+    i2s_event_callbacks_t callbacks={.on_recv_q_ovf=mic_q_overflow};
+    err=i2s_channel_register_event_callback(mic_rx,&callbacks,NULL); if(err) goto fail;
+    err=i2s_channel_enable(mic_rx); if(err) goto fail;
+    /* MCLK must be present during codec reset, as in vendor hal_audio. */
+    /* open, sample format/clock, then start: values follow vendor's codec driver.
+       Gain enum 5 = 30 dB (vendor hal_audio). DAC is muted and amp remains off. */
+    static const uint8_t regs[][2]={
+        {0x0d,0xfa},{0x44,0x08},{0x44,0x08},{0x01,0x30},{0x02,0x00},
+        {0x03,0x10},{0x16,0x24},{0x04,0x10},{0x05,0x00},{0x0b,0x00},
+        {0x0c,0x00},{0x10,0x1f},{0x11,0x7f},{0x00,0x80},{0x01,0x3f},
+        {0x06,0x00},{0x13,0x10},{0x1b,0x0a},{0x1c,0x6a},{0x44,0x58},
+        {0x09,0x0c},{0x0a,0x0c}, /* 16-bit Philips */
+        {0x02,0x00},{0x05,0x00},{0x03,0x10},{0x04,0x20},
+        {0x07,0x00},{0x08,0xff},{0x06,0x03}, /* 4.096 MHz/16 kHz */
+        {0x00,0x80},{0x01,0x3f},{0x09,0x0c},{0x0a,0x0c},
+        {0x17,0xbf},{0x0e,0x02},{0x12,0x00},{0x14,0x1a},{0x0d,0x01},
+        {0x15,0x40},{0x37,0x08},{0x45,0x00},{0x16,0x05},
+        {0x31,0x60},{0x32,0x00}, /* mute DAC; no speaker data */
+    };
+    for(unsigned i=0;i<sizeof regs/sizeof regs[0];i++) {
+        err=write_reg(codec,regs[i][0],regs[i][1]); if(err) goto fail;
+    }
+    uint8_t format;
+    err=read_reg(codec,0x0a,&format,1);
+    if(!err && format!=0x0c) err=ESP_ERR_INVALID_RESPONSE;
+    if(!err) { i2s_channel_disable(mic_rx); return ESP_OK; }
+fail:
+    /* Disable is harmlessly rejected when initialization never reached RUNNING. */
+    i2s_channel_disable(mic_rx);
+    i2s_del_channel(mic_rx); mic_rx=NULL; return err;
+}
+esp_err_t board_mic_start(void)
+{
+    if(!mic_rx) { esp_err_t e=mic_init(); if(e) return e; }
+    mic_used=0; atomic_store(&mic_overflow,false);
+    esp_err_t e=i2s_channel_enable(mic_rx); mic_enabled=e==ESP_OK; return e;
+}
+void board_mic_stop(void)
+{
+    if(mic_enabled) { i2s_channel_disable(mic_rx); mic_enabled=false; }
+    mic_used=0; memset(mic_stereo,0,sizeof mic_stereo);
+}
+esp_err_t board_mic_read(int16_t pcm[320])
+{
+    if(!mic_enabled) return ESP_ERR_INVALID_STATE;
+    if(atomic_load(&mic_overflow)) return ESP_ERR_INVALID_RESPONSE;
+    size_t n=0;
+    esp_err_t e=i2s_channel_read(mic_rx,(uint8_t*)mic_stereo+mic_used,sizeof mic_stereo-mic_used,&n,0);
+    mic_used+=n;
+    if(e!=ESP_OK && e!=ESP_ERR_TIMEOUT) return e;
+    if(mic_used!=sizeof mic_stereo) return ESP_ERR_NOT_FINISHED;
+    for(unsigned i=0;i<320;i++) pcm[i]=mic_stereo[2*i];
+    mic_used=0; return ESP_OK;
+}
+void *board_audio_alloc(size_t bytes)
+{
+    void *p=heap_caps_malloc(bytes,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+    return p?p:heap_caps_malloc(bytes,MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
 }

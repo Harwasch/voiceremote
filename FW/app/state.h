@@ -10,6 +10,7 @@ typedef struct {
     vr_fragments_t fragments;
     vr_debounce_t buttons[2];
     uint32_t next_seq, latest_seq, controls_epoch, fragment_epoch;
+    bool audio_fault, recovery_release;
     bool secure, input_sub, audio_sub, info_read, snapshot_sent, has_phone, armed;
 } vr_state_t;
 /* Retain physical positions/levels across reconnect; erase all connection state. */

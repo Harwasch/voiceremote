@@ -55,6 +55,6 @@ bool vr_phone_decode(const uint8_t *p, size_t n, vr_phone_t *out);
 size_t vr_phone_encode(const vr_phone_t *v, uint8_t p[512]);
 /* -1 rejected/reset; 0 pending; 1 complete validated state. Previous display untouched. */
 int vr_fragment(vr_fragments_t *f, const uint8_t *p, size_t n, vr_phone_t *out);
-/* Framing validation only, never encodes/decodes Opus or transmits Audio. */
+/* Audio transport framing; codec and notification policy live in audio modules. */
 bool vr_audio_decode(const uint8_t *p, size_t n, uint16_t max_packet, vr_audio_t *out);
 size_t vr_audio_encode(const vr_audio_t *v, uint16_t max_packet, uint8_t *p, size_t capacity);

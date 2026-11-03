@@ -20,12 +20,8 @@ static inline vr_layout_t vr_layout(uint16_t w,uint16_t h,bool round,bool ring)
     return (vr_layout_t){w,h,round,ring,s,(w-rw*s)/2,(h-rh*s)/2,
         ring?233:120,ring?233:112,ring?112:84,ring?368:222,ring?424:264};
 }
-/* Stage 1 visual approximation ONLY: no audio exists. Stage 2 MUST replace this
- * with real streaming state, so fill/pulse can never disagree with a live mic. */
-static inline bool vr_ui_stage1_listening(bool linked,uint8_t capture,bool yellow_held)
-{
-    return linked && ((capture==1 && yellow_held) || capture==2);
-}
+/* The producer publishes this bit only after the first Audio notification. */
+static inline bool vr_ui_listening(bool streaming) { return streaming; }
 static inline bool vr_ui_inside(const vr_layout_t *l,float x,float y)
 {
     if(x<0 || y<0 || x>=l->width || y>=l->height) return false;

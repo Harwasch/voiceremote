@@ -16,6 +16,11 @@ void vr_session_reset(vr_state_t *s)
 void vr_control(vr_state_t *s, uint8_t event, uint8_t value, uint32_t sampled)
 {
     s->input.ms=sampled;
+    if(event==VR_UP) s->recovery_release=true;
+    if((event==VR_DOWN && s->recovery_release) ||
+       (event==VR_CAPTURE && value==VR_REC && s->input.capture!=VR_REC)) {
+        s->audio_fault=false; s->recovery_release=false;
+    }
     if(event==VR_DOWN || event==VR_UP) s->input.ptt=value;
     if(event==VR_CAPTURE) s->input.capture=value;
     if(event==VR_MODE) s->input.mode=value;
@@ -24,7 +29,6 @@ void vr_control(vr_state_t *s, uint8_t event, uint8_t value, uint32_t sampled)
 vr_input_t vr_prepare_input(const vr_state_t *s, uint8_t event, uint32_t sampled)
 {
     vr_input_t v=s->input; v.seq=s->next_seq; v.event=event; v.ms=sampled;
-    v.streaming=0; /* Stage 1 has no audio path. */
     return v;
 }
 void vr_input_sent(vr_state_t *s, const vr_input_t *v, bool success)
@@ -41,7 +45,7 @@ int vr_state_fragment(vr_state_t *s, const uint8_t *p, size_t n, vr_phone_t *can
 void vr_apply_phone(vr_state_t *s, const vr_phone_t *p)
 {
     s->phone=*p; s->has_phone=true;
-    s->armed=(p->flags&2) && s->secure && s->input_sub && s->audio_sub && s->info_read &&
+    s->armed=!s->audio_fault && (p->flags&2) && s->secure && s->input_sub && s->audio_sub && s->info_read &&
         s->snapshot_sent && p->ack==s->latest_seq && s->input.capture!=VR_OFF &&
         s->fragment_epoch==s->controls_epoch;
     if(!s->armed) s->phone.flags &= (uint8_t)~2u;
@@ -49,8 +53,8 @@ void vr_apply_phone(vr_state_t *s, const vr_phone_t *p)
 bool vr_capture_gate(const vr_state_t *s)
 {
     /* No lock field exists in v1 Phone state: fail closed for hold without PTT.
-       This is a control-state gate only. Stage 1 never invokes an audio producer. */
-    return s->armed && s->secure && s->input_sub && s->audio_sub && s->info_read && s->snapshot_sent &&
+       Local hold also requires PTT, even if the phone requests continuous. */
+    return !s->audio_fault && s->armed && s->secure && s->input_sub && s->audio_sub && s->info_read && s->snapshot_sent &&
         s->has_phone && s->input.capture!=VR_OFF && s->phone.capture!=VR_OFF && s->phone.recording==1 &&
-        (s->phone.capture!=VR_PTT || s->input.ptt);
+        ((s->phone.capture!=VR_PTT && s->input.capture!=VR_PTT) || s->input.ptt);
 }

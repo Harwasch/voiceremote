@@ -1,31 +1,35 @@
-# FW: stage 1 voice remote
+# FW: stage 2 Opus voice remote
 
 ```mermaid
 flowchart LR
-    M5[StopWatch: display + touch + buttons] --> Board[board.h]
+    M5[StopWatch: ES8311 + display + controls] --> Board[board.h]
     C6[C6: build-only stub] --> Board
     Board --> UI[LVGL + debounced controls]
     UI --> State[Pure protocol + state]
-    State <-->|Encrypted bonded BLE controls| Phone[Phone / bench client]
+    Board --> Encoder[16 kHz mono / 20 ms Opus]
+    Encoder --> Queue[4 packets / MTU fragmentation]
+    Queue -->|Authenticated Audio notifications| Phone[Bench client → segment WAV]
+    State <-->|Encrypted bonded BLE controls| Phone
     Tests[Host fixtures] --> State
 ```
 
 | Path | What it is | Status |
 |---|---|---|
-| [app/](app/) | Shared control firmware; Audio exists but never notifies | 🟡 Hardware unverified |
-| [boards/](boards/) | StopWatch driver and compiling C6 stub | 🟡 Hardware unverified |
+| [app/](app/) | Shared controls + bounded Opus capture/transport | 🟡 Audio hardware unverified |
+| [boards/](boards/) | StopWatch ES8311/display driver and compiling C6 mic stub | 🟡 Audio hardware unverified |
 | [tests/](tests/) | Pure C logic and Python wire tests; no board/adapter | ✅ Host verified |
 | [tools/ui_preview/](tools/ui_preview/) | Real UI, native LVGL renderer, twelve masked PNG fixtures | ✅ Host verified |
-| [tools/ble_client/](tools/ble_client/) | uv/Bleak Linux client with Numeric Comparison agent | 🟡 Adapter unverified |
-| [licences/](licences/) | Reused MIT notices and dependency licences | ✅ Included; coordinator relocates |
+| [tools/ble_client/](tools/ble_client/) | uv/Bleak Linux client, Numeric Comparison and segment WAV recorder | 🟡 Adapter unverified |
+| [licences/](licences/) | MIT / BSD / Apache / OFL notices | ✅ Included; coordinator relocates |
 | `dependencies.lock.*` | Separate pinned dependency graph per board | ✅ Offline resolved |
-| [handoff.md](handoff.md) | Build evidence, assumptions, contract conflicts, hardware checklist | 🟡 Hardware unverified |
+| [handoff.md](handoff.md) | Build evidence, assumptions and hardware checklist | 🟡 Audio hardware unverified |
 
 Start with [the contract](../SYS/protocol/remote-ble.md), then [handoff](handoff.md).
 Traces to [REQ-8], [REQ-18], [REQ-49–53]; no claim of hardware compliance.
-Required Opus capability conflicts with stage 1: bit 0 is **clear**, maximum
-packet field reserves 512. The Orb screen intentionally has no stage/status text.
-A strict full-v1 phone must refuse capture. No microphone, codec or Opus initialization.
+Firmware **0.2.0**, advertised as **Voice Remote**. StopWatch reports required
+capabilities 0–5 and a 512-byte encoder output bound; both boards keep `hw_mic_cut=0`.
+Owner confirmed the existing controls, pairing and Orb on hardware; new audio is
+**unverified on hardware**. The C6 remains a build-only mic/display/control stub.
 
 Host tests, from the repository root (CMake, C compiler, Python ≥3.12):
 
@@ -42,7 +46,7 @@ heavy bash FW/tools/ui_preview/run.sh
 ![Orb UI](build-preview/ptt-armed.png)
 
 The preview includes synthetic touch/display-barrier checks. See
-[app](app/README.md) for stage-1 listening semantics and font fallback.
+[app](app/README.md) for producer-driven listening and font fallback.
 
 Build from the repository root, using ESP-IDF **5.5.6**:
 
@@ -53,7 +57,7 @@ export IDF_TOOLS_PATH=$HOME/hw-tools/espressif
 heavy idf.py -C FW -B FW/build-m5 -DIDF_TARGET=esp32s3 reconfigure
 heavy cmake --build FW/build-m5 -j 4
 heavy idf.py -C FW -B FW/build-m5 build
-heavy idf.py -C FW -B FW/build-c6 -DREMOTE_BOARD=waveshare_c6_169 set-target esp32c6
+heavy idf.py -C FW -B FW/build-c6 -DREMOTE_BOARD=waveshare_c6_169 -DIDF_TARGET=esp32c6 reconfigure
 heavy cmake --build FW/build-c6 -j 4
 heavy idf.py -C FW -B FW/build-c6 -DREMOTE_BOARD=waveshare_c6_169 build
 ```
@@ -63,8 +67,16 @@ directory, including with `-C`. Each build has its own generated sdkconfig.
 The source manifests use normal registry dependencies. For offline builds, set
 the supplied mirror/cache environment variables in the shell only.
 
+Client recording commands and the physical PTT/REC steps are in
+[ble_client](tools/ble_client/README.md). The 20-byte **phone-write** budget does
+not limit Audio fragments; firmware uses `ble_att_mtu()` at each frame boundary.
+
 Only the coordinator flashes/tests hardware. From this worktree's root after setup:
 
 ```sh
 heavy idf.py -C FW -B FW/build-m5 -p /dev/ttyACM0 flash
 ```
+
+In this sandbox, after export use `IDF_TOOLS_PATH=/tmp/voiceremote-espressif` for
+the prepared writable metadata overlay. On a normal networked checkout, normal
+registry manifests/board locks suffice. No offline mirror paths are committed.

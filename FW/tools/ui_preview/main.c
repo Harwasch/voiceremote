@@ -105,11 +105,16 @@ static void check(void)
     fail_flush=true; assert(!ui_phone(&candidate)); fail_flush=false;
     assert(ui_phone(&remote_state.phone));
     remote_state.input.ptt=1; ui_refresh(); advance(100);
+    sent_pixels=0; advance(1000); assert(sent_pixels==0); /* Held, but producer stopped. */
+    remote_state.input.streaming=1; ui_refresh(); advance(100);
     sent_pixels=0;min_x=min_y=466;max_x=max_y=0; advance(1000);
     assert(sent_pixels>0 && sent_pixels<=6*268*268);
     assert(min_x>=99 && min_y>=99 && max_x<367 && max_y<367);
     printf("Pulse: %u pixels flushed in 1s, bounded to (%d,%d)-(%d,%d).\n",sent_pixels,min_x,min_y,max_x,max_y);
-    remote_state.input.ptt=0; ui_refresh();
+    remote_state.input.ptt=0; ui_refresh(); advance(100);
+    sent_pixels=0; advance(1000); assert(sent_pixels>0); /* Producer is the sole source. */
+    remote_state.input.streaming=0; ui_refresh(); advance(100);
+    sent_pixels=0; advance(1000); assert(sent_pixels==0);
     strcpy(candidate.error,"Destination unavailable"); assert(ui_phone(&candidate));
     assert(error_pixels()>100); advance(5100); assert(error_pixels()==0);
     candidate.error[0]=0; assert(ui_phone(&candidate));
@@ -147,8 +152,8 @@ int main(int argc,char **argv)
     fixture(); const char *state=argv[1];
     if(!strcmp(state,"off")) remote_state.input.capture=VR_OFF;
     else if(!strcmp(state,"ptt-armed")) {}
-    else if(!strcmp(state,"ptt-listening-transcribe")) remote_state.input.ptt=1;
-    else if(!strcmp(state,"rec-listening-ai")) { remote_state.input.capture=VR_REC;remote_state.input.mode=1; }
+    else if(!strcmp(state,"ptt-listening-transcribe")) { remote_state.input.ptt=1; remote_state.input.streaming=1; }
+    else if(!strcmp(state,"rec-listening-ai")) { remote_state.input.capture=VR_REC;remote_state.input.mode=1;remote_state.input.streaming=1; }
     else if(!strcmp(state,"auto-target")) remote_state.phone.active=0;
     else if(!strcmp(state,"named-target")) { remote_state.phone.active=2;strcpy(remote_state.phone.resolved,"Laptop"); }
     else if(!strcmp(state,"long-name")) strcpy(remote_state.phone.resolved,"A very long destination name 1234");

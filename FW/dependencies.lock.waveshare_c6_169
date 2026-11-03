@@ -1,4 +1,14 @@
 dependencies:
+  78/esp-opus:
+    component_hash: 8182b733f071d7bfe1e837f4c9f8649a63e4c937177f089e65772880c02f2e17
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    version: 1.0.5
   idf:
     source:
       type: idf
@@ -11,8 +21,9 @@ dependencies:
       type: service
     version: 9.5.0
 direct_dependencies:
+- 78/esp-opus
 - idf
 - lvgl/lvgl
-manifest_hash: d92297def3df9db070d9c5ef0d13e069cb8fa76858348b8be09e90d492f7cf25
+manifest_hash: da119655f10808b7c1938d8221b748e721f0d39dd21c3fd055f7e7fdd2c483a9
 target: esp32c6
 version: 2.0.0

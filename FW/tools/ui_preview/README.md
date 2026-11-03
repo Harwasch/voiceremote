@@ -31,7 +31,7 @@ Everything generated goes into ignored `FW/build-preview/`.
 | PNG basename | Fixture |
 |---|---|
 | `off.png`, `ptt-armed.png` | Hollow grey / outlined transcribe orb |
-| `ptt-listening-transcribe.png`, `rec-listening-ai.png` | Filled orb and pulse |
+| `ptt-listening-transcribe.png`, `rec-listening-ai.png` | Filled orb and pulse from explicit producer streaming bit |
 | `auto-target.png`, `named-target.png` | Resolved destination, Auto badge, pips |
 | `long-name.png`, `error-text.png` | Shrink/ellipsis and temporary red error |
 | `no-link.png` | Hollow grey orb and Bluetooth-off pairing target |
@@ -43,6 +43,8 @@ Everything generated goes into ignored `FW/build-preview/`.
 `run.sh` first executes `ui_preview --check`: actual pointer input, direct capture
 selection, mode/target events, cancelled/recognised 3-second holds, haptics,
 pair accept/reject, both modal display guards, failed/successful flush barriers,
-error expiry and pulse invalidation bounds. Pure geometry/listening checks live in
+error expiry and pulse invalidation bounds. A held PTT with streaming=0 never
+pulses; streaming=1 pulses independently of the held level, and clearing the bit
+stops it. Fixtures inject the producer bit; this is not a microphone measurement. Pure geometry/listening checks live in
 [tests](../../tests/). These support [REQ-8]/[REQ-18]; physical scanout, frame rate,
 BLE/input latency, motor feel and panel colour remain **unverified**.

@@ -10,3 +10,12 @@ add_test(NAME remote_logic COMMAND remote_tests)
 find_package(Python3 3.12 REQUIRED COMPONENTS Interpreter)
 add_test(NAME ble_client_wire COMMAND ${Python3_EXECUTABLE} -m unittest discover
     -s ${CMAKE_CURRENT_SOURCE_DIR}/../tools/ble_client -p test_wire.py -v)
+
+add_executable(audio_tests test_audio.c ../app/audio.c ../app/protocol.c ../app/state.c)
+target_include_directories(audio_tests PRIVATE ../app)
+target_compile_features(audio_tests PRIVATE c_std_11)
+target_compile_options(audio_tests PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+add_test(NAME audio_transport COMMAND audio_tests)
+add_test(NAME audio_client COMMAND ${Python3_EXECUTABLE} -m unittest discover
+    -s ${CMAKE_CURRENT_SOURCE_DIR}/../tools/ble_client -p test_audio.py -v)
+set_tests_properties(audio_client PROPERTIES ENVIRONMENT "VR_FRAMER=$<TARGET_FILE:audio_tests>")
