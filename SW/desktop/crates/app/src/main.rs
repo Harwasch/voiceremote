@@ -2,15 +2,29 @@ use anyhow::{Result, bail, ensure};
 use clap::{Parser, Subcommand};
 use std::{net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 use tokio::sync::watch;
+#[cfg(not(windows))]
 use voiceremote_core::{
-    TextInjector,
+    TextInjector, receiver,
+    transport::{LanListener, RelayTransport},
+};
+use voiceremote_core::{
     pairing::{self, Offer, SystemClock},
     protocol::*,
-    receiver::{self, InjectorFactory},
+    receiver::InjectorFactory,
     relay::{RelayClient, RelayIdentity},
     storage::{FileKeyStore, Identity, KeyStore, ReceiverLease, Registry},
-    transport::{LanListener, RelayRoute, RelayTransport, Transport},
+    transport::{RelayRoute, Transport},
 };
+#[cfg(windows)]
+use windows_receiver as receiver;
+#[cfg(windows)]
+use windows_transport::{LanListener, RelayTransport};
+#[cfg(any(windows, test))]
+#[cfg_attr(not(windows), allow(dead_code))]
+mod windows_receiver;
+#[cfg(any(windows, test))]
+#[cfg_attr(not(windows), allow(dead_code))]
+mod windows_transport;
 fn default_state_dir() -> PathBuf {
     if cfg!(windows) {
         return std::env::var_os("LOCALAPPDATA")
@@ -114,10 +128,28 @@ enum Command {
 enum DictateCommand {
     Toggle,
 }
+#[cfg(not(windows))]
 struct UnavailableInjector;
+#[cfg(not(windows))]
 impl TextInjector for UnavailableInjector {
     fn insert_text(&mut self, _: &str) -> Result<()> {
         bail!("text injection adapter not installed")
+    }
+}
+#[cfg(windows)]
+struct WindowsAppInjector;
+#[cfg(windows)]
+impl voiceremote_core::TextInjector for WindowsAppInjector {
+    fn insert_text(&mut self, text: &str) -> Result<()> {
+        let result = voiceremote_core::TextInjector::insert_text(
+            &mut voiceremote_inject_windows::WindowsInjector,
+            text,
+        );
+        if let Err(error) = &result {
+            // Native errors contain fixed diagnostics and OS error codes only.
+            eprintln!("Windows dictation insertion failed: {error}");
+        }
+        result
     }
 }
 fn store(cli: &Cli) -> Result<Arc<dyn KeyStore>> {
@@ -201,7 +233,10 @@ async fn main() -> Result<()> {
         let _ = tokio::signal::ctrl_c().await;
         let _ = stop_send.send(true);
     });
+    #[cfg(not(windows))]
     let injectors: InjectorFactory = Arc::new(|| Box::new(UnavailableInjector));
+    #[cfg(windows)]
+    let injectors: InjectorFactory = Arc::new(|| Box::new(WindowsAppInjector));
     match cli.command {
         Command::Devices => {
             for peer in registry.devices()? {
