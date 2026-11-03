@@ -56,6 +56,7 @@ impl CliAdapter {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Finish {
     Completed,
+    Pending,
     SpawnFailed,
     IoFailed,
     TimedOut,
@@ -65,6 +66,10 @@ pub enum Finish {
     InvalidOutput,
     NotConfigured,
     UnsupportedPlatform,
+    UnsupportedAction,
+    CloudSubmitted,
+    CloudFailed,
+    CancelUnsupported,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessResult {
@@ -76,6 +81,8 @@ pub struct ProcessResult {
     pub termination_confirmed: bool,
     #[serde(default)]
     pub scope_unit: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cloud: Option<crate::CloudReceipt>,
 }
 impl ProcessResult {
     pub(crate) fn no_process(finish: Finish) -> Self {
@@ -86,18 +93,8 @@ impl ProcessResult {
             success: false,
             termination_confirmed: true,
             scope_unit: None,
+            cloud: None,
         }
-    }
-}
-/// Cloud implementations must return a real provider outcome, never pretend to resume local state.
-pub trait CloudAdapter: voiceremote_core::AgentAdapter {
-    fn unavailable(&self) -> ProcessResult;
-}
-pub struct UnconfiguredCloud;
-impl voiceremote_core::AgentAdapter for UnconfiguredCloud {}
-impl CloudAdapter for UnconfiguredCloud {
-    fn unavailable(&self) -> ProcessResult {
-        ProcessResult::no_process(Finish::NotConfigured)
     }
 }
 #[cfg(unix)]
@@ -140,6 +137,36 @@ impl Drop for ProcessTree {
 }
 #[cfg(unix)]
 impl CliAdapter {
+    pub(crate) async fn cloud_capture(
+        &self,
+        executable: &str,
+        args: &[&str],
+        session: &SessionIdentity,
+        limit: usize,
+    ) -> Option<(bool, Vec<u8>)> {
+        let mut command = Command::new(executable);
+        command
+            .args(args)
+            .current_dir(&session.workspace)
+            .env_clear()
+            .envs(&self.environment)
+            .env("NO_COLOR", "1")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .kill_on_drop(true);
+        tokio::time::timeout(Duration::from_secs(2), async {
+            let mut child = command.spawn().ok()?;
+            let stdout = child.stdout.take()?;
+            let (out, status) = tokio::try_join!(bounded(stdout, limit), async {
+                child.wait().await.map_err(anyhow::Error::from)
+            })
+            .ok()?;
+            Some((status.success(), out))
+        })
+        .await
+        .ok()?
+    }
     async fn control(&self, args: &[&str]) -> Option<std::process::Output> {
         let mut command = Command::new("systemctl");
         command
@@ -253,29 +280,57 @@ impl CliAdapter {
         output_limit: usize,
         cancel: watch::Receiver<bool>,
     ) -> ProcessResult {
-        if session.provider == Provider::Cloud {
-            return UnconfiguredCloud.unavailable();
+        let cloud = session.provider == Provider::Cloud;
+        if cloud && !session.cloud.as_ref().is_some_and(|c| c.enabled) {
+            return crate::cloud::result(session, Finish::NotConfigured);
+        }
+        if cloud
+            && session.capability_profile == crate::CapabilityProfile::ReadOnly
+            && !session
+                .cloud
+                .as_ref()
+                .is_some_and(|c| c.allow_read_only_override)
+        {
+            return crate::cloud::result(session, Finish::UnsupportedAction);
         }
         // The headless node in task 12 is Linux. Refuse rather than start an
         // uncontained Windows child until a suspended-start Job Object exists.
         #[cfg(not(unix))]
         {
             let _ = (instruction, timeout, output_limit, cancel);
-            return ProcessResult::no_process(Finish::UnsupportedPlatform);
+            return if cloud {
+                crate::cloud::result(session, Finish::UnsupportedPlatform)
+            } else {
+                ProcessResult::no_process(Finish::UnsupportedPlatform)
+            };
         }
         #[cfg(unix)]
         {
             let executable = match session.provider {
                 Provider::Claude => "claude",
                 Provider::Codex => "codex",
-                Provider::Cloud => unreachable!(),
+                Provider::Cloud => match session.cloud.as_ref().unwrap().provider {
+                    crate::CloudProvider::Codex => "codex",
+                    crate::CloudProvider::Claude => "claude",
+                },
             };
             if *cancel.borrow() {
-                return ProcessResult::no_process(Finish::Cancelled);
+                return if cloud {
+                    crate::cloud::result(session, Finish::Cancelled)
+                } else {
+                    ProcessResult::no_process(Finish::Cancelled)
+                };
+            }
+            if cloud && !self.cloud_repository(session).await {
+                return crate::cloud::result(session, Finish::NotConfigured);
             }
             let has_bus = self.user_bus().await;
             if *cancel.borrow() {
-                return ProcessResult::no_process(Finish::Cancelled);
+                return if cloud {
+                    crate::cloud::result(session, Finish::Cancelled)
+                } else {
+                    ProcessResult::no_process(Finish::Cancelled)
+                };
             }
             let unit = if has_bus {
                 static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -351,7 +406,27 @@ impl CliAdapter {
                         "-",
                     ]);
                 }
-                Provider::Cloud => unreachable!(),
+                Provider::Cloud => {
+                    let config = session.cloud.as_ref().unwrap();
+                    match config.provider {
+                        crate::CloudProvider::Codex => {
+                            command.args([
+                                "cloud",
+                                "exec",
+                                "--env",
+                                &config.environment,
+                                "--branch",
+                                &config.branch,
+                                "--attempts",
+                                "1",
+                                "-",
+                            ]);
+                        }
+                        crate::CloudProvider::Claude => {
+                            command.args(["--cloud", "--environment", &config.environment, "-p"]);
+                        }
+                    }
+                }
             }
             command
                 .current_dir(&session.workspace)
@@ -363,7 +438,11 @@ impl CliAdapter {
                 .kill_on_drop(true);
             command.process_group(0);
             let Ok(mut child) = command.spawn() else {
-                return ProcessResult::no_process(Finish::SpawnFailed);
+                return if cloud {
+                    crate::cloud::result(session, Finish::SpawnFailed)
+                } else {
+                    ProcessResult::no_process(Finish::SpawnFailed)
+                };
             };
             let mut tree = ProcessTree {
                 pid: child.id().expect("fresh process") as i32,
@@ -410,6 +489,25 @@ impl CliAdapter {
             match result {
                 Ok((out, status)) => {
                     use std::os::unix::process::ExitStatusExt;
+                    if cloud {
+                        let mut result = crate::cloud::submitted(session, &out, status.success());
+                        result.exit_code = status.code();
+                        result.signal = status.signal();
+                        result.termination_confirmed = termination_confirmed;
+                        result.scope_unit = unit;
+                        if result.finish == Finish::CloudSubmitted {
+                            self.cloud_snapshot(
+                                session,
+                                result.cloud.as_mut().unwrap(),
+                                output_limit,
+                            )
+                            .await;
+                            if result.cloud.as_ref().unwrap().state == crate::CloudState::Failed {
+                                result.finish = Finish::CloudFailed;
+                            }
+                        }
+                        return result;
+                    }
                     let valid =
                         structured_success(session.provider, &out, &session.provider_session_id);
                     let unconfirmed = !termination_confirmed;
@@ -426,6 +524,7 @@ impl CliAdapter {
                         success: !unconfirmed && status.success() && valid,
                         termination_confirmed,
                         scope_unit: unit.clone(),
+                        cloud: None,
                     }
                 }
                 Err(finish) => {
@@ -435,7 +534,9 @@ impl CliAdapter {
                         .and_then(Result::ok);
                     use std::os::unix::process::ExitStatusExt;
                     ProcessResult {
-                        finish: if termination_confirmed {
+                        finish: if cloud {
+                            Finish::Unconfirmed
+                        } else if termination_confirmed {
                             finish
                         } else {
                             Finish::Unconfirmed
@@ -445,6 +546,11 @@ impl CliAdapter {
                         success: false,
                         termination_confirmed,
                         scope_unit: unit.clone(),
+                        cloud: if cloud {
+                            crate::cloud::result(session, Finish::Unconfirmed).cloud
+                        } else {
+                            None
+                        },
                     }
                 }
             }
@@ -509,6 +615,7 @@ mod tests {
             workspace: root.path().to_path_buf(),
             provider_session_id: "test-session".into(),
             capability_profile: crate::CapabilityProfile::ReadOnly,
+            cloud: None,
         };
         // No systemctl on this trusted PATH: exercise the real no-bus path.
         let adapter = CliAdapter::with_path(root.path().as_os_str().to_owned());
@@ -548,6 +655,7 @@ mod tests {
             workspace: root.path().to_path_buf(),
             provider_session_id: "test-session".into(),
             capability_profile: crate::CapabilityProfile::ReadOnly,
+            cloud: None,
         };
         let adapter =
             CliAdapter::with_path(format!("{}:/usr/bin:/bin", root.path().display()).into());

@@ -1,10 +1,12 @@
 //! REQ-34/41/44: exact-session CLI dispatch only from a paired phone Noise session.
+mod cloud;
 mod process;
 pub mod receiver;
 mod registry;
 pub mod transport;
 use anyhow::{Result, ensure};
-pub use process::{CliAdapter, CloudAdapter, Finish, ProcessResult, UnconfiguredCloud};
+pub use cloud::{CloudConfig, CloudProvider, CloudReceipt, CloudState};
+pub use process::{CliAdapter, Finish, ProcessResult};
 pub use registry::{Allowlist, CapabilityProfile, Project, Provider, SessionIdentity};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -34,6 +36,7 @@ struct Active {
     project: String,
     session: String,
     cancel: watch::Sender<bool>,
+    cloud: Option<CloudReceipt>,
 }
 #[derive(Clone)]
 pub struct AgentNode {
@@ -314,6 +317,17 @@ impl AgentNode {
             self.record_result(result.clone());
             done(result)
         };
+        if !matches!(
+            command.immutable_task_payload,
+            ToolCall::DelegateTaskTool(_) | ToolCall::CancelTaskTool(_)
+        ) {
+            return finish_now(Self::result(
+                &command,
+                Failed,
+                Unavailable,
+                Some(ProcessResult::no_process(Finish::UnsupportedAction)),
+            ));
+        }
         if self.validate_fresh(&command).is_err() {
             return finish_now(Self::result(&command, Failed, Denied, None));
         }
@@ -340,6 +354,38 @@ impl AgentNode {
         match &command.immutable_task_payload {
             ToolCall::CancelTaskTool(task) => {
                 let active = self.active.lock().unwrap();
+                let cloud = active
+                    .get(&task.command_id)
+                    .filter(|target| {
+                        target.peer == session.peer().id
+                            && target.actor == command.authenticated_actor
+                    })
+                    .and_then(|target| {
+                        let cloud = target.cloud.clone()?;
+                        // Stop a launcher which may still be submitting. This is
+                        // not evidence that an already created remote task stopped.
+                        let _ = target.cancel.send(true);
+                        Some(cloud)
+                    });
+                let target_alias = format!(
+                    "agent-alias-{}",
+                    hex::encode(Sha256::digest(
+                        serde_json::to_vec(&(&session.peer().id, &task.command_id)).unwrap()
+                    ))
+                );
+                let cloud = cloud.or_else(|| {
+                    let bytes = self.keys.get(&target_alias).ok()??;
+                    let target_key = std::str::from_utf8(&bytes).ok()?;
+                    self.stored(target_key).ok()??.process?.cloud
+                });
+                if let Some(cloud) = cloud {
+                    let mut process = ProcessResult::no_process(Finish::CancelUnsupported);
+                    if cloud.state == CloudState::Unknown {
+                        process.termination_confirmed = false;
+                    }
+                    process.cloud = Some(cloud);
+                    return finish_now(Self::result(&command, Failed, Unavailable, Some(process)));
+                }
                 let acknowledged = active.get(&task.command_id).is_some_and(|target| {
                     target.peer == session.peer().id
                         && target.actor == command.authenticated_actor
@@ -360,6 +406,13 @@ impl AgentNode {
             ToolCall::DelegateTaskTool(task) => {
                 let (cancel, receive) = watch::channel(false);
                 let identity = identity.unwrap();
+                let mut initial = initial;
+                if identity.provider == Provider::Cloud {
+                    initial.process = Some(crate::cloud::result(&identity, Finish::Pending));
+                    if self.put_result(&key, &initial).is_err() {
+                        return done(Self::unknown(&command));
+                    }
+                }
                 self.active.lock().unwrap().insert(
                     command.command_id.clone(),
                     Active {
@@ -368,6 +421,11 @@ impl AgentNode {
                         project: task.project_id.clone(),
                         session: identity.provider_session_id.clone(),
                         cancel,
+                        cloud: if identity.provider == Provider::Cloud {
+                            crate::cloud::result(&identity, Finish::Pending).cloud
+                        } else {
+                            None
+                        },
                     },
                 );
                 Admission {
@@ -405,7 +463,9 @@ impl AgentNode {
             }
         };
         let (state, outcome) = match process.finish {
-            Finish::Unconfirmed => (ExecutionState::Running, TaskStatusOutcome::Unavailable),
+            Finish::Unconfirmed | Finish::CloudSubmitted => {
+                (ExecutionState::Running, TaskStatusOutcome::Unavailable)
+            }
             Finish::Cancelled => (ExecutionState::Cancelled, TaskStatusOutcome::Error),
             Finish::NotConfigured | Finish::UnsupportedPlatform | Finish::SpawnFailed => {
                 (ExecutionState::Failed, TaskStatusOutcome::Unavailable)
@@ -419,7 +479,7 @@ impl AgentNode {
             result.status.execution_state = ExecutionState::Running;
             result.status.outcome = Some(TaskStatusOutcome::Unavailable);
         }
-        if confirmed {
+        if confirmed || work.identity.provider == Provider::Cloud {
             self.active.lock().unwrap().remove(&work.command.command_id);
         }
         self.record_result(result.clone());

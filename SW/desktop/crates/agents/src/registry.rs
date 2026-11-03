@@ -41,6 +41,9 @@ pub struct Project {
     /// Optional owner-controlled metadata export outside all writable workspaces.
     #[serde(default)]
     pub discovery_file: Option<PathBuf>,
+    /// Explicit owner opt-in, scoped to this project only.
+    #[serde(default)]
+    pub cloud: Option<crate::CloudConfig>,
 }
 #[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -75,6 +78,7 @@ pub struct SessionIdentity {
     pub workspace: PathBuf,
     pub provider_session_id: String,
     pub capability_profile: CapabilityProfile,
+    pub cloud: Option<crate::CloudConfig>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -87,7 +91,7 @@ struct DiscoveryEntry {
     provider_session_id: String,
     workspace: PathBuf,
 }
-fn identifier(s: &str) -> bool {
+pub(crate) fn identifier(s: &str) -> bool {
     s.as_bytes().first().is_some_and(u8::is_ascii_alphanumeric)
         && s.len() <= 128
         && s.bytes()
@@ -159,6 +163,19 @@ impl Allowlist {
                 project.sessions.iter().all(|s| ids.insert(s)),
                 "duplicate session"
             );
+            if let Some(cloud) = &project.cloud {
+                ensure!(
+                    project.provider == Provider::Cloud,
+                    "cloud configuration on local provider"
+                );
+                cloud.validate()?;
+            }
+            if project.provider == Provider::Cloud {
+                ensure!(
+                    project.discovery_file.is_none(),
+                    "cloud targets cannot discover local sessions"
+                );
+            }
             if let Some(file) = &project.discovery_file {
                 let file = file.canonicalize()?;
                 project.discovery_file = Some(file);
@@ -233,6 +250,7 @@ impl Allowlist {
                     workspace: project.workspace.clone(),
                     provider_session_id: id,
                     capability_profile: project.capability_profile,
+                    cloud: project.cloud.clone(),
                 });
             }
         }
