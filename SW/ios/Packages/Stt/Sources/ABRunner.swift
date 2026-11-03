@@ -10,7 +10,7 @@ public struct BenchRun: Encodable, Sendable {
     public let vocabulary: [String]
     public let stt_cases: [Case]
     public let brain_cases: [String] = []
-    public let engines: [Engine]
+    public var engines: [Engine]
     public struct Case: Encodable, Sendable {
         public enum Category: String, Encodable, Sendable { case normal, whispering, names, numbers, tech_terms }
         public let id: String
@@ -25,12 +25,50 @@ public struct BenchRun: Encodable, Sendable {
         public let id: String
         public let kind = "stt"
         public let version: String
-        public let results: [Result]
+        public var results: [Result]
+        public var battery: Battery? = nil
         public init(id: String, version: String, results: [Result]) {
             self.id = id; self.version = version; self.results = results
         }
     }
+    /// Controlled single-engine interval, never inferred from simultaneous A/B consumption.
+    public struct Battery: Encodable, Sendable {
+        public let cohort_id: String
+        public let duration_seconds: Double
+        public let drain_percentage_points: Double
+        public let conditions: String
+        public init(cohortID: String, durationSeconds: Double, drainPercentagePoints: Double, conditions: String) throws {
+            guard BenchRun.validID(cohortID), durationSeconds.isFinite, durationSeconds > 0,
+                  drainPercentagePoints.isFinite, (0...100).contains(drainPercentagePoints), !conditions.isEmpty else {
+                throw SttFailure.invalidResponse
+            }
+            cohort_id = cohortID; duration_seconds = durationSeconds
+            drain_percentage_points = drainPercentagePoints; self.conditions = conditions
+        }
+    }
+    /// Offsets from capture start on one monotonic clock. External field confirmation is optional.
+    public struct Stages: Encodable, Sendable {
+        public let cleanup_started_ms: Double?
+        public let cleanup_completed_ms: Double?
+        public let delivery_started_ms: Double?
+        public let delivery_completed_ms: Double?
+        public let field_confirmed_ms: Double?
+        public init(cleanupStartedMS: Double? = nil, cleanupCompletedMS: Double? = nil,
+                    deliveryStartedMS: Double? = nil, deliveryCompletedMS: Double? = nil, fieldConfirmedMS: Double? = nil) throws {
+            let values = [cleanupStartedMS, cleanupCompletedMS, deliveryStartedMS, deliveryCompletedMS, fieldConfirmedMS]
+            let known = values.compactMap { $0 }
+            guard known.allSatisfy({ $0.isFinite && $0 >= 0 }), known == known.sorted(),
+                  cleanupCompletedMS == nil || cleanupStartedMS != nil,
+                  deliveryCompletedMS == nil || deliveryStartedMS != nil,
+                  fieldConfirmedMS == nil || deliveryStartedMS != nil else { throw SttFailure.invalidResponse }
+            cleanup_started_ms = cleanupStartedMS; cleanup_completed_ms = cleanupCompletedMS
+            delivery_started_ms = deliveryStartedMS; delivery_completed_ms = deliveryCompletedMS; field_confirmed_ms = fieldConfirmedMS
+        }
+    }
     public struct Result: Encodable, Sendable {
+        public var clipped_first_word: Bool? = nil
+        public var stages: Stages? = nil
+        public var cleaned_text: String? = nil
         public let case_id: String
         public let text: String
         public let first_text_ms: Double?
@@ -71,6 +109,7 @@ public struct BenchRun: Encodable, Sendable {
             guard let next = other.engines.first(where: { $0.id == engine.id }), next.version == engine.version else {
                 throw SttFailure.invalidResponse
             }
+            guard engine.battery == nil, next.battery == nil else { throw SttFailure.invalidResponse }
             return Engine(id: engine.id, version: engine.version, results: engine.results + next.results)
         }
         return try BenchRun(synthetic: synthetic, device: device, captureSource: capture_source, sessionID: session_id,
@@ -90,6 +129,8 @@ public struct BenchRun: Encodable, Sendable {
         return points.dropFirst().allSatisfy { alphanumeric($0) || [0x5f, 0x2e, 0x3a, 0x2d].contains($0) }
     }
     public func json() throws -> Data {
+        _ = try BenchRun(synthetic: synthetic, device: device, captureSource: capture_source, sessionID: session_id,
+                         vocabulary: vocabulary, sttCases: stt_cases, engines: engines)
         let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         return try encoder.encode(self)
     }
@@ -149,20 +190,30 @@ public struct ABRunner: Sendable {
         }
         if await timing.wasInterrupted { throw SttFailure.interrupted }
         let origins = await timing.origins()
-        func result(_ output: Collected) -> BenchRun.Result {
+        func result(_ output: Collected) async -> BenchRun.Result {
             func milliseconds(_ start: ContinuousClock.Instant?, _ end: ContinuousClock.Instant?) -> Double? {
-                guard let start, let end else { return nil }
+                guard let start, let end, end >= start else { return nil }
                 let duration = start.duration(to: end).components
                 return max(0, Double(duration.seconds) * 1000 + Double(duration.attoseconds) / 1e15)
             }
-            return .init(caseID: testCase.id, text: output.text,
+            let cleanupStart = ContinuousClock.now
+            let cleaned = output.text.isEmpty ? nil : try? await FailSafeCleanup().clean(output.text, vocabulary: vocabulary)
+            let cleanupEnd = ContinuousClock.now
+            var row = BenchRun.Result(caseID: testCase.id, text: output.text,
                          firstTextMS: milliseconds(origins.start, output.firstText),
                          finalAfterEOSMS: milliseconds(origins.end, output.final))
+            row.cleaned_text = cleaned
+            if !output.text.isEmpty {
+                row.stages = try? .init(cleanupStartedMS: milliseconds(origins.start, cleanupStart),
+                                        cleanupCompletedMS: milliseconds(origins.start, cleanupEnd))
+            }
+            return row
         }
+        let rowA = await result(outputs.0), rowB = await result(outputs.1)
         return try BenchRun(synthetic: synthetic, device: device, captureSource: capture.rawValue,
                             sessionID: sessionID, vocabulary: vocabulary.terms, sttCases: [testCase],
-                            engines: [.init(id: first.descriptor.id, version: first.descriptor.version, results: [result(outputs.0)]),
-                                      .init(id: second.descriptor.id, version: second.descriptor.version, results: [result(outputs.1)])])
+                            engines: [.init(id: first.descriptor.id, version: first.descriptor.version, results: [rowA]),
+                                      .init(id: second.descriptor.id, version: second.descriptor.version, results: [rowB])])
     }
     private struct Collected: Sendable {
         let text: String

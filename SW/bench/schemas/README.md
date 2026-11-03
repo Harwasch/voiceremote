@@ -11,3 +11,5 @@ flowchart LR
 Start with the [kit README](../README.md). Purpose: schemas for task 8.
 Inputs: SYS design/tool contracts and invented text. Verification: synthetic
 checks only; real phone performance and owner review **unverified**.
+
+run v1 accepts additive optional `cleaned_text`, ordered `stages` capture-clock offsets, battery `cohort_id`/`conditions`, brain-case `recording_id` and brain-result `transcript`. Existing v1 fixtures remain valid. Ordering/completeness beyond JSON Schema is enforced by benchkit; measurements remain **unverified** until supplied.

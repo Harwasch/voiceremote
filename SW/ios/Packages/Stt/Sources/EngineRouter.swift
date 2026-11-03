@@ -11,6 +11,10 @@ public struct EngineRouter: Sendable {
             self.online = online; self.hot = hot; self.lowBattery = lowBattery; self.maxAccuracy = maxAccuracy
         }
     }
+    /// Unknown battery level (negative) does not imply low battery. 20% is a routing policy, not a measured target.
+    public static func lowBattery(level: Float, lowPowerMode: Bool) -> Bool {
+        lowPowerMode || (level.isFinite && level >= 0 && level <= 0.2)
+    }
     public enum Selection: Equatable, Sendable {
         case engine(String)
         /// Offline with no installed local model: remain idle, with no user-facing error.
@@ -25,11 +29,11 @@ public struct EngineRouter: Sendable {
             return local.first(where: { $0.id == preferredID }).map { .engine($0.id) }
                 ?? local.first.map { .engine($0.id) } ?? .silentlyUnavailable
         }
+        if local.isEmpty || conditions.hot || conditions.lowBattery || conditions.maxAccuracy,
+           let engine = remote.first(where: { $0.id == preferredID }) ?? remote.first { return .engine(engine.id) }
         if let preferred = (local + remote).first(where: { $0.id == preferredID }) {
             return .engine(preferred.id)
         }
-        if local.isEmpty || conditions.hot || conditions.lowBattery || conditions.maxAccuracy,
-           let engine = remote.first { return .engine(engine.id) }
         return (local.first ?? remote.first).map { .engine($0.id) } ?? .silentlyUnavailable
     }
 }

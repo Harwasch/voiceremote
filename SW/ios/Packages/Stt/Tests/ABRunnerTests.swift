@@ -51,6 +51,19 @@ private struct RecordingEngine: SttEngine {
         never.continuation.finish()
         XCTAssertEqual(result.engines.map { $0.results[0].text }, ["", ""])
     }
+    func testMeasurementMetadataRoundTripAndInvalidStages() throws {
+        var run = try BenchRun(synthetic: true, device: "synthetic", captureSource: "synthetic", sessionID: "session",
+            vocabulary: [], sttCases: [.init(id: "case", category: .normal, expectedText: "Synthetic", recordingID: "fake")],
+            engines: [.init(id: "a", version: "test", results: [.init(caseID: "case", text: "Synthetic")])])
+        run.engines[0].results[0].clipped_first_word = false
+        run.engines[0].results[0].stages = try .init(cleanupStartedMS: 1, cleanupCompletedMS: 2,
+            deliveryStartedMS: 3, deliveryCompletedMS: 4, fieldConfirmedMS: 5)
+        run.engines[0].battery = try .init(cohortID: "controlled", durationSeconds: 600, drainPercentagePoints: 2, conditions: "synthetic only")
+        try BenchSchemaValidator.repositorySchema().validate(run.json())
+        XCTAssertThrowsError(try BenchRun.Stages(cleanupStartedMS: 2, cleanupCompletedMS: 1))
+        XCTAssertThrowsError(try BenchRun.Stages(fieldConfirmedMS: 3))
+        XCTAssertThrowsError(try BenchRun.Battery(cohortID: "x", durationSeconds: 0, drainPercentagePoints: 2, conditions: "fixture"))
+    }
     func testPCMEncodingAndTimestampValidation() async throws {
         XCTAssertThrowsError(try AudioFrame(samples: [], timestamp: .nan))
         XCTAssertThrowsError(try AudioFrame(samples: [], timestamp: -1))

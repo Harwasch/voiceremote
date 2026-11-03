@@ -25,3 +25,5 @@ flowchart LR
 Start with the interface; [integration contract](../INTEGRATION.md). Trace: REQ-31/33/36–40.
 
 The host selects a model/API version matching relay deployment settings. Proofs add no vendor credential and grant no action authority.
+
+ClaudeBrain bounds HTTP accumulation per response/chunk (1 MiB, 60-second resource timeout), retaining redirect refusal. BrainBenchmark loads the reviewed 50-command set and exports recognized spoken input separately from expected reading prompts. Missing measurements remain TBD; native/provider performance **unverified**.

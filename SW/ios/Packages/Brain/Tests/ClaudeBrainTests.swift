@@ -20,6 +20,22 @@ final class FakeMessagesServer: URLProtocol {
     override func stopLoading() {}
 }
 
+/// Oversized chunked response deliberately never completes: bounded reads must reject early.
+final class OversizedMessagesServer: URLProtocol {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let header = request.url!.path.contains("header") ? ["Content-Length": "1048577"] : [:]
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: header)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        if header.isEmpty {
+            client?.urlProtocol(self, didLoad: Data(repeating: 32, count: 1_048_576))
+            client?.urlProtocol(self, didLoad: Data([32]))
+        }
+    }
+    override func stopLoading() {}
+}
+
 actor InspectingProxy: BrainHTTPTransport {
     let response: BrainHTTPResponse
     var lastRequest: URLRequest?
@@ -35,6 +51,16 @@ final class ClaudeBrainTests: XCTestCase, @unchecked Sendable {
         let brain = ClaudeBrain(configuration: try .init(proxyURL: proxyURL), transport: transport)
         let result = try await brain.propose(request())
         XCTAssertEqual(result.proposals.count, 1); XCTAssertEqual(result.droppedCount, 0)
+    }
+
+    func testStreamingCapRejectsHeadersAndChunksWithoutWaitingForEOF() async throws {
+        for path in ["header", "chunks"] {
+            let transport = URLSessionBrainTransport(protocolClasses: [OversizedMessagesServer.self])
+            do {
+                _ = try await transport.send(URLRequest(url: proxyURL.appendingPathComponent(path)))
+                XCTFail("Oversized response accepted")
+            } catch { XCTAssertEqual(error as? BrainError, .responseTooLarge) }
+        }
     }
 
     func testMessagesRequestUsesConfiguredModelAndNoAPIKey() async throws {

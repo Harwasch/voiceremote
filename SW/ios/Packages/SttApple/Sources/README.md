@@ -11,3 +11,5 @@ flowchart LR
 
 Start with [package integration notes](../README.md). [REQ-9], [REQ-11].
 Purpose: source map. Inputs: vendor public APIs linked in code. Verification: cross review only.
+
+ArgmaxBuild registers a loaded licensed kit on MainActor. The app reads its optional engine for routing/picker availability; a build flag alone does not mark a model ready. SDK/device verification remains **unverified**.

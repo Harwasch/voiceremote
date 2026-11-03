@@ -18,6 +18,9 @@ import Stt
         XCTAssertEqual(WhisperKitEngine().descriptor.location, .onDevice)
         #if !ENABLE_ARGMAX
         XCTAssertFalse(ArgmaxBuild.enabled)
+        XCTAssertNil(ArgmaxBuild.engine)
+        ArgmaxBuild.remove()
+        XCTAssertNil(ArgmaxBuild.engine)
         #endif
     }
 }

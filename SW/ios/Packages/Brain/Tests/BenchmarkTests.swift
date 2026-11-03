@@ -24,6 +24,44 @@ final class BenchmarkTests: XCTestCase, @unchecked Sendable {
         XCTAssertGreaterThanOrEqual(try XCTUnwrap(results[0]["latency_ms"] as? Double), 0)
     }
 
+    func testFiftySpokenCommandsUseRecognizedTextNotExpectedPrompt() async throws {
+        actor RecordingBrain: LlmBrain {
+            var transcripts: [String] = []
+            func propose(_ request: BrainRequest) async throws -> BrainResponse {
+                transcripts.append(request.transcript); return BrainResponse()
+            }
+        }
+        let brain = RecordingBrain()
+        let cases = (0..<50).map { BrainBenchmarkCase(id: "cmd-\($0)", prompt: "Expected fictional command", context: "Fictional context", expectedCalls: [proposal()]) }
+        let transcripts = Dictionary(uniqueKeysWithValues: cases.enumerated().map { ($0.element.id, "Recognized synthetic \($0.offset)") })
+        let ids = Dictionary(uniqueKeysWithValues: cases.map { ($0.id, "recording-" + $0.id) })
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try await BrainBenchmark.writeRun(brain: brain, cases: cases, accountID: "a", engineID: "fake", engineVersion: "test",
+            device: "synthetic", sessionID: "session", synthetic: false, captureSource: "iphone_mic", outputURL: url,
+            spokenTranscripts: transcripts, recordingIDs: ids)
+        let received = await brain.transcripts
+        XCTAssertEqual(received.count, 50)
+        XCTAssertEqual(received.first, "Recognized synthetic 0")
+        let data = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+        XCTAssertEqual((data["brain_cases"] as? [[String: Any]])?.count, 50)
+    }
+
+    func testMissingSpokenRecognitionHasNoInventedBrainLatencyOrCalls() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".json")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try await BrainBenchmark.writeRun(brain: TestBrain(),
+            cases: [.init(id: "missing", prompt: "Expected fictional command", context: "Fictional context", expectedCalls: [proposal()])],
+            accountID: "a", engineID: "fake", engineVersion: "fixture", device: "Linux synthetic", sessionID: "session",
+            synthetic: true, captureSource: "synthetic", outputURL: url,
+            spokenTranscripts: ["missing": ""], recordingIDs: ["missing": "synthetic-recording"])
+        let root = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+        let engine = try XCTUnwrap((root["engines"] as? [[String: Any]])?.first)
+        let result = try XCTUnwrap((engine["results"] as? [[String: Any]])?.first)
+        XCTAssertNil(result["latency_ms"])
+        XCTAssertEqual((result["calls"] as? [Any])?.count, 0)
+    }
+
     func testRealCaptureCannotBeMislabelledSynthetic() async throws {
         do {
             try await BrainBenchmark.writeRun(brain: TestBrain(), cases: [], accountID: "a", engineID: "test",

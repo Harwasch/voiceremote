@@ -1,4 +1,4 @@
-#if ENABLE_ARGMAX
+#if ENABLE_ARGMAX && canImport(Argmax)
 import Foundation
 @preconcurrency import Argmax
 import Stt
@@ -55,10 +55,18 @@ public actor ArgmaxEngine: SttEngine {
 }
 #endif
 
+import Stt
+
 /// Lets the settings UI report licence availability without importing the private SDK.
-public enum ArgmaxBuild {
+@MainActor public enum ArgmaxBuild {
+    public private(set) static var engine: (any SttEngine)?
+    #if ENABLE_ARGMAX && canImport(Argmax)
+    /// Licensed host installs only after SDK initialization and model loading succeed.
+    public static func install(loadedKit: WhisperKitPro) { engine = ArgmaxEngine(loadedKit: loadedKit) }
+    #endif
+    public static func remove() { engine = nil }
     public static var enabled: Bool {
-        #if ENABLE_ARGMAX
+        #if ENABLE_ARGMAX && canImport(Argmax)
         true
         #else
         false

@@ -26,6 +26,20 @@ import XCTest
         XCTAssertEqual(router.select(onDevice: [cloud], cloud: [local], conditions: .init(online: true)), .silentlyUnavailable)
         XCTAssertEqual(router.select(onDevice: [local], cloud: [cloud], conditions: .init(online: true)), .engine("local"))
     }
+    func testMeasuredBatteryAndLowPowerPolicy() {
+        XCTAssertTrue(EngineRouter.lowBattery(level: 0.1, lowPowerMode: false))
+        XCTAssertTrue(EngineRouter.lowBattery(level: 0.8, lowPowerMode: true))
+        XCTAssertFalse(EngineRouter.lowBattery(level: -1, lowPowerMode: false))
+        XCTAssertFalse(EngineRouter.lowBattery(level: 0.8, lowPowerMode: false))
+    }
+    func testSafetyConditionsOverridePreferredLocal() {
+        for state in [EngineRouter.Conditions(online: true, hot: true, cloudConsent: true),
+                      .init(online: true, lowBattery: true, cloudConsent: true),
+                      .init(online: true, maxAccuracy: true, cloudConsent: true)] {
+            XCTAssertEqual(EngineRouter().select(onDevice: [local], cloud: [cloud], conditions: state, preferredID: "local"), .engine("cloud"))
+        }
+    }
+
     func testRouterStreamsPartialsCleansFinalsAndSuppressesOfflineFailures() async {
         let engine = FakeEngine(script: [.partial("um, codex"), .final("um, codex")])
         var result: [SttEvent] = []
