@@ -107,6 +107,7 @@ flowchart LR
 | [REQ-51] | Per-utterance source selection shall score valid streams for signal quality, clipping, proximity and dropouts; the rig shall be benchmarked against AirPods and iPhone microphone. | P3 | Bench run on named devices | Product §§3.2, 9 P3; Design: Plan task 14 |
 | [REQ-52] | The remote target control shall cycle named devices and Auto, and display recording state and destination. | P3 | Owner on-device check | Design: Modes; Product §3.3 |
 | [REQ-53] | Remote inclusion shall depend on measured whisper performance against the best off-the-shelf microphone and owner comfort. | P3 | Bench run; owner on-device check | Product §9 P3 |
+| [REQ-62] | The remote shall capture Opus audio while disconnected, preserve capture mode and time metadata, stop visibly without overwriting old audio when full, and synchronize resumably by recording ID to the phone without duplicates; it shall delete audio only after the phone confirms durable storage, and OFF shall stop offline capture. | P3 | Test: disconnect, resume, duplicate transfer, power loss, full storage and OFF; owner on-device check; unverified | Owner offline-recording request, 2026-11-02; [BLE draft](protocol/remote-ble.md#offline-recording-and-deferred-sync-capability-bit-7) |
 
 ## HIL
 
@@ -122,6 +123,10 @@ flowchart LR
 | [REQ-56] | The proposed privacy defaults shall store no raw audio, retain transcripts on the phone for seven days, and show when cloud STT is in use; retention remains open to owner review. | P0 | Test; owner on-device check | Design: Pairing, security and authorization; Risks and open questions |
 | [REQ-57] | The system shall minimize presence and focus metadata and shall not capture password-field text or inspect unrelated app contents by default. | P0 | Test | Product §8 |
 | [REQ-58] | Recording consent and cloud privacy, retention and encryption policy shall be addressed before release. | P0 | Owner review and on-device check | Product §8 |
+
+**Open conflict with [REQ-56]:** [REQ-62], which the owner asked for on 2026-11-02,
+keeps temporary raw Opus audio on the remote until confirmed phone storage.
+[REQ-56] is unchanged. Resolve retention/encryption under [REQ-58] and [Q-6].
 
 ## Extensibility
 
@@ -166,7 +171,7 @@ These record the Design's locked decisions, not verified implementation.
 | [Q-3] | For an unnamed destination, should a wake command default to the selected agent or computer, and must it be spoken back? | Product §10.3 |
 | [Q-4] | Which actions are preapproved per project and for how long; what risk class applies to authorized project code changes? | Product §10.4; Design: Risks and open questions |
 | [Q-5] | Can the remote button approve medium-risk actions, and how are button approvals authenticated? | Product §10.5; Design: Risks and open questions |
-| [Q-6] | Are seven-day transcripts and no raw-audio storage the right defaults, and is encrypted local-first capture mandatory? | Product §10.6; Design: Risks and open questions |
+| [Q-6] | Are seven-day transcripts and no raw-audio storage the right defaults, and is encrypted local-first capture mandatory? Resolve the conflict between [REQ-56] and temporary remote raw-audio storage in [REQ-62], including unencrypted test-board flash. | Product §10.6; Design: Risks and open questions |
 | [Q-7] | Which keyboard experience and copy/share fallback are acceptable? | Product §10.7 |
 | [Q-8] | How should local/cloud handoffs handle local files, live desktop control and private data barred from cloud providers? | Product §10.8 |
 | [Q-9] | What budget is available for Argmax licensing and cloud STT? | Design: Risks and open questions |
