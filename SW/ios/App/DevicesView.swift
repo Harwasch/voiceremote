@@ -5,6 +5,9 @@ import VoiceRemoteProtocol
 struct DevicesView: View {
     @Bindable var host: AppRuntime
     @State private var scan = false
+    @State private var systemPairingCode = ""
+    @State private var remotePairingCode = ""
+    @State private var discardID: String?
     var body: some View {
         @Bindable var pairing = host.pairing
         @Bindable var remote = host.remote
@@ -12,7 +15,14 @@ struct DevicesView: View {
             Section("Computers") {
                 if let notice = host.link.notice { Text(notice).foregroundStyle(.secondary) }
                 ForEach(host.model.devices, id: \.device_id) { device in
-                    VStack(alignment: .leading) { Text(device.display_name); Text(device.role.rawValue).font(.caption) }
+                    VStack(alignment: .leading) {
+                        Text(device.display_name); Text(device.role.rawValue).font(.caption)
+                        Text(host.link.suspendedIDs.contains(device.device_id) ? "Relay suspended — credentials retained" :
+                            (host.link.connectedIDs.contains(device.device_id) ? "Connected" : "Unreachable — dictation held")).font(.caption)
+                        if host.link.suspendedIDs.contains(device.device_id) {
+                            Button("Retry connection") { host.link.retrySuspended(device.device_id) }
+                        }
+                    }
                         .swipeActions { Button("Revoke", role: .destructive) { Task { await host.model.revoke(device.device_id) } } }
                 }
             }
@@ -25,7 +35,7 @@ struct DevicesView: View {
                 Button("Scan QR code", systemImage: "qrcode.viewfinder") { scan = true }
                 TextField("Pairing code or QR payload", text: $pairing.code, axis: .vertical)
                     .textInputAutocapitalization(.never).autocorrectionDisabled().privacySensitive()
-                Text("Offline fallback: paste the complete QR payload. Short code and external-network lookup await the Pairing transport update.").font(.footnote)
+                Text("Paste the complete code printed by the computer or scan its QR. Configure the relay in Settings for pairing across networks.").font(.footnote)
                 Button("Connect") { Task { await host.pairing.begin() } }.disabled(host.pairing.busy)
                 if host.pairing.busy { ProgressView("Waiting for computer…") }
                 if let phrase = host.pairing.phrase {
@@ -42,15 +52,42 @@ struct DevicesView: View {
             }
             Section("Voice remote") {
                 Text(host.remote.status)
+                if !host.remote.offlineStatus.isEmpty { Text(host.remote.offlineStatus) }
+                if host.remote.enrollmentReady {
+                    Text("Enter local pairing mode on the remote. Compare the fresh six-digit number in the iPhone system pairing prompt with the remote and approve on both. Reject mismatch, no-number, Legacy or Just Works pairing.").font(.footnote)
+                    SecureField("Six digits shown by iPhone", text: $systemPairingCode).keyboardType(.numberPad)
+                    SecureField("Six digits shown by remote", text: $remotePairingCode).keyboardType(.numberPad)
+                    Button("I compared and confirmed both screens") {
+                        let system = systemPairingCode, remote = remotePairingCode
+                        systemPairingCode = ""; remotePairingCode = ""
+                        Task { await host.remote.confirmEnrollment(systemCode: system, remoteCode: remote) }
+                    }.disabled(host.remote.enrollmentBusy)
+                }
+                Button("Retry sync") { host.remote.retryOfflineSync() }.disabled(!host.remote.isEnrolled)
+                ForEach(host.remote.offlineIssues) { issue in
+                    VStack(alignment: .leading) {
+                        Text("Recording \(issue.recordingID)").font(.headline)
+                        Text(issue.reason).font(.caption)
+                        Button("Discard recording", role: .destructive) { discardID = issue.id }
+                    }
+                }
                 Toggle("Use remote microphone", isOn: $remote.useRemote)
                 Button("Find remote") { host.remote.scan() }
                 ForEach(host.remote.discovered, id: \.identifier) { peripheral in
                     Button(peripheral.name ?? "Voice remote") { host.remote.connect(peripheral) }
                 }
-                Button("Disconnect remote", role: .destructive) { host.remote.disconnect() }
-                Text("Draft BLE contract. Audio remains disabled until authenticated bond enrollment can be verified. Prototype OFF is a software stop; hardware microphone cutoff is unverified.").font(.footnote)
+                Button("Disconnect remote") { host.remote.disconnect() }
+                Button("Forget enrolled remote", role: .destructive) { Task { await host.remote.forgetEnrollment() } }
+                Text("Enrollment pins this peripheral after system/remote confirmation. iOS does not expose pairing-method attestation; remote firmware must enforce authenticated encrypted bonding. Prototype OFF is a software stop only.").font(.footnote)
             }
         }.navigationTitle("Devices").task { await host.model.refresh() }
+        .confirmationDialog("Discard this recording without transcription?", isPresented: Binding(get: { discardID != nil }, set: { if !$0 { discardID = nil } })) {
+            Button("Discard recording", role: .destructive) {
+                if let id = discardID { Task { await host.remote.discardOfflineRecording(id) } }
+                discardID = nil
+            }
+            Button("Cancel", role: .cancel) { discardID = nil }
+        }
         .sheet(isPresented: $scan) {
             QRScanner { result in
                 scan = false

@@ -1,70 +1,51 @@
 ```mermaid
 flowchart LR
-  Views[Native SwiftUI tabs] --> Runtime[AppRuntime] --> Model[Packages/AppModel]
-  Runtime --> Phone[AVAudioEngine + AVAudioSession] & Remote[CoreBluetooth + raw Opus]
-  Runtime --> Computer[Pairing Noise + Bonjour LAN] & Activity[ActivityKit / App Intents]
-  Runtime --> Keyboard[KeyboardBridge committed text]
+  Views[SwiftUI] --> Runtime[AppRuntime] --> Model[Portable AppModel]
+  Runtime --> Computer[Relay / Noise sessions]
+  Computer --> Hold[Held / failed / unconfirmed history]
+  Runtime --> Remote[Protected GATT + confirmed peripheral pin]
+  Remote --> Sync[Append-only audio / per-record Retry + Discard]
+  Sync --> History[Offline text only]
 ```
 
 | Path | What | Status |
 |---|---|---|
-| [VoiceRemoteApp.swift](VoiceRemoteApp.swift) | Home controls, target picker, text history, suggestions, exact-action approval | 🟡 Apple compile/device **unverified** |
-| [AppRuntime.swift](AppRuntime.swift) | Merged package composition, explicit model provisioning, protected storage, keyboard producer | 🟡 Apple compile/device **unverified** |
-| [PhoneCapture.swift](PhoneCapture.swift) | AirPods HFP/phone capture, PCM16 resampling, route/interruption stop; no files | 🟡 Apple compile/routes **unverified** |
-| [ComputerLink.swift](ComputerLink.swift) | Small Pairing adapter, Bonjour LAN, Noise framing, phrase/revoke/insertion | 🟡 Interoperability, fresh pinned session resumption, short code and relay **unverified** |
-| [DevicesView.swift](DevicesView.swift), [QRScanner.swift](QRScanner.swift) | QR/fallback, roles, four-word confirmation and remote chooser | 🟡 Camera/accessibility/device **unverified** |
-| [RemoteBLELink.swift](RemoteBLELink.swift) | Draft GATT, display-write barrier, Opus decode, watchdog and loss stop | 🟡 Authenticated enrollment missing; capture disabled; hardware **unverified** |
-| [SecureStore.swift](SecureStore.swift) | ThisDeviceOnly Keychain identity/checkpoints, no vendor keys | 🟡 Device persistence/recovery **unverified** |
-| [ListeningActivity.swift](ListeningActivity.swift) | Recording activity and Action Button AudioRecordingIntent | 🟡 Locked/unlocked/cold-start **unverified** |
-| [Settings/](Settings/README.md) | Speech/brain/vocabulary/relay and benchmark share UI | 🟡 Apple compile/device **unverified** |
+| [VoiceRemoteApp.swift](VoiceRemoteApp.swift) | Controls, cloud indicator, history Send/Copy/Share, approval | 🟡 Apple/device **unverified** |
+| [AppRuntime.swift](AppRuntime.swift) | Protected storage, signed cloud transports, deferred STT | 🟡 Apple/device **unverified** |
+| [ComputerLink.swift](ComputerLink.swift) | Relay pairing/resume, revocation, HTTP suspension, insertion failure correlation | ✅ Shared protocol checks; Apple adapter **unverified** |
+| [RemoteBLELink.swift](RemoteBLELink.swift) | Numeric Comparison confirmation, persisted pin, protected reconnect, draft 1.1 sync and live preemption | 🟡 SDK/bonding/hardware **unverified** |
+| [DevicesView.swift](DevicesView.swift), [QRScanner.swift](QRScanner.swift) | Pairing, enrollment, status, per-record Retry/Discard | 🟡 Apple/device **unverified** |
+| [PhoneCapture.swift](PhoneCapture.swift) | Phone/AirPods source and interruption stop | 🟡 Device **unverified** |
+| [SecureStore.swift](SecureStore.swift) | Device-local Keychain; separate relay and Noise identities | 🟡 Apple persistence **unverified** |
+| [ListeningActivity.swift](ListeningActivity.swift) | Live Activity and Action Button | 🟡 Apple/device **unverified** |
+| [Settings/](Settings/README.md) | Relay, model/version, speech/brain/vocabulary and benchmarks | 🟡 Apple/device **unverified** |
 
-Start with AppRuntime; [AppModel](../Packages/AppModel/README.md) owns tested decisions.
-Purpose: task 6 Apple adapters and native views. Inputs: SYS design/product/requirements,
-merged package protocols, SW/bench and draft BLE contract. Verification: Swift syntax
-parse only; SDK type checking/real-device behavior **unverified**. REQ-2–8/12/16–18/22–25/28–33/38/46–52/56.
-Native Form/List/Picker/Sheet/Button/Share controls follow Dynamic Type, system appearance
-and VoiceOver; large text, dark mode and complete VoiceOver navigation need owner checks.
+Start with AppRuntime and [portable tests](../Packages/AppModel/Tests/README.md).
+Inputs: SYS relay-join/noise, desktop insertion reports, external BLE draft 1.1,
+cross review. Evidence: package tests, [real relay gate](../../../SYS/tests/e2e/README.md),
+Linux syntax/interface probes. Trace: REQ-2–12/16–18/22–25/28–33/38/46–52/56/60/61.
 
-Audio options checked 2026-11-02: Apple's [HFP input option](https://developer.apple.com/documentation/avfaudio/avaudiosession/categoryoptions-swift.struct/allowbluetoothhfp),
-[A2DP output option](https://developer.apple.com/documentation/avfaudio/avaudiosession/categoryoptions-swift.struct/allowbluetootha2dp),
-and [AudioRecordingIntent activity requirement](https://developer.apple.com/documentation/appintents/audiorecordingintent).
-HFP supplies input; A2DP alone cannot. A connected computer changes text routing, never audio routing.
-Opus is an unmodified pinned SwiftPM dependency [alta/swift-opus 0.0.2](https://github.com/alta/swift-opus/tree/0.0.2),
-using its Copus library; [upstream licensing](https://github.com/alta/swift-opus/blob/0.0.2/LICENSE) remains upstream.
-No third-party source is copied. Coordinator must review dependency licensing for release.
+Remote enrollment: enter local pairing mode; select remote; compare the fresh
+six-digit iPhone system/remote number and approve on both screens, then enter both
+numbers in Devices and confirm. Protected GATT access and explicit confirmation
+persist the peripheral/recording-namespace pin in device-local Keychain. Reconnect
+restores that pin after protected access. Reject mismatch, no-number, Legacy and
+Just Works pairing. **Gap:** CoreBluetooth cannot attest the method, inspect/remove
+OS bonds, or cryptographically authenticate this service itself. Firmware must
+enforce LE Secure Connections + MITM on every attribute. Numeric Comparison
+interoperability is **unverified**. Forget removes the app pin and stops capture;
+also forget the iPhone OS bond and erase the remote owner bond. The prototype
+microphone-cut exception grants no authentication exception.
 
-Cross-review follow-up: views bind child observable references locally. GestureState
-reset and foreground exit cancel HOLD; audio callbacks are explicitly Sendable and
-created outside MainActor. Audio observers install after start, category changes are
-ignored, and engine format changes rebuild the tap on the same sample timeline.
-Peers restore from protected metadata plus Keychain keys; desktop Revoke is attempted
-before closing, and notification failures remain visible. Cold intent and scene share
-one runtime bootstrap. BLE uses current app presentation, awaited write barriers and a
-conservative 20-byte value budget, avoiding ATT long writes. The final SYS BLE document
-is absent on this base; the supplied draft remains the input. All Apple execution is
-**unverified**, pending the coordinator's CI and owner route/gesture checks.
+Relay 403 suspends routing/cloud access and retains credentials. Retry is explicit;
+only user removal or authenticated Noise Revoke deletes trust. Cleanup attempts
+self-revoke even after computer-revoke 403. Desktop failed TaskStatus uses
+command_id = segment_id: unavailable means failed/not inserted; error means
+unconfirmed. Success remains unconfirmed without a positive insertion ACK.
 
-Apple references checked for this correction: [route reasons](https://developer.apple.com/documentation/avfaudio/avaudiosession/routechangereason),
-[gesture reset](https://developer.apple.com/documentation/swiftui/gesturestate),
-[engine reconfiguration](https://developer.apple.com/documentation/avfaudio/avaudioengineconfigurationchangenotification),
-[long-write distinction](https://developer.apple.com/documentation/corebluetooth/cbcharacteristicwritetype).
-
-Swift 6 audit: ActivityKit handles stay inside nonisolated operations; only IDs and
-strings enter the ordered update/end queue. Bluetooth delegates run synchronously
-on their configured main queue, without transferring SDK objects in Tasks. QR
-configuration/start/stop share one serial owner; permission, network, audio and
-share callbacks explicitly use Sendable closures. First BLE state write waits for
-subscriptions and requests a snapshot even if reconnect's initial notification was
-missed. Portable reconnect regression was reproduced failing first; Apple SDK build
-and device execution remain **unverified** pending CI.
-API references: [Activity lookup](https://developer.apple.com/documentation/activitykit/activity/activities),
-[async updates](https://developer.apple.com/documentation/activitykit/activity/update(_:alertconfiguration:)),
-[Bluetooth delegate queue](https://developer.apple.com/documentation/corebluetooth/cbcentralmanager/init(delegate:queue:)),
-[serial camera session](https://developer.apple.com/documentation/avfoundation/avcapturesession).
-
-Compiler follow-up: settings-save failure assigns `self.error`; Pairing's public
-actor-owned confirmation phrase is read with `await`. All app Swift sources were
-reread for catch shadowing, isolation, throwing calls and unresolved package names;
-package declarations were checked for public visibility and exact signatures.
-Both reported diagnostics were reproduced before the fixes with Linux compiler
-probes against the real package types. Apple SDK compilation remains **unverified**.
+Held text splits safely and is journaled before wire encoding. Connection changes
+prevent automatic later insertion; Send is explicit. Copy accepts offline IDs and
+full text. Deferred audio uses protected append-only per-record files, deleted
+after successful STT or explicit discard. Silent/oversized/failed records remain
+visible without starving later records. Live PTT yields STT and resumes when idle;
+ambiguous failures require Retry. Offline text never invokes Brain or inserts.

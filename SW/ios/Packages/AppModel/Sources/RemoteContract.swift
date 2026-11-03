@@ -4,18 +4,22 @@ import VoiceRemoteProtocol
 
 public enum RemoteContractError: Error { case incompatible, malformed, loss, off, notReady }
 public struct RemoteInfo: Sendable {
+    public let minor: UInt8
+    public let capabilities: UInt16
+    public var supportsOfflineSync: Bool { capabilities & 0x80 != 0 }
     public let maxPacket: Int
     public let hardwareMicCut: Bool
     public init(_ data: Data) throws {
         let b = [UInt8](data)
-        guard b.count == 20, b[0] == 1, b[1] == 0, b[7] == 0, b[18] == 0, b[19] == 0,
-              b[8] & 0x3f == 0x3f, b[8] & 0x80 == 0, b[9] == 0,
+        guard b.count == 20, b[0] == 1, b[7] == 0, b[18] == 0, b[19] == 0,
+              b[8] & 0x3f == 0x3f, (b[1] > 1 || b[9] == 0),
               b[10] > 0, b[11] <= 1,
               (Int(b[12]) | Int(b[13]) << 8) > 0, (Int(b[14]) | Int(b[15]) << 8) > 0 else { throw RemoteContractError.incompatible }
         let board = Int(b[2]) | Int(b[3]) << 8
         guard [1, 2, 65535].contains(board) else { throw RemoteContractError.incompatible }
         maxPacket = Int(b[16]) | Int(b[17]) << 8
         guard (1...4096).contains(maxPacket) else { throw RemoteContractError.incompatible }
+        minor = b[1]; capabilities = UInt16(b[8]) | UInt16(b[9]) << 8
         hardwareMicCut = b[8] & 0x40 != 0
     }
 }
@@ -26,13 +30,14 @@ public struct RemoteInput: Sendable {
     public let capture: UInt8
     public let mode: UInt8
     public let pressed: Bool
-    public init(_ data: Data) throws {
+    public let status: UInt8
+    public init(_ data: Data, minor: UInt8 = 1) throws {
         let b = [UInt8](data)
         guard b.count == 14, b[8] <= 5, b[9] <= 2, b[10] <= 1, b[11] <= 1,
-              b[12] <= 1, b[13] == 0, b[8] != 1 || b[11] == 1,
+              (minor > 1 || b[12] & 0xe0 == 0), b[12] & 3 != 3, b[13] == 0, b[8] != 1 || b[11] == 1,
               b[8] != 2 || b[11] == 0 else { throw RemoteContractError.malformed }
         sequence = Self.word(b, 0); tick = Self.word(b, 4); event = b[8]
-        capture = b[9]; mode = b[10]; pressed = b[11] == 1
+        capture = b[9]; mode = b[10]; pressed = b[11] == 1; status = b[12] & 0x1f
     }
     static func word(_ b: [UInt8], _ i: Int) -> UInt32 {
         UInt32(b[i]) | UInt32(b[i+1]) << 8 | UInt32(b[i+2]) << 16 | UInt32(b[i+3]) << 24

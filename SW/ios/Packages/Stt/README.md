@@ -13,7 +13,8 @@ flowchart LR
 |---|---|---|
 | [Sources/](Sources/README.md) | Portable protocols, routing, vocabulary, cleanup, A/B, proxy clients | ✅ Linux synthetic tests |
 | [Tests/](Tests/README.md) | Router/cleanup, schema validation, local RFC6455 server | ✅ Synthetic only |
-| [Package.swift](Package.swift) | Swift 6, Foundation only; no Apple SDK dependency | ✅ Linux |
+| [Package.resolved](Package.resolved) | Crypto/ASN.1 dependency pins for relay signing | ✅ Linux resolved |
+| [Package.swift](Package.swift) | Swift 6 + Pairing signing dependency; no Apple SDK dependency | ✅ Linux |
 | [../SttApple/](../SttApple/README.md) | Apple SpeechAnalyzer, WhisperKit, optional licensed Argmax | 🟡 Apple CI **unverified** |
 
 Start with [SttEngine](Sources/SttEngine.swift) and [EngineRouter](Sources/EngineRouter.swift).
@@ -96,3 +97,5 @@ on loss (including offline), and A/B refuses to export an interrupted run. Consu
 events rather than stripping the loss signal via `frames()`. Existing engine PCM interfaces
 remain unchanged. [InterruptedCaptureTests](Tests/InterruptedCaptureTests.swift) cover
 loss/late-frame rejection and A/B failure; Apple/BLE behavior is **unverified**.
+
+Relay integration: CloudEngine constructs canonical ordered form queries; `URLSessionSocketFactory(authorizer:provider:)` obtains a fresh signed relay challenge and sends its proof headers in the WebSocket URLRequest. No vendor key is supplied by the phone. [Linux fake-server regression](Tests/CloudTests.swift) and [production relay + fake upstream gate](../../../../SYS/tests/e2e/README.md) cover both providers. Deployed providers and native Apple WebSocket execution remain **unverified**.

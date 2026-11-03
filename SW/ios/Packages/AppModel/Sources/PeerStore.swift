@@ -11,6 +11,8 @@ import Darwin
 public struct StoredPeer: Codable, Equatable, Sendable {
     public let device: DeviceInfo
     public let roomID: String
+    public var relayOrigin: String?
+    public var suspended: Bool?
     public var revoked = false
     public var notificationPending = false
 }
@@ -42,11 +44,16 @@ public struct StoredPeer: Codable, Equatable, Sendable {
         }
         return missing
     }
-    public func enroll(_ device: DeviceInfo, roomID: String) throws {
+    public func enroll(_ device: DeviceInfo, roomID: String, relayOrigin: String? = nil) throws {
         _ = try ProtocolCodec.encode(device)
         guard device.account_id == accountID, !roomID.isEmpty else { throw CocoaError(.fileWriteUnknown) }
         var next = records.filter { $0.device.device_id != device.device_id }
-        next.append(StoredPeer(device: device, roomID: roomID))
+        next.append(StoredPeer(device: device, roomID: roomID, relayOrigin: relayOrigin))
+        try write(next)
+    }
+    public func suspend(deviceID: String, _ value: Bool = true) throws {
+        var next = records
+        if let i = next.firstIndex(where: { $0.device.device_id == deviceID && !$0.revoked }) { next[i].suspended = value }
         try write(next)
     }
     public func markRevoked(deviceID: String, notificationPending: Bool) throws {
@@ -71,7 +78,7 @@ public struct SettingsStore: Sendable {
     }
     public func save(_ settings: AppSettings) throws { try PrivateJSONFile.write(JSONEncoder().encode(settings), to: url) }
 }
-private enum PrivateJSONFile {
+enum PrivateJSONFile {
     static func write(_ data: Data, to url: URL) throws {
         let pending = url.appendingPathExtension("pending")
         try? FileManager.default.removeItem(at: pending)

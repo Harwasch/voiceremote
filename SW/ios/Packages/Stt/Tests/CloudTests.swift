@@ -1,4 +1,8 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
+import Pairing
 import XCTest
 @testable import Stt
 
@@ -29,9 +33,9 @@ private final class BridgeSocket: SttSocket, @unchecked Sendable {
     let process = Process()
     let input = Pipe()
     let output = Pipe()
-    init(url: URL) throws {
+    init(url: URL, headers: [String: String] = [:]) throws {
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["python3", fakeScript, "bridge", url.absoluteString]
+        process.arguments = ["python3", fakeScript, "bridge", url.absoluteString, try JSONEncoder().encode(headers).base64EncodedString()]
         process.standardInput = input; process.standardOutput = output
         try process.run()
     }
@@ -345,5 +349,29 @@ private struct ActivityTestFactory: SttSocketFactory {
             XCTAssertThrowsError(try ProxySettings(url: URL(string: url)!))
         }
         XCTAssertNoThrow(try ProxySettings(url: URL(string: "wss://proxy.invalid/stt")!))
+    }
+}
+
+private struct SyntheticProof: RelayProxyAuthorizer {
+    func authorize(_ request: URLRequest, provider: String) async throws -> URLRequest {
+        XCTAssertEqual(provider, "elevenlabs"); XCTAssertEqual(request.httpMethod, "GET")
+        var signed = request
+        signed.setValue("synthetic-challenge", forHTTPHeaderField: "X-Relay-Challenge")
+        signed.setValue("synthetic-signature", forHTTPHeaderField: "X-Relay-Signature")
+        return signed
+    }
+}
+extension CloudTests {
+    func testURLSessionFactoryCarriesProofHeadersThroughRealLinuxUpgrade() async throws {
+        let server = try LocalWebSocketServer(vendor: .elevenLabs, scenario: "signed")
+        let sockets = URLSessionSocketFactory(authorizer: SyntheticProof(), provider: "elevenlabs", open: { request in
+            try BridgeSocket(url: request.url!, headers: request.allHTTPHeaderFields ?? [:])
+        })
+        let engine = CloudEngine(vendor: .elevenLabs, settings: try ProxySettings(url: server.url, allowInsecureLoopback: true), sockets: sockets)
+        let source = ScriptedCaptureSource([try AudioFrame(samples: [-32768, 32767], timestamp: 0)])
+        var events: [SttEvent] = []
+        for await event in engine.transcribe(source.frames(), vocabulary: vocabulary) { events.append(event) }
+        XCTAssertTrue(events.contains(.final("Synthetic phrase.")))
+        XCTAssertFalse(events.contains { if case .failure = $0 { return true }; return false })
     }
 }

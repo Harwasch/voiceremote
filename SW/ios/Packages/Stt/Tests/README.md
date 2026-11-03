@@ -36,3 +36,7 @@ on loss (including offline), and A/B refuses to export an interrupted run. Consu
 events rather than stripping the loss signal via `frames()`. Existing engine PCM interfaces
 remain unchanged. [InterruptedCaptureTests](../Tests/InterruptedCaptureTests.swift) cover
 loss/late-frame rejection and A/B failure; Apple/BLE behavior is **unverified**.
+
+[RelayQueryTests.swift](RelayQueryTests.swift) reproduces vocabulary escaping failure before the fix. CloudTests' signed scenario passes the factory's real URLRequest headers through a Linux loopback RFC6455 bridge to FakeWebSocket.py; missing proof headers fail. Actual Ed25519 acceptance is exercised by [SYS E2E](../../../../../SYS/tests/e2e/README.md). Only invented audio/text/proofs are used.
+
+InterruptedCaptureTests verifies complete-success mode for deferred STT: an offline engine failure after a partial result cannot become successful history and authorize deletion.

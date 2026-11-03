@@ -24,3 +24,7 @@ on loss (including offline), and A/B refuses to export an interrupted run. Consu
 events rather than stripping the loss signal via `frames()`. Existing engine PCM interfaces
 remain unchanged. [InterruptedCaptureTests](../Tests/InterruptedCaptureTests.swift) cover
 loss/late-frame rejection and A/B failure; Apple/BLE behavior is **unverified**.
+
+`URLSessionSocketFactory(authorizer:provider:)` signs the CloudEngine URL using Pairing's shared relay contract, then opens a URLRequest carrying both proof headers. Its injected opening boundary is tested against a real Linux fake WebSocket server. CloudEngine builds ordered form queries so literal pluses, apostrophes and Unicode vocabulary retain their values. [Real relay proof](../../../../../SYS/tests/e2e/README.md). Native Apple WebSocket execution **unverified**.
+
+Deferred sync opts into `EngineRouter.transcribe(requireComplete: true)`: any engine failure suppresses final text and is reported even offline. Default live dictation retains its existing stable-final recovery behavior.

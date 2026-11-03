@@ -56,3 +56,14 @@ public enum VerificationPhrase {
         return handshakeHash.prefix(4).map { prefixes[Int($0 >> 4)] + suffixes[Int($0 & 15)] }.joined(separator: " ")
     }
 }
+
+public extension PairingInvitation {
+    /// Desktop --code emits the complete JSON payload. Accept a base64 copy as
+    /// a compact paste format too. There is no short-code lookup API in relay v1.
+    init(code: String, expectedAccount: String, clock: any PairingClock) throws {
+        let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines)
+        let bytes = trimmed.first == "{" ? Data(trimmed.utf8) : Data(base64Encoded: trimmed)
+        guard let bytes, bytes.count <= 4096 else { throw PairingError.invalidQR }
+        try self.init(qr: bytes, expectedAccount: expectedAccount, clock: clock)
+    }
+}

@@ -77,6 +77,10 @@ def server(vendor, scenario):
     accept = base64.b64encode(hashlib.sha1((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()).digest()).decode()
     sock.sendall(("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: " + accept + "\r\n\r\n").encode())
     try:
+        if scenario == "signed":
+            headers = dict(line.lower().split(": ", 1) for line in request.split("\r\n")[1:] if ": " in line)
+            assert headers["x-relay-challenge"] == "synthetic-challenge"
+            assert headers["x-relay-signature"] == "synthetic-signature"
         assert "key" not in request.lower().split("\r\n")[0] or "keyterms" in path
         if scenario == "malformed":
             send(sock, 1, "not json")
@@ -158,7 +162,9 @@ def bridge(url):
     sock = socket.create_connection((parts.hostname, parts.port), timeout=5)
     sock.settimeout(None)
     key = base64.b64encode(os.urandom(16)).decode()
-    sock.sendall((f"GET {parts.path}?{parts.query} HTTP/1.1\r\nHost: {parts.hostname}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: {key}\r\n\r\n").encode())
+    proof = json.loads(base64.b64decode(sys.argv[3])) if len(sys.argv) > 3 else {}
+    extra = "".join(f"{name}: {value}\r\n" for name, value in proof.items())
+    sock.sendall((f"GET {parts.path}?{parts.query} HTTP/1.1\r\nHost: {parts.hostname}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: {key}\r\n{extra}\r\n").encode())
     response = header(sock)
     accept = base64.b64encode(hashlib.sha1((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()).digest()).decode()
     assert "101 Switching" in response and accept in response

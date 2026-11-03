@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import AppModel
 import Core
 import Stt
@@ -135,16 +136,25 @@ private struct HistoryView: View {
     let model: VoiceAppModel
     var body: some View {
         List {
-            Text("Text only. Deleted after seven days. Secure fields may need Copy or Share.").font(.footnote)
+            Text("Text only. Held and unconfirmed text stays until you delete it. Other text expires after seven days.").font(.footnote)
             ForEach(model.history.reversed(), id: \.segmentID) { entry in
                 VStack(alignment: .leading) {
                     Text(entry.text).textSelection(.enabled)
                     Text(entry.targetID).font(.caption).foregroundStyle(.secondary)
+                    if let origin = model.offlineOrigins[entry.segmentID] { Text(origin.label).font(.caption) }
+                    if let state = model.deliveryStates[entry.segmentID] {
+                        Text(state.label).font(.caption)
+                        if [.held, .failed, .unconfirmed].contains(state) {
+                            Button(state == .unconfirmed ? "Resend after checking computer" : "Send to computer") {
+                                Task { await model.sendHeld(entry.segmentID) }
+                            }.buttonStyle(.borderless)
+                        }
+                    }
                     HStack {
                         Button("Copy") {
-                            guard let id = UUID(uuidString: entry.segmentID) else { return }
-                            try? CommittedTextFallback.copy(CommittedSegment(id: id,
-                                createdAt: Date(timeIntervalSince1970: Double(entry.createdAt) / 1000), text: entry.text))
+                            UIPasteboard.general.setItems([[UIPasteboard.typeAutomatic: entry.text]], options: [
+                                .localOnly: true, .expirationDate: Date().addingTimeInterval(BridgePolicy.retention)
+                            ])
                         }
                         ShareLink(item: entry.text) { Text("Share") }
                     }.buttonStyle(.borderless)

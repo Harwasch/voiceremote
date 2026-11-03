@@ -204,3 +204,21 @@ extension NoiseSessionTests {
         }
     }
 }
+
+extension NoiseSessionTests {
+    func testConfirmedLegacyEnrollmentMigrationDoesNotRotateExistingGeneration() async throws {
+        let registry = PeerRegistry(store: InMemoryKeyStore())
+        let key = Curve25519.KeyAgreement.PrivateKey().publicKey.rawRepresentation
+        let device = syntheticDevice()
+        try await registry.restoreConfirmed(device: device, publicKey: key, roomID: "legacy-room")
+        let lookup = try await registry.lookup(publicKey: key)
+        let retained = try XCTUnwrap(lookup)
+        try await registry.restoreConfirmed(device: device, publicKey: key, roomID: "legacy-room")
+        try await registry.require(retained)
+        do {
+            try await registry.restoreConfirmed(device: device, publicKey: key, roomID: "other-room")
+            XCTFail("mismatched migration overwrote enrollment")
+        } catch {}
+        try await registry.require(retained)
+    }
+}

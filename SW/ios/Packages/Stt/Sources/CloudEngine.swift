@@ -1,4 +1,5 @@
 import Foundation
+import Pairing
 #if canImport(FoundationNetworking)
 import FoundationNetworking
 #endif
@@ -32,21 +33,34 @@ public struct ProxySettings: Sendable {
 
 /// Foundation's Linux WebSocket transport is deliberately not used: inject SttSocketFactory there.
 public struct URLSessionSocketFactory: SttSocketFactory {
-    public init() {}
+    private let authorizer: (any RelayProxyAuthorizer)?
+    private let provider: String?
+    private let open: (@Sendable (URLRequest) async throws -> any SttSocket)?
+    public init(authorizer: (any RelayProxyAuthorizer)? = nil, provider: String? = nil,
+                open: (@Sendable (URLRequest) async throws -> any SttSocket)? = nil) {
+        self.authorizer = authorizer; self.provider = provider; self.open = open
+    }
     public func connect(to url: URL) async throws -> any SttSocket {
+        var request = URLRequest(url: url); request.httpMethod = "GET"
+        if let authorizer, let provider { request = try await authorizer.authorize(request, provider: provider) }
+        if let open { return try await open(request) }
         #if os(Linux)
         throw SttFailure.unavailable
         #else
-        let socket = URLSession.shared.webSocketTask(with: url)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpShouldSetCookies = false; configuration.urlCache = nil
+        let session = URLSession(configuration: configuration, delegate: SocketRedirectGuard(), delegateQueue: nil)
+        let socket = session.webSocketTask(with: request)
         socket.resume()
-        return FoundationSocket(socket)
+        return FoundationSocket(socket, session: session)
         #endif
     }
 }
 #if !os(Linux)
 private struct FoundationSocket: SttSocket {
     let task: URLSessionWebSocketTask
-    init(_ task: URLSessionWebSocketTask) { self.task = task }
+    let session: URLSession
+    init(_ task: URLSessionWebSocketTask, session: URLSession) { self.task = task; self.session = session }
     func send(_ message: SocketMessage) async throws {
         switch message {
         case .text(let text): try await task.send(.string(text))
@@ -60,7 +74,13 @@ private struct FoundationSocket: SttSocket {
         @unknown default: throw SttFailure.invalidResponse
         }
     }
-    func close() async { task.cancel(with: .goingAway, reason: nil) }
+    func close() async { task.cancel(with: .goingAway, reason: nil); session.invalidateAndCancel() }
+}
+private final class SocketRedirectGuard: NSObject, URLSessionTaskDelegate, Sendable {
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest, completionHandler: @escaping @Sendable (URLRequest?) -> Void) {
+        completionHandler(nil)
+    }
 }
 #endif
 
@@ -105,6 +125,7 @@ public struct CloudEngine: SttEngine {
                                 .init(name: "include_partial_turns", value: "true"),
                                 .init(name: "keyterms_prompt", value: String(decoding: terms, as: UTF8.self))]
         }
+        parts.percentEncodedQuery = RelayQuery.encode(parts.queryItems ?? [])
         guard let url = parts.url else { throw SttFailure.transport }
         return url
     }

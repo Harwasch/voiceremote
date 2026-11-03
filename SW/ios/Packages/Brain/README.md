@@ -12,7 +12,8 @@ flowchart LR
 
 | Path | What | Status |
 |---|---|---|
-| [Package.swift](Package.swift) | Plain Swift 6 + generated Protocol dependency; no Policy/Core dependency | ✅ Linux |
+| [Package.resolved](Package.resolved) | Crypto/ASN.1 dependency pins for relay signing | ✅ Linux resolved |
+| [Package.swift](Package.swift) | Plain Swift 6 + Protocol/Pairing signing dependencies; no Policy/Core dependency | ✅ Linux |
 | [Sources/](Sources/README.md) | Strict tool inputs, tolerant provider metadata, refusal outcomes, bounded whole-transcript suggestions | ✅ Synthetic Linux tests |
 | [Tests/](Tests/README.md) | Authority, current-shape fake server, refusal, streaming races, retention/rate caps and cancellation | ✅ Linux |
 | [INTEGRATION.md](INTEGRATION.md) | Policy handoff, assumptions, provider sources and verification limits | 🟡 Integration pending |
@@ -25,3 +26,5 @@ Live Claude, Apple/MLX, real-device accuracy/latency/battery, visible app cards 
 Fenced JSON in model text stays **dropped**, never parsed into a tool call. Claude accepts only
 native `tool_use.input` through the generated codec; Apple/MLX text must be a bare JSON array.
 Provider metadata is ignored. A refusal produces no proposals and never reruns on another brain.
+
+Signed relay access uses [RelayBrainTransport](Sources/RelayBrainTransport.swift) around the final Messages body. The app derives the room route from persisted pairing and exposes deployment model/API-version settings. Linux tests and [real local relay gate](../../../../SYS/tests/e2e/README.md) verify body signing; live Anthropic and Apple host execution remain **unverified**.
