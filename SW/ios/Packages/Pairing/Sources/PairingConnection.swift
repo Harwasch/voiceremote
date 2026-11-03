@@ -117,3 +117,12 @@ public enum PairingConnection {
         } catch { await transport.close(); throw error }
     }
 }
+
+public extension PairedPeer {
+    /// Hosts may validate/narrow UI enrollment before publishing the session.
+    /// PairedPeer can only be obtained after both phrase confirmations.
+    func applicationSession(registry: PeerRegistry, localDeviceID: String) async throws -> ApplicationSession {
+        let enrollment = try await registry.enroll(self)
+        return ApplicationSession(noise: session, registry: registry, peer: enrollment, localDeviceID: localDeviceID)
+    }
+}

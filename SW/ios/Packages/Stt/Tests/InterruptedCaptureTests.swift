@@ -45,3 +45,13 @@ private struct LostSource: CaptureSource {
         #expect(!result.contains { if case .final = $0 { true } else { false } })
     }
 }
+
+@Test func deferredTranscriptionRequiresCompleteSuccessEvenWhenOffline() async throws {
+    let engine = FakeEngine(script: [.final("Invented partial fixture."), .failure(.unavailable)])
+    let source = ScriptedCaptureSource([try AudioFrame(samples: [1, 2], timestamp: 0)])
+    var events: [SttEvent] = []
+    for await event in EngineRouter().transcribe(source: source, engines: [engine], conditions: .init(online: false),
+        vocabulary: Vocabulary(userID: "synthetic", terms: []), requireComplete: true) { events.append(event) }
+    #expect(events.contains(.failure(.unavailable)))
+    #expect(!events.contains { if case .final = $0 { return true }; return false })
+}

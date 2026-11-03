@@ -1,4 +1,5 @@
 import XCTest
+import Pairing
 import Foundation
 #if canImport(FoundationNetworking)
 import FoundationNetworking
@@ -133,5 +134,35 @@ final class ClaudeBrainTests: XCTestCase, @unchecked Sendable {
         let result = try await ClaudeBrain(configuration: .init(proxyURL: proxyURL), transport: InspectingProxy(response)).propose(request())
         XCTAssertTrue(result.proposals.isEmpty); XCTAssertEqual(result.droppedCount, 1)
         XCTAssertTrue(ProposalDecoder.decode(Data(text.utf8), accountID: "a").proposals.isEmpty)
+    }
+}
+
+private actor RecordingAuthorizer: RelayProxyAuthorizer {
+    var received: URLRequest?
+    func authorize(_ request: URLRequest, provider: String) throws -> URLRequest {
+        XCTAssertEqual(provider, "anthropic")
+        received = request
+        var signed = request
+        signed.setValue("synthetic-proof", forHTTPHeaderField: "X-Relay-Signature")
+        signed.setValue("synthetic-challenge", forHTTPHeaderField: "X-Relay-Challenge")
+        return signed
+    }
+}
+extension ClaudeBrainTests {
+    func testRelayTransportSignsFinalBodyWithoutChangingModelOrVersion() async throws {
+        let authorizer = RecordingAuthorizer()
+        let upstream = InspectingProxy(#"{"type":"message","role":"assistant","content":[],"stop_reason":"end_turn"}"#)
+        let brain = ClaudeBrain(configuration: try .init(proxyURL: proxyURL, model: "relay-model", apiVersion: "2026-10-21"),
+            transport: RelayBrainTransport(authorizer: authorizer, upstream: upstream))
+        _ = try await brain.propose(request())
+        let received = await authorizer.received, forwarded = await upstream.lastRequest
+        let before = try XCTUnwrap(received)
+        let after = try XCTUnwrap(forwarded)
+        XCTAssertEqual(before.httpBody, after.httpBody)
+        XCTAssertEqual(after.value(forHTTPHeaderField: "X-Relay-Signature"), "synthetic-proof")
+        XCTAssertEqual(after.value(forHTTPHeaderField: "anthropic-version"), "2026-10-21")
+        XCTAssertNil(after.value(forHTTPHeaderField: "x-api-key"))
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: after.httpBody!) as? [String: Any])
+        XCTAssertEqual(body["model"] as? String, "relay-model")
     }
 }

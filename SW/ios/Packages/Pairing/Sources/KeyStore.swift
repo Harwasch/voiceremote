@@ -127,3 +127,18 @@ public struct KeychainStore: KeyStore {
     }
 }
 #endif
+
+public extension PeerRegistry {
+    /// Migration only: import an earlier app's already confirmed, device-local
+    /// Keychain enrollment. Callers must filter durable revocation tombstones.
+    func restoreConfirmed(device: DeviceInfo, publicKey: Data, roomID: String) throws {
+        if let retained = try lookup(publicKey: publicKey) {
+            guard retained.device == device, retained.roomID == roomID else { throw PairingError.keyMismatch }
+            return
+        }
+        guard publicKey.count == 32, !roomID.isEmpty else { throw PairingError.invalidMessage }
+        _ = try ProtocolCodec.encode(device)
+        let enrollment = Enrollment(device: device, publicKey: publicKey, roomID: roomID, generation: UUID())
+        try store.put(enrollment.storageName, value: JSONEncoder().encode(enrollment))
+    }
+}

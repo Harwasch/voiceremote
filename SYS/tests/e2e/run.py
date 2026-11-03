@@ -119,5 +119,13 @@ try:
             if receiver.insertions != (1 if mode == 'relay' else 2): raise RuntimeError('unexpected insertion count after resume')
             if mode == 'relay' and queued_frames(storage, 'desktop') != 0: raise RuntimeError('replayed queue not drained')
             print(f'PASS {mode}: XX, phrase, dictation, resume, revoke, next-message rejection' + ('; real room create/redeem, persisted stale queue, permanent 403' if mode == 'relay' else ''), flush=True)
+        cloud = Child(['node', 'SYS/tests/e2e/relay.mjs', str(Path(temp)/'cloud'), 'proxy']); children.append(cloud)
+        cloud_origin = cloud.wait_line(lambda label, line: label == 'out' and line.startswith('http://127.0.0.1:'))
+        invitation = cloud.wait_line(lambda label, line: label == 'out' and line.startswith('PROXY_INVITE:')).split(':', 1)[1]
+        proxy = Child([str(ROOT/'SYS/tests/e2e/.build/debug/proxy-e2e'), cloud_origin]); children.append(proxy)
+        proxy.send(invitation)
+        passed = proxy.wait_line(lambda label, line: label == 'out' and line.startswith('PASS proxy:'), seconds=60)
+        proxy.success(); print(passed, flush=True)
+
 finally:
     for child in reversed(children): child.close()

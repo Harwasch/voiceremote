@@ -28,10 +28,32 @@ public struct AppSettings: Codable, Equatable, Sendable {
     public var cloudConsent = false
     public var maxAccuracy = false
     public var vocabulary: [String] = []
+    public var cloudModel = "claude-opus-5-5"
+    public var cloudAPIVersion = "2026-10-21"
     public var relayURL = ""
     public var speechProxyURL = ""
     public var brainProxyURL = ""
     public init() {}
+    private enum CodingKeys: String, CodingKey {
+        case speechEngine, comparisonEngine, compare, brain, cloudConsent, maxAccuracy, vocabulary
+        case relayURL, speechProxyURL, brainProxyURL, cloudModel, cloudAPIVersion
+    }
+    public init(from decoder: any Decoder) throws {
+        self.init()
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        speechEngine = try c.decodeIfPresent(String.self, forKey: .speechEngine) ?? speechEngine
+        comparisonEngine = try c.decodeIfPresent(String.self, forKey: .comparisonEngine) ?? comparisonEngine
+        compare = try c.decodeIfPresent(Bool.self, forKey: .compare) ?? compare
+        brain = try c.decodeIfPresent(String.self, forKey: .brain) ?? brain
+        cloudConsent = try c.decodeIfPresent(Bool.self, forKey: .cloudConsent) ?? cloudConsent
+        maxAccuracy = try c.decodeIfPresent(Bool.self, forKey: .maxAccuracy) ?? maxAccuracy
+        vocabulary = try c.decodeIfPresent([String].self, forKey: .vocabulary) ?? vocabulary
+        relayURL = try c.decodeIfPresent(String.self, forKey: .relayURL) ?? relayURL
+        speechProxyURL = try c.decodeIfPresent(String.self, forKey: .speechProxyURL) ?? speechProxyURL
+        brainProxyURL = try c.decodeIfPresent(String.self, forKey: .brainProxyURL) ?? brainProxyURL
+        cloudModel = try c.decodeIfPresent(String.self, forKey: .cloudModel) ?? cloudModel
+        cloudAPIVersion = try c.decodeIfPresent(String.self, forKey: .cloudAPIVersion) ?? cloudAPIVersion
+    }
 }
 
 public struct ApprovalCard: Identifiable, Sendable {
@@ -71,6 +93,8 @@ public struct ApprovalCard: Identifiable, Sendable {
     public private(set) var cloudInUse = false { didSet { onStateChange?() } }
     public private(set) var message: String? { didSet { onStateChange?() } }
     public private(set) var devices: [DeviceInfo] = [] { didSet { onStateChange?() } }
+    public private(set) var offlineOrigins: [String: OfflineTextOrigin] = [:]
+    public private(set) var deliveryStates: [String: TextDeliveryState] = [:]
     public private(set) var history: [HistoryEntry] = [] { didSet { onStateChange?() } }
     public private(set) var suggestions: [SuggestionCard] = [] { didSet { onStateChange?() } }
     public private(set) var approval: ApprovalCard? { didSet { onStateChange?() } }
@@ -87,7 +111,7 @@ public struct ApprovalCard: Identifiable, Sendable {
     public let phoneID: String
     private let registry: DeviceRegistry
     private let historyStore: AppHistoryStore
-    private let pipeline: DictationPipeline
+    private let pipeline: HeldDictationPipeline
     private var picker: TargetPicker
     private let policy: PolicyGate
     private let input: PhoneInput
@@ -118,14 +142,14 @@ public struct ApprovalCard: Identifiable, Sendable {
                 deliver: @escaping @MainActor (ExecutionPermit) throws -> [QueuedTask]) {
         self.accountID = accountID; self.phoneID = phoneID; self.actorID = actorID
         self.registry = registry; historyStore = history; self.policy = policy
-        pipeline = DictationPipeline(history: history, target: target, registry: registry)
+        pipeline = HeldDictationPipeline(history: history, target: target, registry: registry, accountID: accountID, phoneID: phoneID)
         picker = TargetPicker(accountID: accountID, phoneID: phoneID)
         input = PhoneInput(now: now); self.now = now; self.makeCapture = makeCapture
         self.engines = engines; self.brain = brain; self.online = online; self.power = power; self.deliver = deliver
     }
     public func refresh() async {
         devices = await registry.all()
-        do { history = try await historyStore.entries(now: now()) }
+        do { history = try await historyStore.entries(now: now()); deliveryStates = await historyStore.deliveryStates(); offlineOrigins = await historyStore.offlineOrigins() }
         catch { message = "History is unavailable." }
     }
     public func updateFocus(_ report: FocusReport) throws { try picker.update(report) }
@@ -396,6 +420,22 @@ public struct ApprovalCard: Identifiable, Sendable {
         await suggestionEngine?.dismiss(cardID: card.id, now: Date(timeIntervalSince1970: Double(now()) / 1000))
         suggestions.removeAll { $0.id == card.id }
     }
+    public func insertionStatus(_ status: TaskStatus, from deviceID: String) async {
+        do { try await historyStore.insertionStatus(status, from: deviceID, accountID: accountID); await refresh() }
+        catch { message = "Insertion status could not be saved. Check the computer before resending." }
+    }
+    public func sendHeld(_ id: String) async {
+        do { try await pipeline.sendHeld(id: id, now: now()) }
+        catch { message = "Text remains held. Check the destination before trying again." }
+        await refresh()
+    }
+    /// Deferred remote text is history only, independent of mode/brain/target selection.
+    public func saveOfflineText(id: String, text: String, origin: OfflineTextOrigin? = nil) async throws {
+        let clean = DictationPipeline.sanitize(text)
+        guard !clean.isEmpty else { throw SttFailure.invalidResponse }
+        try await historyStore.saveText(HistoryEntry(segmentID: id, targetID: phoneID, text: clean, createdAt: now()), state: .offline, now: now(), origin: origin)
+        await refresh()
+    }
     public func deleteHistory(_ id: String) async {
         do { try await historyStore.delete(id: id, now: now()); await refresh() }
         catch { message = "Unable to delete history." }
@@ -408,5 +448,7 @@ public struct ApprovalCard: Identifiable, Sendable {
         do { try await registry.revoke(id) } catch { message = "Device removed locally. Desktop notification or credential cleanup failed; check the computer." }
         await refresh()
     }
+    public func offlineEngineSelected(isCloud: Bool) { cloudInUse = isCloud }
+    public func endOfflineCloudIndication() { cloudInUse = false }
     public func settingsChanged() { suggestionEngine = nil; suggestions = []; suggestionTargets = [:] }
 }

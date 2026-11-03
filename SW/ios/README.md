@@ -104,9 +104,9 @@ Task 6 owner acceptance ([design plan](../../SYS/system-design-v1.md#plan),
 | Owner check | Status |
 |---|---|
 | AirPods remain connected to iPhone while committed text goes to the PC; switch back to iPhone without reconnecting headset (task 6 done-when) | **Unverified** |
-| QR pair on home LAN and an external network, no manual IP; goal under one minute | **Unverified**; LAN adapter present; short-code/relay service integration remains open |
+| QR pair on home LAN and an external network, no manual IP; goal under one minute | **Unverified**; relay + LAN protocol paths pass local E2E; complete code supported; short-code lookup absent from relay v1 |
 | Four words match on both screens; enrollment waits for both; role/capabilities and revoke work | **Unverified** |
-| Revocation immediately blocks the next message and removes peer credentials/relay membership | **Unverified**; current adapter joins no relay room |
+| Revocation immediately blocks the next message and removes peer credentials/relay membership | **Unverified**; signed relay revoke + local enrollment cleanup implemented; local protocol E2E passed |
 | Windows correct field: Notepad, Chrome, Teams; text insertion never presses Send/Enter | **Unverified** |
 | Clear destination before first word: named target and Auto; phone fallback after stale focus; desktop tray/remote presentation | **Unverified**; merged wire protocol has no tray display acknowledgement |
 | OFF/HOLD/CONTINUOUS and Dictation/AI Control are separate; mode switch preserves target; short taps/hold/double-tap match shared trigger | **Unverified** on phone; portable tests cover state boundaries |
@@ -114,26 +114,25 @@ Task 6 owner acceptance ([design plan](../../SYS/system-design-v1.md#plan),
 | Continuous dictation segments reach history/field while microphone remains on; source loss drops only unfinished text | **Unverified** on phone; segmentation thresholds **TBC** |
 | Action Button unlocked/locked, warm/cold start, microphone indicator and Live Activity; document observed limitations and fallbacks | **Unverified**; intent requests foreground opening; cold start has no proven guarantee |
 | Messages/Mail keyboard inserts committed text at caret with Full Access off; no auto-send; copy/share in unsupported fields | **Unverified** |
-| Seven-day text-only history, manual delete, private storage/backup exclusion; no normal capture audio files | **Unverified** on phone; synthetic retention/delete tests |
-| Speech model provisioning, offline on-device path, cloud consent/indicator, vocabulary, speech/brain pickers and A/B | **Unverified**; proxy authentication/provider behavior requires deployed services |
+| Text-only history, manual delete, held/unconfirmed text retained until deletion; private temporary remote sync audio until STT succeeds | **Unverified** on phone; synthetic retention/delete tests |
+| Speech model provisioning, offline on-device path, cloud consent/indicator, vocabulary, speech/brain pickers and A/B | **Unverified**; signed proxy access passes real local Worker + fake upstream tests; deployed vendor behavior **unverified** |
 | Meeting suggestions do nothing untouched, deduplicate/expire, mute, edit destination, review and dismiss | **Unverified** on phone; conservative inferred-only app activation |
 | Exact action/destination/recipient/consequences remain visible during approval; tier 3 requires fresh Policy Face ID/passcode; cancellation/failure never executes; remote cannot approve | **Unverified** on phone; synthetic Policy integration tests |
 | Benchmark prompts, same-audio A/B, run-schema JSON share, audio local and removed after successful export unless kept | **Unverified** on phone; synthetic schema and deletion tests |
-| BLE authenticated Numeric Comparison enrollment, version/snapshot/display-write barrier, raw Opus, OFF/disconnect/loss/watchdog, release then fresh trigger | **Unverified**; remote capture disabled until trusted enrollment is supplied; draft contract/PR #9 untested on hardware |
+| BLE authenticated Numeric Comparison enrollment, version/snapshot/display-write barrier, raw Opus, OFF/disconnect/loss/watchdog, release then fresh trigger | **Unverified**; explicit Numeric Comparison confirmation and persisted protected-peripheral pin implemented; draft contract/PR #9 untested on hardware |
 | Dynamic Type largest sizes, VoiceOver all controls and approval details, dark mode | **Unverified** |
 | Owner speech/brain benchmark gate: named iPhone/AirPods, WER/terms/first words/latency/battery; no engine selected on synthetic scores | **Unverified** |
 | Privacy/recording consent, cloud retention and encryption policy reviewed before release | **Unverified** |
 
 Task 6 integration limits: computer enrollment metadata and revocation tombstones persist
 in protected files; keys remain in Keychain. Relaunch restores Core and performs a fresh,
-pinned LAN Noise resume handshake on use; real-device resumption remains **unverified**. Account identifier
+pinned Pairing SessionResume handshake at launch and reconnect over the saved relay or LAN; real-device resumption remains **unverified**. Account identifier
 must match the receiver (Settings; restart after change). Provider-session executors are not yet supplied: supported machine actions queue against
 paired registry destinations and hold visibly; unsupported/pinned unknown sessions report
 queue-confirmation failure and retain the approval permit for a verified retry.
 Tier 2 wake/grant automation stays disabled pending authenticated actor/scope integration.
 The app uses the merged Core trigger window; draft BLE trigger ambiguity remains unresolved.
-BLE capture stays fail-closed because CoreBluetooth does not expose the Numeric Comparison
-security evidence required by the draft. Opus integration and all Apple APIs await the
+BLE capture requires protected access plus a saved pin established by explicit both-screen Numeric Comparison confirmation. CoreBluetooth method/bond attestation is unavailable; firmware must enforce authenticated SC bonding. Opus integration and all Apple APIs await the
 coordinator's `ios-ci-*` tag. No commit, push, merge or PR was performed by this worker.
 
 Scoped portable checks: `swift test -j 4 --package-path SW/ios/Packages/AppModel` and
@@ -153,3 +152,7 @@ ActivityKit ID-only operations, serial camera ownership, synchronous main-queue 
 delegates, and explicit Sendable callbacks. Reconnect requests an Input snapshot in
 the first state write after subscriptions. Portable regression reproduced failing
 first; Apple SDK compilation and device execution of these changes **unverified**.
+
+Integration (2026-11-02): [App map](App/README.md) covers relay pairing, exact signed speech/Claude proxy requests, durable held/unconfirmed dictation and draft 1.1 remote offline sync. [AppModel regressions](Packages/AppModel/Tests/README.md) prove interruption/resume, delete after STT + durable history, short discard, same-major/capability rules and offline text isolation. [SYS E2E](../../SYS/tests/e2e/README.md) proves signing bytes against the production Worker with synthetic upstreams. No relay source edits. Short-code lookup and positive insertion acknowledgments need contracts; existing TaskStatus failures now map by segment_id; BLE authenticated enrollment and all changed Apple SDK/device behavior remain **unverified**.
+
+Cross-review: relay 403 suspends without deleting credentials; cleanup always attempts self-revoke. Deferred sync uses protected append-only audio and visible Retry/Discard; silent/oversized records do not starve later recordings, and live PTT preemption resumes. Unicode splits are durable before encoding; Copy handles offline IDs. Remote enrollment has a real confirmation/pinning UI; CoreBluetooth method attestation and OS bond removal remain API gaps, not authentication exceptions.

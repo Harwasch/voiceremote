@@ -51,19 +51,26 @@ private final class LANTransport: PairingTransport, @unchecked Sendable {
     func close() async { lock.withLock { closed = true; connection.cancel() } }
 }
 
-/// The Pairing worker can replace only discovery/code resolution with its extended
-/// transport. Noise, phrase confirmation and enrollment stay in the merged package.
-@MainActor @Observable final class ComputerLink: ComputerPairing, DeviceRevocationHandler, DictationTarget {
+/// Relay enrollment and fresh XX resume use the same Pairing application boundary as LAN.
+@MainActor @Observable final class ComputerLink: ComputerPairing, DeviceRevocationHandler, DictationAvailability {
     let accountID: String
     let phoneID: String
     weak var runtime: AppRuntime?
+    private let peerRegistry = PeerRegistry(store: KeychainStore(service: "VoiceRemote.Pairing"))
+    private var pendingRelay: RelayClient?
+    private var pendingOrigin: String?
+    private var reconnectors: [String: Task<Void, Never>] = [:]
+    private var remoteRevocations = Set<String>()
+    private(set) var connectedIDs = Set<String>()
+    private(set) var suspendedIDs = Set<String>()
     private var confirmation: PairingConfirmation?
     private var pendingTransport: (any PairingTransport)?
     private struct ConnectedPeer {
         let device: DeviceInfo
         let publicKey: Data
         let roomID: String
-        let session: NoiseSession
+        let session: ApplicationSession
+        let epoch = UUID()
     }
     private var peers: [String: (ConnectedPeer, any PairingTransport)] = [:]
     private let store: PeerStore
@@ -85,20 +92,93 @@ private final class LANTransport: PairingTransport, @unchecked Sendable {
             guard let key = try SecureStore.load(keyName(id)) else { return false }
             return key.count == 32
         })
+        for record in store.active {
+            guard let key = try SecureStore.load(keyName(record.device.device_id)) else { continue }
+            if try await peerRegistry.lookup(publicKey: key) == nil {
+                try await peerRegistry.restoreConfirmed(device: record.device, publicKey: key, roomID: record.roomID)
+            }
+        }
+        suspendedIDs = Set(store.active.filter { $0.suspended == true }.map { $0.device.device_id })
         if !missing.isEmpty { notice = "Stored computer credentials are unavailable. Pair those computers again." }
         if store.records.contains(where: \.notificationPending) {
             notice = "A removed computer could not be notified. Remove this phone on that computer as well."
         }
     }
+    private func relayKeyName(room: String) -> String {
+        "relay-signing:" + (try! JSONEncoder().encode([accountID, room])).base64EncodedString()
+    }
+    private func relay(room: String, origin: String, create: Bool = false) throws -> RelayClient {
+        guard let url = URL(string: origin) else { throw PairingError.invalidQR }
+        let name = relayKeyName(room: room)
+        let bytes: Data
+        if let retained = try SecureStore.load(name) { bytes = retained }
+        else {
+            guard create else { throw PairingError.keyMismatch }
+            bytes = Curve25519.Signing.PrivateKey().rawRepresentation
+            try SecureStore.save(bytes, key: name)
+        }
+        return try RelayClient(origin: url, route: RelayRoute(account: accountID, room: room, device: phoneID),
+            signingKey: Curve25519.Signing.PrivateKey(rawRepresentation: bytes), http: URLSessionRelayHTTP(), connector: URLSessionWebSocketConnector())
+    }
+    func cloudClient() throws -> RelayClient {
+        guard let record = store.active.first(where: { $0.relayOrigin != nil && $0.suspended != true }), let origin = record.relayOrigin else { throw PairingError.invalidState }
+        return try relay(room: record.roomID, origin: origin)
+    }
+    private func scheduleReconnect(_ id: String) {
+        guard reconnectors[id] == nil, !suspendedIDs.contains(id) else { return }
+        reconnectors[id] = Task { [weak self] in
+            var retryOnExit = true
+            defer {
+                if let self {
+                    reconnectors.removeValue(forKey: id)
+                    if retryOnExit, !Task.isCancelled, peers[id] == nil,
+                       store.active.contains(where: { $0.device.device_id == id }) { scheduleReconnect(id) }
+                }
+            }
+            var delay: Duration = .milliseconds(500)
+            while !Task.isCancelled {
+                guard let self, store.active.contains(where: { $0.device.device_id == id }), !revoking.contains(id) else { return }
+                do { try await ensureConnected(id); return }
+                catch is CancellationError { retryOnExit = false; return }
+                catch let error as RelayError where error.permanent {
+                    retryOnExit = false
+                    if error == .httpRefused(403) {
+                        try? store.suspend(deviceID: id)
+                        suspendedIDs.insert(id)
+                        notice = "Relay access suspended. Credentials retained; retry or explicitly remove this computer."
+                    } else { notice = "Relay refused the connection. Check its settings." }
+                    return
+                } catch { notice = "Computer unavailable. Dictation will be held in History." }
+                do { try await Task.sleep(for: delay) } catch { return }
+                delay = min(delay * 2, .seconds(30))
+            }
+        }
+    }
+    func retrySuspended(_ id: String) {
+        do { try store.suspend(deviceID: id, false); suspendedIDs.remove(id); scheduleReconnect(id) }
+        catch { notice = "Suspension could not be updated." }
+    }
+    func reconnectAtLaunch() {
+        for record in store.active { scheduleReconnect(record.device.device_id) }
+        for record in store.records where record.revoked && record.notificationPending && record.relayOrigin != nil {
+            Task { [weak self] in try? await self?.dropRoom(deviceID: record.device.device_id) }
+        }
+    }
     func begin(_ invitationOrCode: String, role: DeviceInfoRole) async throws -> String {
         await cancel(); self.role = role
         let epoch = pairingEpoch
-        // Full QR text is an offline code fallback. A short code requires the
-        // coordinator's authenticated lookup service; never guess a lookup URL.
-        let invitation = try PairingInvitation(qr: Data(invitationOrCode.utf8), expectedAccount: accountID, clock: SystemPairingClock())
-        let endpoint = try await discover(room: invitation.payload.relay_room_id)
-        guard epoch == pairingEpoch else { throw CancellationError() }
-        let transport = LANTransport(endpoint: endpoint); pendingTransport = transport
+        let invitation = try PairingInvitation(code: invitationOrCode, expectedAccount: accountID, clock: SystemPairingClock())
+        guard !store.active.contains(where: { $0.roomID == invitation.payload.relay_room_id }) else { throw PairingError.invalidState }
+        let transport: any PairingTransport
+        let origin = runtime?.model.settings.relayURL.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !origin.isEmpty {
+            let client = try relay(room: invitation.payload.relay_room_id, origin: origin, create: true)
+            pendingRelay = client; pendingOrigin = origin
+            try await client.redeem(invitation)
+            transport = try await client.connect()
+        } else { transport = LANTransport(endpoint: try await discover(room: invitation.payload.relay_room_id)) }
+        guard epoch == pairingEpoch else { await transport.close(); throw CancellationError() }
+        pendingTransport = transport
         let keyData = try SecureStore.loadOrCreateKey("noise-static")
         let key = try Curve25519.KeyAgreement.PrivateKey(rawRepresentation: keyData)
         let confirmation = try await PairingConnection.initiate(invitation: invitation, staticKey: key,
@@ -122,58 +202,76 @@ private final class LANTransport: PairingTransport, @unchecked Sendable {
             display_name: peer.device.display_name, platform: peer.device.platform, role: role, capabilities: capabilities)
         guard self.confirmation === confirmation, !revoking.contains(device.device_id),
               !store.active.contains(where: { $0.device.device_id == device.device_id }) else { throw PairingError.invalidState }
+        let session = try await peer.applicationSession(registry: peerRegistry, localDeviceID: phoneID)
         // Both confirmations already succeeded. Persist keys separately from metadata.
-        try SecureStore.save(peer.publicKey, key: keyName(device.device_id))
-        try store.enroll(device, roomID: peer.roomID)
         do {
+            try SecureStore.save(peer.publicKey, key: keyName(device.device_id))
+            try store.enroll(device, roomID: peer.roomID, relayOrigin: pendingOrigin)
             do { try await runtime.registry.register(device) }
             catch CoreError.revokedDevice { try await runtime.registry.rePair(device) }
         } catch {
             try? store.markRevoked(deviceID: device.device_id, notificationPending: true)
-            try? SecureStore.delete(keyName(device.device_id)); await peer.session.close(); await transport.close()
+            try? SecureStore.delete(keyName(device.device_id)); try? await peerRegistry.revoke(session.peer)
+            await session.close(transport: transport)
             throw error
         }
-        let connected = ConnectedPeer(device: device, publicKey: peer.publicKey, roomID: peer.roomID, session: peer.session)
+        let connected = ConnectedPeer(device: device, publicKey: peer.publicKey, roomID: peer.roomID, session: session)
         install(connected, transport: transport)
-        self.confirmation = nil; pendingTransport = nil
+        self.confirmation = nil; pendingTransport = nil; pendingRelay = nil; pendingOrigin = nil
         return device
     }
     func cancel() async {
         pairingEpoch = UUID()
         if let confirmation, let pendingTransport { await confirmation.abort(transport: pendingTransport) }
         else { await pendingTransport?.close() }
-        confirmation = nil; pendingTransport = nil
+        if let client = pendingRelay { try? await client.revoke(device: phoneID) }
+        confirmation = nil; pendingTransport = nil; pendingRelay = nil; pendingOrigin = nil
     }
     private func install(_ peer: ConnectedPeer, transport: any PairingTransport) {
         let id = peer.device.device_id
-        peers[id] = (peer, transport)
+        peers[id] = (peer, transport); connectedIDs.insert(id)
+        notice = "Computer connected"
         readers[id] = Task { [weak self] in
             do {
                 while !Task.isCancelled {
-                    let plain = try await peer.session.decrypt(transport.receive())
+                    let message = try await peer.session.receive(transport: transport)
                     guard let self, peers[id]?.0.session === peer.session else { return }
-                    if let focus = try? ProtocolCodec.decode(FocusReport.self, from: plain), focus.device_id == id {
+                    switch message {
+                    case .focusReport(let focus) where focus.device_id == id:
                         try runtime?.model.updateFocus(focus)
+                    case .taskStatus(let status):
+                        await runtime?.model.insertionStatus(status, from: id)
+                    case .revoke:
+                        remoteRevocations.insert(id)
+                        await runtime?.model.revoke(id)
+                        remoteRevocations.remove(id)
+                        notice = "Computer revoked this phone. Pair again to reconnect."
+                        return
+                    default: break
                     }
                 }
             } catch {
                 guard let self, peers[id]?.0.session === peer.session else { return }
-                peers.removeValue(forKey: id); notice = "Computer disconnected. It will reconnect on the next use."
+                peers.removeValue(forKey: id); connectedIDs.remove(id)
+                notice = "Computer disconnected. Dictation will be held in History."
+                scheduleReconnect(id)
             }
         }
     }
     private func ensureConnected(_ id: String) async throws {
         if peers[id] != nil { return }
         if let task = connecting[id] { return try await task.value }
-        guard !revoking.contains(id), let record = store.active.first(where: { $0.device.device_id == id }),
+        guard !revoking.contains(id), !suspendedIDs.contains(id), let record = store.active.first(where: { $0.device.device_id == id && $0.suspended != true }),
               let publicKey = try SecureStore.load(keyName(id)), let localKey = try SecureStore.load("noise-static") else { throw PairingError.keyMismatch }
         let task = Task { [self] in
-            let endpoint = try await discover(room: record.roomID)
-            let transport = LANTransport(endpoint: endpoint)
-            let session = try await PeerResume.initiate(accountID: accountID, roomID: record.roomID,
-                localPrivateKey: localKey, expectedRemoteKey: publicKey, transport: transport)
+            let transport: any PairingTransport
+            if let origin = record.relayOrigin { transport = try await relay(room: record.roomID, origin: origin).connect() }
+            else { transport = LANTransport(endpoint: try await discover(room: record.roomID)) }
+            guard let enrollment = try await peerRegistry.lookup(publicKey: publicKey) else { await transport.close(); throw PairingError.keyMismatch }
+            let session = try await SessionResume.initiate(staticKey: Curve25519.KeyAgreement.PrivateKey(rawRepresentation: localKey),
+                registry: peerRegistry, peer: enrollment, localDeviceID: phoneID, transport: transport)
             guard !Task.isCancelled, !revoking.contains(id), store.active.contains(where: { $0.device.device_id == id }) else {
-                await session.close(); await transport.close(); throw CancellationError()
+                await session.close(transport: transport); throw CancellationError()
             }
             install(ConnectedPeer(device: record.device, publicKey: publicKey, roomID: record.roomID, session: session), transport: transport)
         }
@@ -184,16 +282,23 @@ private final class LANTransport: PairingTransport, @unchecked Sendable {
     func deleteKey(deviceID: String) async throws {
         revoking.insert(deviceID); defer { revoking.remove(deviceID) }
         connecting.removeValue(forKey: deviceID)?.cancel()
+        reconnectors.removeValue(forKey: deviceID)?.cancel(); connectedIDs.remove(deviceID); suspendedIDs.remove(deviceID)
         // Remove delivery eligibility before awaits; keep transport solely for Revoke.
         let live = peers.removeValue(forKey: deviceID)
+        let publicKey = try SecureStore.load(keyName(deviceID))
+        let enrollment: Enrollment?
+        if let publicKey { enrollment = try await peerRegistry.lookup(publicKey: publicKey) }
+        else { enrollment = nil }
         do {
             try await PeerRevocation.perform(deviceID: deviceID, accountID: accountID, store: store,
                 send: { data in
+                    if remoteRevocations.contains(deviceID) { return }
                     guard let (peer, transport) = live else { throw PairingError.closedTransport }
-                    try await transport.send(peer.session.encrypt(data))
+                    try await peer.session.send(ProtocolCodec.decode(InnerMessage.self, from: data), transport: transport)
                 }, erase: { try SecureStore.delete(keyName(deviceID)) }, close: {
                     readers.removeValue(forKey: deviceID)?.cancel()
-                    if let (peer, transport) = live { await peer.session.close(); await transport.close() }
+                    if let enrollment { try? await peerRegistry.revoke(enrollment) }
+                    if let (peer, transport) = live { await peer.session.close(transport: transport) }
                 }, now: Int64(Date().timeIntervalSince1970 * 1000))
         } catch PeerRevocationError.notification {
             // Remote notification failure is visible, but local key cleanup did
@@ -204,10 +309,33 @@ private final class LANTransport: PairingTransport, @unchecked Sendable {
             throw error
         }
     }
-    func dropRoom(deviceID: String) async throws { /* LAN-only sessions have no joined relay room. */ }
+    func dropRoom(deviceID: String) async throws {
+        guard let record = store.records.first(where: { $0.device.device_id == deviceID }), let origin = record.relayOrigin else { return }
+        if remoteRevocations.contains(deviceID) {
+            try SecureStore.delete(relayKeyName(room: record.roomID)); return
+        }
+        do {
+            let client = try relay(room: record.roomID, origin: origin)
+            try await RelayMembershipCleanup.perform(peer: deviceID, local: phoneID) { try await client.revoke(device: $0) }
+        } catch {
+            try? store.markRevoked(deviceID: deviceID, notificationPending: true)
+            notice = "Removed locally. Relay cleanup is pending; it will retry at launch."
+            // Retain this key solely for cleanup. The tombstone already excludes
+            // the room from reconnection, dictation and cloud selection.
+            throw error
+        }
+        try SecureStore.delete(relayKeyName(room: record.roomID))
+        try store.markRevoked(deviceID: deviceID, notificationPending: false)
+    }
+    func deliveryEpoch(_ deviceID: String) async -> UUID? { peers[deviceID]?.0.epoch }
+    func isReachable(_ deviceID: String) async -> Bool { deviceID == phoneID || peers[deviceID] != nil }
     func showTarget(_ device: DeviceInfo) async throws {
         guard let runtime else { throw CoreError.unavailableTarget }
-        if device.device_id != phoneID { try await ensureConnected(device.device_id) }
+        runtime.preparedDestination = device.display_name
+        if device.device_id != phoneID, peers[device.device_id] == nil {
+            scheduleReconnect(device.device_id)
+            throw DictationDeliveryError.unreachable
+        }
         runtime.preparedDestination = device.display_name
         try await runtime.remote.present(model: runtime.model, destination: device)
         await Task.yield()
@@ -219,12 +347,16 @@ private final class LANTransport: PairingTransport, @unchecked Sendable {
 
         }
     }
-    func insert(_ text: DictationText) async throws {
-        if text.target_device_id == phoneID { try runtime?.publish(text); return }
-        guard let (peer, transport) = peers[text.target_device_id] else { throw CoreError.unavailableTarget }
-        let frame = try await peer.session.encrypt(ProtocolCodec.encode(text))
-        guard peers[text.target_device_id]?.0.session === peer.session else { throw CoreError.revokedDevice }
-        try await transport.send(frame)
+    func insert(_ text: DictationText) async throws { try await insert(text, expectedEpoch: nil) }
+    func insert(_ text: DictationText, expectedEpoch: UUID?) async throws {
+        if text.target_device_id == phoneID {
+            guard let runtime else { throw DictationDeliveryError.unreachable }
+            try runtime.publish(text); return
+        }
+        guard let (peer, transport) = peers[text.target_device_id], expectedEpoch == nil || peer.epoch == expectedEpoch else { throw DictationDeliveryError.unreachable }
+        try await peer.session.send(.dictationText(text), transport: transport)
+        // Relay and current desktop schema have no insertion ACK. Never claim success.
+        throw DictationDeliveryError.unconfirmed
     }
     private func discover(room: String) async throws -> NWEndpoint {
         let browser = NWBrowser(for: .bonjourWithTXTRecord(type: "_voiceremote._tcp", domain: nil), using: .tcp)

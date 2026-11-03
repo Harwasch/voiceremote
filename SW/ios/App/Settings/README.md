@@ -6,7 +6,7 @@ flowchart LR
 
 | File | What | Status |
 |---|---|---|
-| [SettingsView.swift](SettingsView.swift) | Native engine/brain/vocabulary/proxy settings; model preparation; recorder and share completion | 🟡 Apple compile/device **unverified** |
+| [SettingsView.swift](SettingsView.swift) | Native engine/brain/vocabulary settings, relay origin and deployment model/API version; model preparation; recorder and share completion | 🟡 Apple compile/device **unverified** |
 | [EnginePickerView.swift](EnginePickerView.swift) | Previous standalone task 7 debug picker; retained for upstream package link compatibility | 🟡 Superseded by SettingsView in app navigation |
 
 Start with SettingsView. Purpose: task 6 settings/benchmark UI; inputs: Stt/Brain contracts and
@@ -17,3 +17,5 @@ Settings changes persist immediately to a protected private file; consent withdr
 also stops active capture. Apple compilation remains **unverified**.
 Share completion is explicitly Sendable and sends only a success Bool to MainActor;
 UIKit callback arguments remain inside the callback. SDK compilation **unverified**.
+
+Cloud URLs are derived from retained relay membership. Relay origin edits apply to new pairing; existing computers retain the paired origin. Settings decode older files with defaults for the new model/version fields.

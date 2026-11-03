@@ -39,7 +39,7 @@ extension EngineRouter {
     /// Freeze routing/vocabulary; clean the complete utterance once at EOS, never isolated segments.
     public func transcribe(source: any CaptureSource, engines: [any SttEngine], conditions: Conditions,
                            vocabulary: Vocabulary, preferredID: String? = nil,
-                           cleanup: FailSafeCleanup = FailSafeCleanup()) -> AsyncStream<SttEvent> {
+                           cleanup: FailSafeCleanup = FailSafeCleanup(), requireComplete: Bool = false) -> AsyncStream<SttEvent> {
         let selection = select(onDevice: engines.map(\.descriptor), cloud: engines.map(\.descriptor),
                                conditions: conditions, preferredID: preferredID)
         guard Set(engines.map { $0.descriptor.id }).count == engines.count,
@@ -102,6 +102,9 @@ extension EngineRouter {
                     }
                     }
                     if captureEnded && engineEnded { break engineEvents }
+                }
+                if requireComplete, !Task.isCancelled, let failure = terminalFailure {
+                    output.yield(.failure(failure)); output.finish(); return
                 }
                 if !Task.isCancelled, !stable.isEmpty {
                     let raw = stable.joined(separator: " ")

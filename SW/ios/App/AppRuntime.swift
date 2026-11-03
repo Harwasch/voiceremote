@@ -23,6 +23,7 @@ import VoiceRemoteProtocol
     let link: ComputerLink
     let pairing: PairingFlow
     let model: VoiceAppModel
+    let offlineSync: RemoteOfflineSync
     let recorder: BenchmarkRecorder
     let remote = RemoteBLELink()
     var preparedDestination = "iPhone"
@@ -58,6 +59,7 @@ import VoiceRemoteProtocol
         keyboard = QueueWriter(sharedDirectory: group)
         try keyboard.maintain(listening: false)
         settingsStore = SettingsStore(url: root.appendingPathComponent("settings.json"))
+        offlineSync = try RemoteOfflineSync(url: root.appendingPathComponent("remote-offline.json"))
         let peers = try PeerStore(url: root.appendingPathComponent("peers-" + PayloadDigest.sha256(Data(account.utf8)) + ".json"), accountID: account)
         link = ComputerLink(accountID: account, phoneID: phoneID, store: peers)
         registry = DeviceRegistry(accountID: account, revocation: link)
@@ -80,8 +82,10 @@ import VoiceRemoteProtocol
             brain: { settings in
                 let local = FoundationModelsBrain()
                 let cloud: any LlmBrain
-                if settings.cloudConsent, let url = URL(string: settings.brainProxyURL), let configuration = try? ClaudeBrainConfiguration(proxyURL: url) {
-                    cloud = IndicatingCloudBrain(backend: ClaudeBrain(configuration: configuration))
+                if settings.cloudConsent, let client = try? AppRuntime.shared?.link.cloudClient(),
+                   let url = try? client.proxyURL(provider: "anthropic"),
+                   let configuration = try? ClaudeBrainConfiguration(proxyURL: url, model: settings.cloudModel, apiVersion: settings.cloudAPIVersion) {
+                    cloud = IndicatingCloudBrain(backend: ClaudeBrain(configuration: configuration, transport: RelayBrainTransport(authorizer: client)))
                 } else { cloud = UnavailableBrain() }
                 return BrainRouter(setting: BrainSetting(rawValue: settings.brain) ?? .hybrid,
                     onDevice: local, cloud: cloud, isOnline: { await MainActor.run { AppRuntime.shared?.network.online ?? false } })
@@ -115,6 +119,7 @@ import VoiceRemoteProtocol
         let task = Task { [self] in
             try await link.restore(registry: registry)
             await model.refresh()
+            link.reconnectAtLaunch()
         }
         preparation = task
         try await task.value
@@ -135,11 +140,37 @@ import VoiceRemoteProtocol
         var result: [any SttEngine] = []
         if await apple.modelAvailable() { result.append(apple) }
         if await whisper.modelAvailable { result.append(whisper) }
-        if model.settings.cloudConsent, let url = URL(string: model.settings.speechProxyURL), let settings = try? ProxySettings(url: url) {
-            result.append(CloudEngine(vendor: .elevenLabs, settings: settings))
-            result.append(CloudEngine(vendor: .assemblyAI, settings: settings))
+        if model.settings.cloudConsent, let client = try? link.cloudClient() {
+            for (vendor, provider) in [(CloudEngine.Vendor.elevenLabs, "elevenlabs"), (.assemblyAI, "assemblyai")] {
+                guard let url = try? client.proxyURL(provider: provider),
+                      var parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else { continue }
+                parts.scheme = "wss"
+                guard let socketURL = parts.url, let settings = try? ProxySettings(url: socketURL) else { continue }
+                result.append(CloudEngine(vendor: vendor, settings: settings,
+                    sockets: URLSessionSocketFactory(authorizer: client, provider: provider)))
+            }
         }
         return result
+    }
+    func transcribeOffline(_ packets: [Data]) async throws -> String {
+        let snapshot = model.settings
+        let engines = await availableEngines()
+        let conditions = EngineRouter.Conditions(online: network.online, hot: false, lowBattery: ProcessInfo.processInfo.isLowPowerModeEnabled,
+            maxAccuracy: snapshot.maxAccuracy, cloudConsent: snapshot.cloudConsent)
+        var finals: [String] = []
+        defer { model.endOfflineCloudIndication() }
+        for await event in EngineRouter().transcribe(source: OfflineOpusSource(packets: packets), engines: engines,
+            conditions: conditions, vocabulary: Vocabulary(userID: model.accountID, terms: snapshot.vocabulary), preferredID: snapshot.speechEngine, requireComplete: true) {
+            try Task.checkCancellation()
+            switch event {
+            case .selected(let engine): model.offlineEngineSelected(isCloud: engine.isCloud)
+            case .final(let text): finals.append(text)
+            case .failure(let failure): throw failure
+            case .partial: break
+            }
+        }
+        let text = finals.joined(separator: " ")
+        return text // Empty successful output is a per-record silent disposition in sync.
     }
     func prepareModels() async {
         do { try await apple.prepare(allowDownload: true); try await whisper.prepare(allowDownload: true) }
@@ -148,7 +179,7 @@ import VoiceRemoteProtocol
     func saveSettings(_ current: AppSettings? = nil) {
         let settings = current ?? model.settings
         guard savedSettings != settings else { return }
-        model.stop(); model.settingsChanged()
+        model.stop(); remote.cancelOfflineSync(); model.settingsChanged()
         do { try settingsStore.save(settings); savedSettings = settings }
         catch { self.error = "Settings could not be saved. Cloud processing has stopped; check storage before restarting." }
     }

@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 import XCTest
 import Crypto
 import VoiceRemoteProtocol
@@ -107,6 +110,14 @@ private actor MemberRelay: RelayHTTP, WebSocketConnector {
         XCTAssertEqual(array[4] as? String, request.url.lastPathComponent)
         XCTAssertEqual(array[5] as? String, Data(SHA256.hash(data: request.body)).base64EncodedString())
         consumed = true
+    }
+    func verifyProxy(_ request: URLRequest, operation: String, bytes expectedBytes: Data) throws {
+        let proof = try XCTUnwrap(proof), key = try XCTUnwrap(key)
+        let values = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(proof.utf8)) as? [Any])
+        XCTAssertEqual(values[4] as? String, operation)
+        XCTAssertEqual(values[5] as? String, Data(SHA256.hash(data: expectedBytes)).base64EncodedString())
+        XCTAssertEqual(request.value(forHTTPHeaderField: "X-Relay-Challenge"), Data(repeating: 9, count: 32).base64EncodedString())
+        try signature(request.value(forHTTPHeaderField: "X-Relay-Signature"), message: Data(proof.utf8), publicKey: key)
     }
     func connect(_ request: RelayRequest) throws -> WebSocketUpgrade {
         XCTAssertEqual(request.method, "GET"); XCTAssertEqual(request.url.scheme, "wss"); XCTAssertTrue(request.body.isEmpty)
@@ -243,7 +254,7 @@ extension NoiseRelayTests {
         catch {}
         let delays = await sleeper.delays
         XCTAssertTrue(delays.isEmpty, "permanent refusal must surface immediately")
-        do { try await registry.require(peer); XCTFail("403 retained enrollment") } catch {}
+        try await registry.require(peer) // HTTP refusal cannot revoke endpoint trust.
     }
 }
 
@@ -252,5 +263,42 @@ extension NoiseRelayTests {
         let (client, _, _) = try await setup(loseResponse: true)
         let transport = try await client.connect()
         await transport.close()
+    }
+}
+
+extension NoiseRelayTests {
+    func testProxyProofsBindCanonicalQueryAndExactBodyAndRejectOtherRoutes() async throws {
+        let (client, server, _) = try await setup()
+        let prefix = "wss://relay.invalid/v1/accounts/synthetic/rooms/" + String(repeating: "a", count: 32)
+        let query = "?model_id=scribe_v2_realtime&audio_format=pcm_16000&commit_strategy=manual&keyterms=O%27Brien"
+        let canonical = Data(query.utf8)
+        XCTAssertEqual(Data(SHA256.hash(data: canonical)).base64EncodedString(), "Pf3oZrkv9GShKRbUCijPMlzWfZn9dv4xDIoM51ydJvc=")
+        var speech = URLRequest(url: URL(string: prefix + "/proxy/elevenlabs" + query.replacingOccurrences(of: "%27", with: "'"))!)
+        speech.httpMethod = "GET"
+        let signed = try await client.authorize(speech, provider: "elevenlabs")
+        try await server.verifyProxy(signed, operation: "proxy/elevenlabs", bytes: canonical)
+        var body = URLRequest(url: try client.proxyURL(provider: "anthropic")); body.httpMethod = "POST"
+        body.httpBody = Data("{ \"synthetic\": \"body / bytes\" }".utf8)
+        body.setValue("never-forward", forHTTPHeaderField: "x-api-key")
+        let messages = try await client.authorize(body, provider: "anthropic")
+        XCTAssertEqual(messages.httpBody, body.httpBody); XCTAssertNil(messages.value(forHTTPHeaderField: "x-api-key"))
+        try await server.verifyProxy(messages, operation: "proxy/anthropic", bytes: body.httpBody!)
+        for wrong in [prefix + "/proxy/assemblyai" + query, "wss://other.invalid/proxy/elevenlabs" + query] {
+            do { _ = try await client.authorize(URLRequest(url: URL(string: wrong)!), provider: "elevenlabs"); XCTFail("wrong route signed") } catch {}
+        }
+        await server.configure(fault: 1)
+        do { _ = try await client.authorize(speech, provider: "elevenlabs"); XCTFail("wrong challenge context signed") } catch {}
+    }
+    func testCanonicalQueryVectorsAndCompleteCodeParsing() async throws {
+        let pairs = [URLQueryItem(name: "term", value: "C++ ~ é"), URLQueryItem(name: "term", value: "O'Brien")]
+        XCTAssertEqual(RelayQuery.encode(pairs), "term=C%2B%2B+%7E+%C3%A9&term=O%27Brien")
+        let url = URL(string: "https://example.invalid/?a=hello%20world&&a=O%27Brien&z&bad=%25zz")!
+        XCTAssertEqual(String(decoding: try RelayQuery.canonical(url), as: UTF8.self), "?a=hello+world&a=O%27Brien&z=&bad=%25zz")
+        let (_, _, invitation) = try await setup()
+        let qr = try ProtocolCodec.encode(invitation.payload)
+        for code in [String(decoding: qr, as: UTF8.self), qr.base64EncodedString()] {
+            XCTAssertEqual(try PairingInvitation(code: code, expectedAccount: "synthetic", clock: TestClock(now: 1)).payload, invitation.payload)
+        }
+        XCTAssertThrowsError(try PairingInvitation(code: "123456", expectedAccount: "synthetic", clock: TestClock(now: 1)))
     }
 }

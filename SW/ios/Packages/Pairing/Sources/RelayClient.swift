@@ -126,6 +126,7 @@ enum RelayJSON {
 public struct RelayClient: Sendable {
     public let route: RelayRoute
     private let base: URL
+    var baseURL: URL { base }
     private let identity: Curve25519.Signing.PrivateKey
     private let http: any RelayHTTP
     private let connector: any WebSocketConnector
@@ -172,7 +173,7 @@ public struct RelayClient: Sendable {
             } catch { throw original }
         }
     }
-    private func authorization(operation: String, body: Data) async throws -> [String: String] {
+    public func authorization(operation: String, body: Data) async throws -> [String: String] {
         let hash = RelayJSON.digest(body)
         let request = try RelayJSON.encode(["device_id": route.device, "operation": operation, "body_sha256": hash])
         let proof = try RelayJSON.array(["voiceremote-relay-challenge-v1", route.account, route.room, RelayJSON.digest(request)])
@@ -187,7 +188,8 @@ public struct RelayClient: Sendable {
               started.duration(to: .now) < .milliseconds(expires - serverTime) else { throw PairingError.expiredQR }
         let expected = try RelayJSON.array(["voiceremote-relay-auth-v1", route.account, route.room, route.device, operation, hash, challenge], integer: expires)
         guard try RelayJSON.value(String.self, fields, "message") == String(decoding: expected, as: UTF8.self) else { throw PairingError.invalidMessage }
-        return ["X-Relay-Challenge": challenge, "X-Relay-Signature": try sign(expected)]
+        let message = try RelayJSON.value(String.self, fields, "message")
+        return ["X-Relay-Challenge": challenge, "X-Relay-Signature": try sign(Data(message.utf8))]
     }
     public func revoke(device: String) async throws {
         try RelayRoute.validateID(device)
@@ -217,7 +219,8 @@ public struct RelayClient: Sendable {
             do { return try await connect() }
             catch is CancellationError { throw CancellationError() }
             catch let refusal as RelayError where refusal.permanent {
-                if refusal == .httpRefused(403), let registry, let peer { try await registry.revoke(peer) }
+                // HTTP intermediaries cannot revoke Noise endpoint trust.
+                // Surface the refusal; hosts suspend routing and retain credentials.
                 throw refusal
             }
             catch { try await sleeper.sleep(for: delay); delay = min(delay * 2, .seconds(30)) }

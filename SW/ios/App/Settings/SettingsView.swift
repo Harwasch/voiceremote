@@ -30,7 +30,7 @@ struct SettingsView: View {
                     NavigationLink("Run same-audio A/B comparison") { RecorderView(host: host) }
                 }
                 #endif
-                TextField("Speech proxy WebSocket URL", text: $model.settings.speechProxyURL).textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
+                Text("Cloud services use the signed relay membership from pairing.").font(.footnote)
             }
             Section("Brain") {
                 Picker("Brain", selection: $model.settings.brain) {
@@ -38,7 +38,9 @@ struct SettingsView: View {
                     Text("Hybrid").tag(BrainSetting.hybrid.rawValue)
                     Text("Cloud only").tag(BrainSetting.cloudOnly.rawValue)
                 }
-                TextField("Brain proxy HTTPS URL", text: $model.settings.brainProxyURL).textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
+                TextField("Relay Claude model", text: $model.settings.cloudModel).textInputAutocapitalization(.never).autocorrectionDisabled()
+                TextField("Relay Anthropic API version", text: $model.settings.cloudAPIVersion).textInputAutocapitalization(.never).autocorrectionDisabled()
+                Text("Model and API version must match the relay deployment.").font(.footnote)
             }
             Section("Vocabulary") {
                 TextField("One word or phrase per line", text: Binding(get: { host.model.settings.vocabulary.joined(separator: "\n") },
@@ -49,7 +51,7 @@ struct SettingsView: View {
                 TextField("Relay HTTPS URL", text: $model.settings.relayURL).textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
                 TextField("Account identifier for pairing", text: $accountID)
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
-                Text("Changing account takes effect after restarting the app. Pairing transport and relay authentication are being integrated separately.").font(.footnote)
+                Text("Changing account takes effect after restarting the app. Set the relay before pairing; saved computers retain their paired relay address.").font(.footnote)
             }
             Section { NavigationLink("Benchmark recorder") { RecorderView(host: host) } }
         }.navigationTitle("Settings")
