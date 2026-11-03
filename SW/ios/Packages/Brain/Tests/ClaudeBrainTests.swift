@@ -183,7 +183,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.flush()
         try:
-            if self.path == '/header-untyped':
+            # Apple's URLSession can hold a response until its first body bytes arrive.
+            if self.path.startswith('/header'):
                 self.wfile.write(b' ' * 1024)
                 self.wfile.flush()
             if self.path.startswith('/chunks'):
