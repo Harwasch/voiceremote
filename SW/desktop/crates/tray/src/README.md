@@ -18,3 +18,5 @@ flowchart LR
 Start at `Backend::open` and `pair_loop`. REQ-18/21–25/57. Wire contracts and
 cryptography remain in core. Capture requests use the existing capture-state
 record; phone interpretation and Auto pre-insertion announcements are unverified.
+
+`backend.rs` owns dual-path pairing/resume and transient provisioning; `control.rs` correlates phone requests, presentation readiness and revocation notices. `main.rs` acknowledges only successful tray/overlay presentation calls. Stalled-presentation ordering has an encrypted session regression.

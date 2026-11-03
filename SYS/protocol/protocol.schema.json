@@ -286,6 +286,9 @@
           "not": {
             "pattern": "[\\u0000-\\u001F\\u007F-\\u009F\\u2028\\u2029]"
           }
+        },
+        "preparation_id": {
+          "$ref": "#/$defs/Identifier"
         }
       },
       "required": [
@@ -316,6 +319,9 @@
         },
         "last_activity_at": {
           "$ref": "#/$defs/Timestamp"
+        },
+        "activity_age_ms": {
+          "$ref": "#/$defs/Counter"
         }
       },
       "required": [
@@ -911,6 +917,9 @@
         },
         "capture_state": {
           "$ref": "#/$defs/CaptureState"
+        },
+        "listening": {
+          "type": "boolean"
         }
       },
       "required": [
@@ -957,6 +966,24 @@
         },
         {
           "$ref": "#/$defs/CaptureStateReport"
+        },
+        {
+          "$ref": "#/$defs/TargetPrepare"
+        },
+        {
+          "$ref": "#/$defs/TargetReady"
+        },
+        {
+          "$ref": "#/$defs/DictationOutcome"
+        },
+        {
+          "$ref": "#/$defs/DictationQuery"
+        },
+        {
+          "$ref": "#/$defs/CaptureControl"
+        },
+        {
+          "$ref": "#/$defs/CaptureControlResult"
         }
       ]
     },
@@ -975,6 +1002,187 @@
       "minimum": 1,
       "maximum": 9007199254740991,
       "description": "Positive Unix epoch milliseconds. Enrollment additionally checks now < expires_at <= now + 120000 using trusted time."
+    },
+    "TargetPrepare": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "target_prepare"
+        },
+        "account_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "target_device_id": {
+          "$ref": "#/$defs/Identifier"
+        }
+      },
+      "required": [
+        "kind",
+        "account_id",
+        "request_id",
+        "target_device_id"
+      ]
+    },
+    "TargetReady": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "target_ready"
+        },
+        "account_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "target_device_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "ready": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "kind",
+        "account_id",
+        "request_id",
+        "target_device_id",
+        "ready"
+      ]
+    },
+    "DictationOutcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "dictation_outcome"
+        },
+        "account_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "segment_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "target_device_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "inserted",
+            "unavailable",
+            "unconfirmed"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "account_id",
+        "segment_id",
+        "target_device_id",
+        "outcome"
+      ]
+    },
+    "DictationQuery": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "dictation_query"
+        },
+        "account_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "segment_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "target_device_id": {
+          "$ref": "#/$defs/Identifier"
+        }
+      },
+      "required": [
+        "kind",
+        "account_id",
+        "segment_id",
+        "target_device_id"
+      ]
+    },
+    "CaptureControl": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "capture_control"
+        },
+        "account_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "target_device_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "capture_state": {
+          "$ref": "#/$defs/CaptureState"
+        },
+        "ttl_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2000
+        }
+      },
+      "required": [
+        "kind",
+        "account_id",
+        "request_id",
+        "target_device_id",
+        "capture_state",
+        "ttl_ms"
+      ]
+    },
+    "CaptureControlResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "capture_control_result"
+        },
+        "account_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "request_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "device_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "capture_state": {
+          "$ref": "#/$defs/CaptureState"
+        },
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "applied",
+            "unavailable",
+            "expired",
+            "cancelled"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "account_id",
+        "request_id",
+        "device_id",
+        "capture_state",
+        "outcome"
+      ]
     }
   }
 }

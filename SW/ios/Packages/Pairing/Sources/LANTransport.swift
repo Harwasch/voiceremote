@@ -81,8 +81,40 @@ public final class NetworkLANStream: LANByteStream, @unchecked Sendable {
         connection = NWConnection(host: host, port: port, using: NWParameters(tls: nil, tcp: tcp))
         connection.start(queue: DispatchQueue(label: "voiceremote.lan"))
     }
+    /// Discovered Bonjour service only; validate its resolved address before I/O.
+    public init(endpoint: NWEndpoint) throws {
+        guard case .service = endpoint else { throw PairingError.invalidMessage }
+        let tcp = NWProtocolTCP.Options()
+        tcp.enableKeepalive = true; tcp.keepaliveIdle = 10; tcp.keepaliveInterval = 5
+        let parameters = NWParameters(tls: nil, tcp: tcp)
+        parameters.prohibitedInterfaceTypes = [.cellular]
+        connection = NWConnection(to: endpoint, using: parameters)
+        connection.start(queue: DispatchQueue(label: "voiceremote.lan"))
+    }
+    private func requirePrivateConnection() async throws {
+        let deadline = ContinuousClock.now + .seconds(3)
+        while ContinuousClock.now < deadline {
+            try Task.checkCancellation()
+            switch connection.state {
+            case .ready:
+                guard case .hostPort(let host, _) = connection.currentPath?.remoteEndpoint else { throw PairingError.invalidMessage }
+                let allowed: Bool
+                switch host {
+                case .ipv4(let address): allowed = LANAddress.allowed(address.rawValue)
+                case .ipv6(let address): allowed = LANAddress.allowed(address.rawValue)
+                default: allowed = false
+                }
+                guard allowed else { connection.cancel(); throw PairingError.invalidMessage }
+                return
+            case .failed, .cancelled: throw PairingError.closedTransport
+            default: try await Task.sleep(for: .milliseconds(10))
+            }
+        }
+        connection.cancel(); throw PairingError.closedTransport
+    }
     public func read(upTo count: Int) async throws -> Data {
-        try await withTaskCancellationHandler {
+        try await requirePrivateConnection()
+        return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 connection.receive(minimumIncompleteLength: 1, maximumLength: count) { bytes, _, _, error in
                     if let error { continuation.resume(throwing: error) }
@@ -93,6 +125,7 @@ public final class NetworkLANStream: LANByteStream, @unchecked Sendable {
         } onCancel: { self.connection.cancel() }
     }
     public func write(_ bytes: Data) async throws {
+        try await requirePrivateConnection()
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
                 connection.send(content: bytes, completion: .contentProcessed { error in

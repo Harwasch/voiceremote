@@ -15,3 +15,5 @@ flowchart LR
 | [native/](native/) | Clipboard, UIA/privilege and SendInput APIs | 🟡 Windows runtime unverified |
 
 Start at `policy::insert`; REQ-16/18–21/57. Tests use synthetic text only.
+
+Focus snapshots expose optional input age for clock-skew-safe Auto. Unknown native sampling remains inactive; native Windows runtime acceptance **unverified**.

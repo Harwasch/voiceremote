@@ -26,7 +26,7 @@ revocation or physical safety. Those need the later component tasks.
 | Bytes | Nonempty padded standard base64 strings, no whitespace or URL alphabet. Strings preserve wire bytes; transport decodes them. The schema checks base64 shape, not key material or canonical pad bits. |
 | IDs | Opaque, nonempty strings up to 128 Unicode code points; no global identifier format imposed. |
 | Time / counters | Nonnegative Unix epoch milliseconds / source-local ticks and revisions, up to `2^53−1`, preserving [JavaScript safe-integer precision](https://tc39.es/ecma262/multipage/numbers-and-dates.html#sec-number.max_safe_integer). Epoch semantics do not apply to `source_clock`. |
-| Revisions | Partial and committed dictation carry segment ID + monotonic revision. Receiver reconciliation and committed-segment deduplication remain component work. |
+| Revisions | Partial and committed dictation carry segment ID + monotonic revision. Durable receiver claims deduplicate committed segments across sessions; `dictation_query` reads the result without carrying text. |
 | Text | UTF-8 JSON strings containing Unicode scalar values; no Unicode normalization or byte-canonical JSON. Dictation additionally excludes every C0/C1 control and line/paragraph separators; multiline insertion needs a separately reviewed future contract. |
 | Hash | Lowercase SHA-256 hex of the exact immutable task-preview bytes retained by trusted policy. Do not hash a reserialized JSON object and assume another language emits identical bytes. The hash is a binding identifier, not an authorization credential. |
 | Payloads | Typed `ToolCall` unions, no arbitrary JSON argument bag. `prepare_send` is an action preview, never a dictation feature. |
@@ -53,3 +53,36 @@ token bound to this enrollment/device/account. Reject stale, far-future, replaye
 tokens and unavailable trusted time. Consume the token once; never promote it to
 a lasting credential. Schema validation cannot compare timestamps to the clock,
 prove randomness, or prove one-use. The token size is a defensive contract choice.
+
+## Dictation, target and capture exchange
+
+```mermaid
+sequenceDiagram
+    Phone->>Desktop: target_prepare(request_id, target)
+    Desktop->>Tray: Present destination; wait for display readiness
+    Tray-->>Desktop: Ready (or deadline / unavailable)
+    Desktop-->>Phone: target_ready(request_id, ready)
+    Phone->>Phone: Pin/show destination before capture starts
+    Phone->>Desktop: dictation_text(segment_id, preparation_id)
+    Desktop->>Desktop: Durable claim → literal insertion → durable outcome
+    Desktop-->>Phone: dictation_outcome(inserted / unavailable / unconfirmed)
+    Phone->>Desktop: dictation_query(segment_id), after lost ACK / resume
+    Desktop-->>Phone: Durable result; query never inserts
+```
+
+| Exchange | Runtime contract |
+|---|---|
+| Preparation | Production desktop requires `preparation_id` matching a successful prepare on this Noise session. A GUI acknowledges only after tray/overlay presentation calls succeed. Stalled/absent presentation refuses readiness; no insertion. CLI writes a content-free selection announcement. Physical display timing remains **unverified**. |
+| Outcome | `inserted` follows successful injector return and durable success. `unavailable` certifies no input started. Any partial insertion, unknown native error, receiver crash or missing result is `unconfirmed`. Unknown query IDs are conservative `unconfirmed`. `task_status` is for tasks; new dictation outcomes have separate identity. |
+| Retry | No automatic text retry or carrier replay. Reconnection starts fresh XX, then queries unconfirmed segment identities. Held/failed text requires a Send tap. A tap on unconfirmed text queries first and sends only if the receiver positively certifies unavailability. |
+| Local keyboard | Enqueue and receipt-before-call deduplication do not prove insertion. A separate shared receipt is persisted after the keyboard insertion call succeeds. Missing/throwing/crashed calls stay unconfirmed and are never drained twice. |
+| Focus | `activity_age_ms` is elapsed milliseconds from native input/idle clocks at sampling, **not** report age or peer wall time. Phone adds local monotonic elapsed time since receipt; eligible focused devices need activity within 60 seconds. Rank by estimated input time; deterministic device ID tie-break. Unknown/missing age is inactive. Heartbeats preserve growing age and cannot refresh old activity. Active-window/editability is checked locally without field/window contents. |
+| Capture request | `capture_control` identifies the phone, desired selection, unique request ID and TTL (1–2000 ms). Desktop expires its pending request from send; phone expires processing from monotonic receipt. Transport latency may make the result late: only a matching unexpired reply confirms the request at the desktop. Old-session ciphertext is never resumed. Phone rejects wrong account/target, AI mode, duplicate IDs and exhausted bounded request ledgers. |
+| Capture result | `capture_control_result` distinguishes applied, unavailable, expired and cancelled. Continuous capture is applied only after capture starts; Stop or a superseding local change cancels preparation. Desired `capture_state` and actual `listening` are reported separately; sending a request never changes displayed mic state. Phone state is echoed on focus heartbeats so an otherwise idle healthy connection does not expire. |
+| Compatibility | New variants fail closed on older peers. Missing activity age cannot select Auto; missing preparation cannot insert on the production receiver. Upgrade both peers; no fallback to unacknowledged insertion. |
+| Carrier | At connection/resume, try discovered private LAN and its authenticated handshake first; close failed probes before signed relay fallback. Both desktop listeners remain available while paired. The same production `PhoneConnection` serializes writes and correlates readiness/outcomes in app and socket e2e. |
+| Pairing entry | No short-code lookup exists. The tray displays QR plus the complete copyable invitation, bounded by the existing one-use, two-minute contract. Optional relay provisioning secret is transient input used only for signed room creation; never saved in settings/snapshots/logs. |
+
+Trace: REQ-16–18, REQ-22–27; owner wording question Q-12. Local synthetic
+contract tests do not prove native field insertion, physical UI timing or phone
+background behavior.

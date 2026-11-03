@@ -1,10 +1,9 @@
 //! State presentation only; authentication and enrollment stay in core.
 use anyhow::Result;
 use serde::Serialize;
-use sha2::{Digest, Sha256};
 use voiceremote_core::{
     pairing::{Clock, Offer},
-    protocol::{self, CaptureState, Mode},
+    protocol::{self, Mode},
     storage::Identity,
 };
 
@@ -24,11 +23,11 @@ pub fn icon(status: &crate::control::Status, flash: bool) -> Icon {
     if !status.connected {
         return Icon::Unknown;
     }
-    match (&status.mode, &status.capture) {
-        (Some(Mode::Dictation), Some(CaptureState::Off)) => Icon::DictationOff,
-        (Some(Mode::Dictation), Some(_)) => Icon::DictationListening,
-        (Some(Mode::AiControl), Some(CaptureState::Off)) => Icon::AiOff,
-        (Some(Mode::AiControl), Some(_)) => Icon::AiListening,
+    match (&status.mode, status.listening) {
+        (Some(Mode::Dictation), Some(false)) => Icon::DictationOff,
+        (Some(Mode::Dictation), Some(true)) => Icon::DictationListening,
+        (Some(Mode::AiControl), Some(false)) => Icon::AiOff,
+        (Some(Mode::AiControl), Some(true)) => Icon::AiListening,
         _ => Icon::Unknown,
     }
 }
@@ -64,7 +63,7 @@ pub fn icon_rgba(icon: Icon) -> Vec<u8> {
 #[derive(Clone, Serialize)]
 pub struct QrView {
     pub svg: String,
-    pub short_code: String,
+    pub invitation: String,
     pub expires_at: u64,
 }
 pub struct RotatingOffer {
@@ -82,11 +81,7 @@ impl RotatingOffer {
     }
     pub fn from_offer(offer: Offer) -> Result<Self> {
         let payload = protocol::encode(&offer.payload).map_err(anyhow::Error::msg)?;
-        let digest = Sha256::digest(payload.as_bytes());
-        let short_code = digest[..4]
-            .iter()
-            .map(|b| format!("{b:02X}"))
-            .collect::<String>();
+        let invitation = payload.clone();
         let svg = qrcode::QrCode::new(payload.as_bytes())?
             .render::<qrcode::render::svg::Color>()
             .min_dimensions(300, 300)
@@ -94,7 +89,7 @@ impl RotatingOffer {
             .build();
         let view = QrView {
             svg,
-            short_code,
+            invitation,
             expires_at: offer.payload.expires_at,
         };
         Ok(Self { offer, view })
@@ -121,7 +116,7 @@ impl RotatingOffer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use voiceremote_core::pairing::TOKEN_TTL_MS;
+    use voiceremote_core::{pairing::TOKEN_TTL_MS, protocol::CaptureState};
     struct Time(u64);
     impl Clock for Time {
         fn now_ms(&self) -> Result<u64> {
@@ -133,12 +128,17 @@ mod tests {
         let identity = Identity::generate()?;
         let mut qr = RotatingOffer::new(&identity, "test".into(), "room".into(), &Time(1))?;
         let original = protocol::encode(&qr.offer.payload).unwrap();
-        let old_code = qr.view.short_code.clone();
+        let old_code = qr.view.invitation.clone();
+        assert_eq!(
+            protocol::decode::<voiceremote_core::protocol::PairingPayload>(&old_code)
+                .map_err(anyhow::Error::msg)?,
+            qr.offer.payload
+        );
         assert!(!qr.rotate(&identity, &Time(TOKEN_TTL_MS))?);
         assert_eq!(protocol::encode(&qr.offer.payload).unwrap(), original);
         assert!(qr.rotate(&identity, &Time(TOKEN_TTL_MS + 1))?);
         assert_ne!(protocol::encode(&qr.offer.payload).unwrap(), original);
-        assert_ne!(qr.view.short_code, old_code);
+        assert_ne!(qr.view.invitation, old_code);
         assert_eq!(qr.offer.payload.expires_at, TOKEN_TTL_MS * 2 + 1);
         Ok(())
     }
@@ -166,6 +166,7 @@ mod tests {
                 } else {
                     on
                 };
+                status.listening = Some(capture != CaptureState::Off);
                 status.capture = Some(capture);
                 assert_eq!(icon(&status, false), expected);
             }

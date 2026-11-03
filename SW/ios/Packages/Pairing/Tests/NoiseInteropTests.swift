@@ -84,6 +84,9 @@ final class NoiseInteropTests: XCTestCase, @unchecked Sendable {
         let peer = await paired.peer
         let text = DictationText(account_id: "synthetic", segment_id: "synthetic-segment", revision: 1, state: .committed, target_device_id: "desktop", text: String(repeating: "🦀", count: 16_384))
         try await paired.send(.dictationText(text), transport: rust)
+        let outcome = try await paired.receive(transport: rust)
+        guard case .dictationOutcome(let acknowledgement) = outcome else { return XCTFail("insertion outcome expected") }
+        XCTAssertEqual(acknowledgement.outcome, .inserted)
         let response = try await paired.receive(transport: rust)
         guard case .dictationText(let returned) = response else { return XCTFail("dictation expected") }
         XCTAssertEqual(returned.text, text.text); XCTAssertEqual(returned.target_device_id, "phone")

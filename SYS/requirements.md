@@ -172,6 +172,7 @@ These record the Design's locked decisions, not verified implementation.
 | [Q-9] | What budget is available for Argmax licensing and cloud STT? | Design: Risks and open questions |
 | [Q-10] | Is the proposed 25% personal-term error reduction the owner-approved STT gate? | Design: Speech-to-text |
 | [Q-11] | Should the remote mode control use a second switch or a PTT long-press? | Design: Modes |
+| [Q-12] | Does “no inbound ports” in REQ-24 / D-1 mean no public inbound listener and no router port forwarding? The implemented LAN receiver binds a private network interface only (loopback is allowed for tests), accepts private-network peers only, and runs while pairing or paired; relay uses outbound HTTPS/WSS. Owner confirmation of this interpretation is pending; the literal no-inbound claim remains unverified. | REQ-24; D-1; LAN/relay implementation |
 
 ## Plan traceability
 

@@ -24,12 +24,16 @@ pub struct Status {
     pub capture: Option<CaptureState>,
     pub destination: Option<String>,
     pub flash: u64,
+    pub listening: Option<bool>,
 }
 #[derive(Default)]
 pub struct Hub {
     next: u64,
     sessions: BTreeMap<u64, mpsc::Sender<Toggle>>,
     pub status: Status,
+    pub presentation_required: bool,
+    presentation: Option<(u64, oneshot::Sender<bool>)>,
+    pub revocations: BTreeMap<String, oneshot::Sender<bool>>,
 }
 impl Hub {
     #[allow(dead_code)] // Read by the GUI, not the CLI.
@@ -41,6 +45,39 @@ impl Hub {
                 connected: !self.sessions.is_empty(),
                 ..Status::default()
             }
+        }
+    }
+}
+/// A GUI completes this only after successfully showing the tray/overlay.
+/// A stalled or unavailable GUI refuses preparation; text cannot overtake it.
+pub async fn present(hub: &Arc<Mutex<Hub>>, destination: String) -> bool {
+    let receive = {
+        let mut h = hub.lock().unwrap();
+        h.status.destination = Some(destination);
+        h.status.flash = h.status.flash.wrapping_add(1);
+        if !h.presentation_required {
+            // CLI presentation has no GUI event loop. Output contains no field data.
+            eprintln!("Voice Receiver selected for dictation");
+            return true;
+        }
+        let (reply, receive) = oneshot::channel();
+        let sequence = h.status.flash;
+        h.presentation = Some((sequence, reply));
+        receive
+    };
+    tokio::time::timeout(Duration::from_secs(2), receive)
+        .await
+        .is_ok_and(|result| result == Ok(true))
+}
+#[allow(dead_code)] // The GUI acknowledges presentation; the CLI prints directly.
+pub fn presented(hub: &Arc<Mutex<Hub>>, sequence: u64, ready: bool) {
+    let mut h = hub.lock().unwrap();
+    if h.presentation
+        .as_ref()
+        .is_some_and(|(pending, _)| *pending == sequence)
+    {
+        if let Some((_, reply)) = h.presentation.take() {
+            let _ = reply.send(ready);
         }
     }
 }
@@ -77,6 +114,25 @@ pub fn register(hub: Arc<Mutex<Hub>>) -> (Registration, mpsc::Receiver<Toggle>) 
     };
     (Registration { hub, id }, rx)
 }
+/// Best-effort authenticated notice before local erasure. Local revocation
+/// proceeds even if the peer is offline or the notice cannot be confirmed.
+#[allow(dead_code)] // Called by the tray; the CLI includes this shared module.
+pub async fn notify_revocation(hub: &Arc<Mutex<Hub>>, device: &str) -> bool {
+    let receive = {
+        let mut h = hub.lock().unwrap();
+        if h.sessions.is_empty() || h.revocations.len() >= 4 {
+            return false;
+        }
+        let (reply, receive) = oneshot::channel();
+        h.revocations.insert(device.to_owned(), reply);
+        receive
+    };
+    let result = tokio::time::timeout(Duration::from_millis(1500), receive)
+        .await
+        .is_ok_and(|result| result == Ok(true));
+    hub.lock().unwrap().revocations.remove(device);
+    result
+}
 pub async fn toggle(hub: &Arc<Mutex<Hub>>) -> Result<()> {
     let tx = {
         let h = hub.lock().unwrap();
@@ -94,7 +150,7 @@ pub async fn toggle(hub: &Arc<Mutex<Hub>>) -> Result<()> {
     .map_err(|_| anyhow::anyhow!("capture request busy"))?;
     ensure!(
         tokio::time::timeout(Duration::from_secs(3), receive).await??,
-        "phone state unknown or request not sent"
+        "phone state unknown, request expired or phone refused"
     );
     Ok(())
 }

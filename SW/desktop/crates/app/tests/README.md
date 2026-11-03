@@ -15,3 +15,5 @@ physical phone and terminal QR scanning remain **unverified**.
 
 `cli.rs` verifies the fixed toggle request over a private Unix socket and a failure
 exit code when no receiver is running. No phone microphone transition is claimed.
+
+CLI regressions retain explicit QR/code selection; relay can coexist with a private LAN listener. Toggle success now means a correlated phone result, not a socket write.

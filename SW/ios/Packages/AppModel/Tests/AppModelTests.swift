@@ -323,7 +323,7 @@ actor BrainSpy: LlmBrain {
         rig.capture.channel.continuation.yield(.frame(try AudioFrame(samples: Array(repeating: 0, count: 12_800), timestamp: time + 0.01)))
     }
     try slice(0); try await rig.until { rig.model.history.count == 1 }
-    try rig.model.updateFocus(FocusReport(account_id: "fixture", device_id: "pc", text_field_focused: true, last_activity_at: 1_000_000))
+    try rig.model.updateFocus(FocusReport(account_id: "fixture", device_id: "pc", text_field_focused: true, last_activity_at: 1_000_000, activity_age_ms: 0))
     try slice(1); try await rig.until { rig.model.history.count == 2 }
     #expect(names.last == "Fixture PC")
     rig.model.stop()

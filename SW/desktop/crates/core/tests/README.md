@@ -22,3 +22,5 @@ Human pairing time and live network/OS behavior remain **unverified**.
 Run `python3 SW/desktop/crates/core/tests/check-token-guards.py` alone (no concurrent desktop build) to reproduce the token guard mutation checks. Re-run normal tests afterward.
 
 The [real E2E gate](../../../../../SYS/tests/e2e/README.md) complements fakes with the production Worker, Rust CLI and Swift over actual WS/TCP, including persisted old-frame replay.
+
+Delivery coverage includes positive encrypted outcomes, read-only segment queries, pre-input refusal and uncertain insertion across resume. All text/injectors are synthetic; native field acceptance **unverified**.

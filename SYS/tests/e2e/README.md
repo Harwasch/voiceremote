@@ -9,14 +9,16 @@ sequenceDiagram
   Phone->>Relay: Redeem with own Ed25519 identity
   Phone->>Desktop: Socket generation rendezvous + Noise XX
   Driver->>Phone: Confirm matching phrases on both clients
-  Phone->>Desktop: Encrypted dictation
+  Phone->>Desktop: Prepare target; wait for display-ready
+  Phone->>Desktop: Encrypted max Unicode dictation
+  Desktop-->>Phone: Positive insertion outcome, then a real injector refusal
   Desktop->>Driver: Test TextInjector insertion event
   Driver->>Desktop: Stop process (relay case)
-  Phone->>Relay: Old-session ciphertext while desktop offline
+  Phone->>Relay: Adversarial captured stale ciphertext while desktop offline
   Driver->>Relay: Read-only SQLite assertion: frame persisted
   Driver->>Desktop: Restart with saved enrollment
   Relay->>Desktop: Replay stale queue; endpoint filters it
-  Phone->>Desktop: Fresh rendezvous / session resume + dictation
+  Phone->>Desktop: Fresh resume + read-only outcome query + new dictation
   Phone->>Desktop: Revoke; next phone message rejected
   participant Proxy as Swift proxy-e2e
   participant Fake as Synthetic upstream
@@ -28,7 +30,7 @@ sequenceDiagram
 | File | Purpose / inputs | Status |
 |---|---|---|
 | [run.sh](run.sh) | Sequential builds, four workers maximum, then local real-client exchange | ✅ Linux |
-| [run.py](run.py) | Coordinate QR/phrase privately; assert exactly two insertions, restart, persisted queue, revoke and permanent 403 | ✅ WS + LAN |
+| [run.py](run.py) | Coordinate privately; verify ACK success/failure, restart/query, max Unicode, Auto age/skew, LAN preference/relay fallback, stale queue and revoke | ✅ WS + LAN + preferred/fallback |
 | [Package.resolved](Package.resolved) | Pinned Crypto/ASN.1 for production Swift clients | ✅ Linux resolved |
 | [Package.swift](Package.swift), [ProxyClient/](ProxyClient/README.md) | Swift production Stt/Brain/Pairing clients; Linux loopback carrier | ✅ Exact query/body signing accepted |
 | [relay.mjs](relay.mjs) | Bundle **production** `SW/relay/src/worker.ts`; start actual Miniflare SQLite DOs; optional synthetic cloud settings/provisioner/upstreams | ✅ no test fixture / no Worker source changes |
@@ -39,11 +41,10 @@ Rust builds use the committed workspace lockfile with `--locked`.
 REQ-22–25/61; plan task 2's two clients exchange messages **verified locally**.
 
 The Rust executable is the real `voiceremote` CLI. Its opt-in `e2e-test` feature
-adds an injector which accepts only `Synthetic e2e 🦀` and emits a fixed event;
-normal builds select the platform adapter (Windows injection; Linux unavailable). HTTP/WS is
+adds an injector accepting only fixed synthetic text / maximum Unicode and a known pre-input failure, emitting content-free events;
+normal builds select the platform adapter. HTTP/WS is
 explicitly loopback-only in test mode; production still requires HTTPS/WSS.
-The Swift executable uses production pairing, Noise, session, relay auth and LAN
-framing, over actual sockets. No mock relay, modified Worker entrypoint or pipe bypass is used. The separate cloud test substitutes only provider upstreams via Miniflare outboundService; the production relay performs membership, challenge, signature and policy checks.
+The Swift executable uses the same PhoneConnection and LAN framing as ComputerLink, plus production pairing, Noise and relay auth over actual sockets. No mock relay, modified Worker entrypoint or pipe bypass is used. The separate cloud test substitutes only provider upstreams via Miniflare outboundService; the production relay performs membership, challenge, signature and policy checks.
 
 Relay assertions include actual room creation/QR redemption, both confirmations,
 insertion, process restart, an old-session frame verified in the real SQLite queue
@@ -58,3 +59,5 @@ local interoperability evidence; physical iPhone, Apple Keychain/Network/native
 WebSocket, WAN/TLS deployment and human phrase-comparison time are **unverified**.
 
 Cloud gate: a separate local production Worker uses explicit synthetic provisioning/provider markers and conservative test policy. The trusted Node provisioner creates/invites; Swift receives only the invitation and redeems with its own Ed25519 key. CloudEngine signs both speech queries (apostrophe, literal plus, Unicode, repeated terms); ClaudeBrain signs its exact final body with the configured model/version. Synthetic upstreams check vocabulary/credential injection and return invented responses. No SW/relay source changes, vendor requests or real keys/transcripts/audio.
+
+The preferred-path case pairs over LAN with relay configured, then restarts the desktop with only relay. The phone proves LAN failure precedes fresh signed relay resume and reconciles the earlier success without reinsertion. Auto compares two synthetic focused devices by activity age despite extreme peer-clock skew and expires idle heartbeats. Display readiness uses the CLI presentation hook; native tray rendering is **unverified**.

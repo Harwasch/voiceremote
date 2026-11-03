@@ -29,3 +29,5 @@ Keychain/Network adapters and native WebSocket operation remain **unverified**.
 All inputs are public test secrets or synthetic values generated in memory.
 
 [Real local gate](../../../../../SYS/tests/e2e/README.md) runs the production Worker, Rust CLI and Swift client over sockets, including persisted queue replay.
+
+[PhoneConnectionTests.swift](PhoneConnectionTests.swift) covers production readiness/outcome correlation, query without replay, state heartbeat with actual mic state, LAN preference and cancellation without relay fallback. Rust interop now reads the positive insertion outcome before its text echo.

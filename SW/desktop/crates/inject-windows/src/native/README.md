@@ -14,3 +14,5 @@ flowchart LR
 Start at `Target::capture` and `clipboard::paste`. REQ-16/18–21/57.
 MIT adaptation headers and notices are mapped in
 [licences](../../../../../../DOCS/licences/README.md).
+
+`focus.rs` derives input age directly from the wrapping Windows input tick counter, independently of peer epoch clocks. No window or field contents enter focus reports.

@@ -10,7 +10,7 @@ use voiceremote_core::{
     receiver::InjectorFactory,
     relay::{RelayClient, RelayIdentity},
     storage::{FileKeyStore, Identity, KeyStore, ReceiverLease, Registry},
-    transport::{RelayRoute, Transport},
+    transport::RelayRoute,
 };
 #[path = "../../tray/src/control.rs"]
 mod control;
@@ -21,7 +21,7 @@ mod desktop_transport;
 #[cfg(any(windows, target_os = "linux"))]
 use desktop_receiver as receiver;
 #[cfg(any(windows, target_os = "linux"))]
-use desktop_transport::{LanListener, RelayTransport};
+use desktop_transport::LanListener;
 #[cfg(not(any(windows, target_os = "linux")))]
 use voiceremote_core::{
     receiver,
@@ -72,7 +72,7 @@ enum Command {
         account: String,
         #[arg(long)]
         device: Option<String>,
-        #[arg(long, conflicts_with = "relay")]
+        #[arg(long)]
         listen: Option<SocketAddr>,
         /// Relay origin. Creates a fresh room unless --room names an existing membership.
         #[arg(long, env = "VOICEREMOTE_RELAY_URL")]
@@ -100,7 +100,7 @@ enum Command {
         /// Optional assertion; receiver uses the identity persisted at pairing.
         #[arg(long)]
         device: Option<String>,
-        #[arg(long, conflicts_with = "relay")]
+        #[arg(long)]
         listen: Option<SocketAddr>,
         #[arg(long, env = "VOICEREMOTE_RELAY_URL")]
         relay: Option<String>,
@@ -177,7 +177,14 @@ struct SyntheticInjector;
 #[cfg(feature = "e2e-test")]
 impl voiceremote_core::TextInjector for SyntheticInjector {
     fn insert_text(&mut self, text: &str) -> Result<()> {
-        ensure!(text == "Synthetic e2e 🦀", "unexpected e2e input");
+        if text == "Synthetic failure" {
+            println!("E2E_FAILED");
+            return Err(voiceremote_core::InsertionFailure::NotStarted.into());
+        }
+        ensure!(
+            text == "Synthetic e2e 🦀" || text == "🦀".repeat(16384),
+            "unexpected e2e input"
+        );
         println!("E2E_INSERTED");
         Ok(())
     }
@@ -185,7 +192,7 @@ impl voiceremote_core::TextInjector for SyntheticInjector {
 fn injector_factory(state_dir: &std::path::Path, headless: bool) -> InjectorFactory {
     if headless {
         #[cfg(any(windows, target_os = "linux"))]
-        desktop_receiver::set_focus_sampler(Arc::new(|| (false, 0)));
+        desktop_receiver::set_focus_sampler(Arc::new(|| (false, 0, None)));
         return Arc::new(|| Box::new(UnavailableInjector));
     }
     #[cfg(target_os = "linux")]
@@ -194,7 +201,11 @@ fn injector_factory(state_dir: &std::path::Path, headless: bool) -> InjectorFact
         let sampler = injector.clone();
         desktop_receiver::set_focus_sampler(Arc::new(move || {
             let snapshot = sampler.focus_snapshot();
-            (snapshot.text_field_focused, snapshot.last_activity_at)
+            (
+                snapshot.text_field_focused,
+                snapshot.last_activity_at,
+                snapshot.activity_age_ms,
+            )
         }));
         Arc::new(move || Box::new(injector.clone()))
     }
@@ -203,7 +214,11 @@ fn injector_factory(state_dir: &std::path::Path, headless: bool) -> InjectorFact
         let _ = state_dir;
         desktop_receiver::set_focus_sampler(Arc::new(|| {
             let snapshot = voiceremote_inject_windows::focus_snapshot();
-            (snapshot.text_field_focused, snapshot.last_activity_at)
+            (
+                snapshot.text_field_focused,
+                snapshot.last_activity_at,
+                snapshot.activity_age_ms,
+            )
         }));
         Arc::new(|| Box::new(WindowsAppInjector))
     }
@@ -297,7 +312,7 @@ async fn main() -> Result<()> {
         .try_init();
     if matches!(cli.command, Command::Dictate { .. }) {
         control::send(&cli.state_dir).await?;
-        println!("Capture request sent; phone confirmation pending");
+        println!("Phone confirmed capture request");
         return Ok(());
     }
     let _lease = if !matches!(cli.command, Command::Devices | Command::Revoke { .. }) {
@@ -441,25 +456,21 @@ async fn main() -> Result<()> {
                 );
                 Offer::issue(&identity, account.clone(), room, &SystemClock)?
             };
-            let listener = if relay.is_none() {
-                let mut listener = match listen {
-                    Some(address) => LanListener::bind(address).await?,
-                    None => LanListener::bind_auto().await?,
-                };
+            let mut listener = match listen {
+                Some(address) => Some(LanListener::bind(address).await?),
+                None => match LanListener::bind_auto().await {
+                    Ok(listener) => Some(listener),
+                    Err(error) if relay.is_none() => return Err(error),
+                    Err(_) => None,
+                },
+            };
+            if let Some(listener) = &mut listener {
                 listener.advertise(&offer.payload.relay_room_id)?;
                 eprintln!(
                     "LAN pairing listener: {} (mDNS discovery)",
                     listener.address()?
                 );
-                Some(listener)
-            } else {
-                None
-            };
-            let mut connected = if let Some(client) = &relay {
-                Some(Box::new(RelayTransport::connect(client).await?) as Box<dyn Transport>)
-            } else {
-                None
-            };
+            }
             let complete:Result<_>=async {
             let payload = encode(&offer.payload).map_err(anyhow::Error::msg)?;
             if qr {
@@ -472,12 +483,9 @@ async fn main() -> Result<()> {
             } else {
                 println!("{payload}");
             }
-            let mut transport: Box<dyn Transport> = if let Some(transport) = connected.take() {
-                transport
-            } else {
-                Box::new(
-                    tokio::select! {result=tokio::time::timeout(Duration::from_secs(120),listener.as_ref().unwrap().accept())=>result??,_=receiver::stopped(stop.clone())=>bail!("pairing stopped")},
-                )
+            let (mut transport, via_relay) = tokio::select! {
+                result=tokio::time::timeout(Duration::from_secs(120), desktop_transport::accept_pairing(listener.as_ref(), relay.as_ref()))=>result??,
+                _=receiver::stopped(stop.clone())=>bail!("pairing stopped")
             };
             let mut pending = tokio::select! {result=pairing::accept(transport.as_mut(),&identity,&mut offer,&SystemClock)=>result?,_=receiver::stopped(stop.clone())=>bail!("pairing stopped")};
             let phrase = pending.phrase();
@@ -496,9 +504,9 @@ async fn main() -> Result<()> {
                 );
             }
             let session = pending.finish(registry.clone())?;
-            Ok((session,transport))
+            Ok((session,transport,via_relay))
             }.await;
-            let (session, mut transport) = match complete {
+            let (session, transport, via_relay) = match complete {
                 Ok(pair) => pair,
                 Err(error) => {
                     // A joined phone whose Noise confirmation failed must not
@@ -514,37 +522,19 @@ async fn main() -> Result<()> {
             };
             let peer = session.peer().clone();
             println!("Paired {} ({})", peer.info.device_id, peer.id);
-            if let Some(listener) = listener {
-                receiver::run_lan(
-                    listener,
-                    identity,
-                    registry,
-                    peer,
-                    device,
-                    injectors,
-                    stop,
-                    Some((session, transport)),
-                )
-                .await?;
-            } else {
-                let _ = receiver::serve(
-                    session,
-                    transport.as_mut(),
-                    injectors().as_mut(),
-                    stop.clone(),
-                )
-                .await;
-                receiver::run_relay(
-                    relay.unwrap(),
-                    identity,
-                    registry,
-                    peer,
-                    device,
-                    injectors,
-                    stop,
-                )
-                .await?;
-            }
+            receiver::run_paths(
+                listener,
+                relay,
+                identity,
+                registry,
+                peer,
+                device,
+                injectors,
+                stop,
+                Some((session, transport)),
+                via_relay,
+            )
+            .await?;
         }
         Command::Run {
             headless: _,

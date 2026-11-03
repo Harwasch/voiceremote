@@ -22,3 +22,5 @@ flowchart LR
 Start at `pairing::accept` / `initiate`, then `PendingPair::finish` and
 `Session::receive` / `deliver`. [Exact protocol](../../../../../SYS/protocol/noise.md).
 REQ-16/22–25/27/34/60/61. No command adapter is executed in this phase.
+
+`session.rs` persists successful segment outcomes, answers read-only reconciliation queries and requires the production driver’s presentation token before insertion. Unknown/partial insertion stays unconfirmed; no automatic retry.

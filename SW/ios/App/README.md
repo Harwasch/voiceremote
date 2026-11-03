@@ -49,3 +49,5 @@ full text. Deferred audio uses protected append-only per-record files, deleted
 after successful STT or explicit discard. Silent/oversized/failed records remain
 visible without starving later records. Live PTT yields STT and resumes when idle;
 ambiguous failures require Retry. Offline text never invokes Brain or inserts.
+
+ComputerLink uses the shared production PhoneConnection for readiness, correlated insertion outcomes, state reports and read-only reconciliation. New connections prefer private LAN then signed relay. Keyboard delivery waits for a post-insertion shared receipt. Apple adapters/display timing remain **unverified**.

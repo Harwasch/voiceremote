@@ -52,7 +52,7 @@ private actor HeldTarget: DictationAvailability, DeviceRevocationHandler {
     try await second.sendHeld(id: "held-synthetic", now: 700_000_000)
     #expect(await target.inserted.count == 1)
     #expect(await target.inserted.first?.text == "Invented text.")
-    #expect(await reopened.deliveryStates()["held-synthetic"] == .unconfirmed)
+    #expect(await reopened.deliveryStates()["held-synthetic"] == .delivered)
 }
 @Test func failedOrAmbiguousInsertionKeepsHonestDurableState() async throws {
     for outcome in [DictationDeliveryError.failed, .unconfirmed] {
@@ -128,4 +128,20 @@ private actor BlockingTapTarget: DictationTarget, DeviceRevocationHandler {
     #expect(entries.count > 1)
     #expect(entries.allSatisfy { $0.text.unicodeScalars.count <= 16384 && $0.text.utf8.count <= 16384 })
     #expect(await target.inserted.isEmpty)
+}
+
+@Test func unconfirmedHistoryTapReconcilesBeforeAnyTextResend() async throws {
+    let target = HeldTarget(); await target.setOnline(true, outcome: .unconfirmed)
+    let registry = DeviceRegistry(accountID: "fixture", revocation: target)
+    let desktop = DeviceInfo(account_id: "fixture", device_id: "desktop", display_name: "Synthetic PC", platform: .linux, role: .text_receiver, capabilities: [.receive_text])
+    try await registry.register(desktop)
+    let history = try AppHistoryStore(now: 1000)
+    let pipeline = HeldDictationPipeline(history: history, target: target, registry: registry, accountID: "fixture", phoneID: "phone")
+    var state = AppState(); state.setTarget(.device("desktop"))
+    _ = try await pipeline.prepare(segmentID: "uncertain-tap", state: state, picker: TargetPicker(accountID: "fixture", phoneID: "phone"), now: 1000)
+    try await pipeline.commit(segmentID: "uncertain-tap", revision: 0, text: "Synthetic.", now: 1000)
+    #expect(await target.inserted.count == 1)
+    await #expect(throws: DictationDeliveryError.unconfirmed) { try await pipeline.sendHeld(id: "uncertain-tap", now: 1001) }
+    #expect(await target.inserted.count == 1)
+    #expect(await history.deliveryStates()["uncertain-tap"] == .unconfirmed)
 }

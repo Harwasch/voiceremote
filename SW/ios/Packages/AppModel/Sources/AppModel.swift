@@ -152,6 +152,7 @@ public struct ApprovalCard: Identifiable, Sendable {
         do { history = try await historyStore.entries(now: now()); deliveryStates = await historyStore.deliveryStates(); offlineOrigins = await historyStore.offlineOrigins() }
         catch { message = "History is unavailable." }
     }
+    public func clearFocus(_ deviceID: String) { picker.clear(deviceID) }
     public func updateFocus(_ report: FocusReport) throws { try picker.update(report) }
     public func setTarget(_ selection: TargetSelection) {
         stop(); controls.setTarget(selection); picker.selection = selection
@@ -225,6 +226,8 @@ public struct ApprovalCard: Identifiable, Sendable {
                 } else { selected = try picker.resolve(devices: await registry.all()) }
                 guard epoch == token, !Task.isCancelled else { await pipeline.cancel(segmentID: segmentID); return }
                 destination = selected // Before source construction or first text.
+                stateDidChange?(false, selected.display_name)
+                await Task.yield() // Allow destination observers to present before capture starts.
                 var available = await engines()
                 guard epoch == token, !Task.isCancelled else { await pipeline.cancel(segmentID: segmentID); return }
                 let source = try await makeCapture()
@@ -419,6 +422,46 @@ public struct ApprovalCard: Identifiable, Sendable {
     public func dismiss(_ card: SuggestionCard) async {
         await suggestionEngine?.dismiss(cardID: card.id, now: Date(timeIntervalSince1970: Double(now()) / 1000))
         suggestions.removeAll { $0.id == card.id }
+    }
+    private var captureRequests: [UUID: Set<String>] = [:]
+    /// Only the authenticated connection calls this. Expiry is measured from
+    /// receipt on the phone's monotonic clock; peer wall clocks are irrelevant.
+    public func captureControl(_ request: CaptureControl, connectionID: UUID,
+        receivedAt: ContinuousClock.Instant = .now) async -> CaptureControlResult {
+        func result(_ outcome: CaptureControlResultOutcome) -> CaptureControlResult {
+            CaptureControlResult(account_id: accountID, request_id: request.request_id,
+                device_id: phoneID, capture_state: controls.capture, outcome: outcome)
+        }
+        guard request.account_id == accountID, request.target_device_id == phoneID,
+              (try? ProtocolCodec.encode(request)) != nil, controls.mode == .dictation else { return result(.unavailable) }
+        guard captureRequests[connectionID, default: []].count < 256, captureRequests.count < 5 else { return result(.unavailable) }
+        guard captureRequests[connectionID, default: []].insert(request.request_id).inserted else { return result(.cancelled) }
+        let deadline = receivedAt + .milliseconds(request.ttl_ms)
+        guard ContinuousClock.now < deadline else { return result(.expired) }
+        setCapture(request.capture_state)
+        let token = epoch
+        if request.capture_state != .continuous { return result(.applied) }
+        while ContinuousClock.now < deadline {
+            guard !Task.isCancelled, epoch == token else { return result(.cancelled) }
+            if isRecording { return result(.applied) }
+            if worker == nil { stop(); return result(.unavailable) }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        if epoch == token { stop() }
+        return result(.expired)
+    }
+    public func forgetCaptureConnection(_ id: UUID) { captureRequests.removeValue(forKey: id) }
+    public func dictationOutcome(_ outcome: DictationOutcome, from deviceID: String) async {
+        do { try await historyStore.dictationOutcome(outcome, from: deviceID, accountID: accountID); await refresh() }
+        catch { message = "Delivery outcome could not be saved. Check the computer before resending." }
+    }
+    public func reconcileDictation(on deviceID: String, query: (String) async throws -> DictationOutcome) async {
+        guard let entries = try? await historyStore.entries(now: now()) else { return }
+        let states = await historyStore.deliveryStates()
+        for entry in entries where entry.targetID == deviceID && states[entry.segmentID] == .unconfirmed {
+            do { await dictationOutcome(try await query(entry.segmentID), from: deviceID) }
+            catch { return } // Reconnection only queries; held text still requires a tap.
+        }
     }
     public func insertionStatus(_ status: TaskStatus, from deviceID: String) async {
         do { try await historyStore.insertionStatus(status, from: deviceID, accountID: accountID); await refresh() }
