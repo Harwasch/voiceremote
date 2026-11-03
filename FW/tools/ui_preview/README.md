@@ -46,7 +46,7 @@ Everything generated goes into ignored `FW/build-preview/`.
 
 `run.sh` first executes `ui_preview --check`: production touch sampling, immediate preview before release/debounce, preview rollback, direct capture
 selection, mode/target events, cancelled/recognised 3-second holds, haptics,
-pair accept/reject, both modal display guards, failed/successful flush barriers, deadline/late-draw rollback, modal cancellation
+pair accept/reject, both modal display guards, failed/successful flush barriers, 175 ms realistic draw / 450 ms completed draw despite wait expiry, modal cancellation
 during DMA, lock-free flushes with interleaved input sampling, partial redraws
 matching forced full redraws, destination-only flush bounds,
 error expiry and pulse invalidation bounds. A held PTT with streaming=0 never
@@ -55,7 +55,16 @@ stops it. Offline recording pulses with no link and retains its Bluetooth-off
 target after reconnect until local capture ends. Full/waiting remain visible
 in OFF; storage-state transitions equal forced full redraws. Failed touch reads
 preserve the previous state briefly; sustained faults cancel without accepting
-a control, and held recovery cannot retrigger it. All twelve baseline PNG SHA256
-hashes remain identical; five offline/storage fixtures extend the set to seventeen. Fixtures inject the producer bit; this is not a microphone measurement. Pure geometry/listening checks live in
+a control, and held recovery cannot retrigger it. All seventeen baseline PNGs remain byte-identical; cache-disabled output also
+matches each cached fixture. Hook debounce and its modal-visible mark run in a
+separate native executable. Fixtures inject the producer bit; this is not a microphone measurement. Pure geometry/listening checks live in
 [tests](../../tests/). These support [REQ-8]/[REQ-18]; physical scanout, frame rate,
 BLE/input latency, motor feel and panel colour remain **unverified**.
+
+`--timing` uses production `timing.c` aggregates with a native monotonic clock,
+`-O2`, and no panel delay. `run.sh` measures cache-enabled/disabled control and
+pulse workloads, then compares all PNG pairs. Synthetic ticks cannot measure
+physical touch/barrier latency. No-PSRAM fallback is selected by `VR_UI_NO_CACHE=1`.
+The long-name fixture now fits the protocol's 32-byte field (the prior 33-byte
+fixture overflow became visible at `-O2`); its rendered ellipsis is unchanged.
+See [evidence](../../../AI/FW/2026-11-02-hardware-fixes/README.md).

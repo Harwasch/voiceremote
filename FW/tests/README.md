@@ -22,6 +22,9 @@ flowchart LR
 | `test_offline_capture.c` | Fresh triggers, disconnect/reconnect, stored mode, OFF, owner/incompatibility/pause gates | ✅ Host tested |
 | `check_partitions.py` | Generated StopWatch/C6 tables against original NVS offset/size and flash bounds | ✅ Build outputs required |
 | `../tools/ble_client/test_offline.py` | Contract offline hex/fragments, resume/integrity, durable copy and clock behavior | ✅ Host tested |
+| `test_config.py` | Rejects hook for explicit release and GitHub/GitLab firmware-tag signals before IDF setup | ✅ Host tested |
+| `test_hook.c` | All serial commands, unknown input and held/released PTT decoder | ✅ Host tested |
+| `../tools/hil/test_run_offline.py` | Entire unattended procedure using fake serial/BLE, durable fetch interruption/resume, failure and PTY serial collector | ✅ Host tested |
 | `test_audio.c` | Production queue/framer with fake encoder: MTU 23/247, START/END/LAST, MTU changes, OFF discard, arm/hold gate, overflow and sequence/segment exhaustion; binary fixture mode | ✅ Host tested |
 | `test_audio_runtime.c` | Production audio lifecycle: codec generation survives BLE reconnect/reset during local recording; live reset invalidates generation; OFF immediately stops mic/suspends worker and discards in-flight encoder output | ✅ Host tested |
 | `test_offline_runtime.c`, `offline_stubs/` | Production writer and sync transport with synthetic NOR and bounded FIFO: queued/in-flight begin OFF, volatile discard, queue/flash full, write failure, clock/progress, contract result layouts, resume/deletion after reboot, enrollment guard, C6 capability stub and live preemption; asserts storage IO never holds the app mutex | ✅ Host tested |
@@ -60,3 +63,9 @@ The actual LVGL interaction/display-barrier and pulse-bound checks run with
 The store resume test counts fake-flash reads: fetching the final frame of a
 300-frame/two-sector record needs 96 reads, before and after remount, and never
 rereads the first sector. The 16 KiB index changes RAM only, not flash format.
+
+The root test command now also builds/runs the **real LVGL renderer** (managed
+LVGL must exist). It models 175 ms redraw and a 450 ms completion racing wait
+expiry; matching completed DMA succeeds. Missing/failed/modal draws fail.
+Hook and PSRAM-free variants run too. Audio regressions cover one completely
+unsent queued frame at OFF and C→Python clean END, retaining partial-frame loss.

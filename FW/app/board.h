@@ -27,3 +27,8 @@ esp_err_t board_mic_start(void);
 void board_mic_stop(void);
 esp_err_t board_mic_read(int16_t pcm[320]); /* ESP_ERR_NOT_FINISHED if incomplete */
 void *board_audio_alloc(size_t bytes);
+
+/* Optional immutable UI artwork cache. NULL selects the primitive fallback.
+ * Cached pixels need no DMA capability; the display strip always stays internal. */
+void *board_ui_alloc(size_t bytes);
+unsigned board_ui_strip_rows(void);

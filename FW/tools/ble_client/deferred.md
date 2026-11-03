@@ -80,3 +80,7 @@ and remote waiting/full state updated. Fail on any unverified deletion,
 transmission while OFF, missing retained prefix or repeated identity allocation.
 This is a hardware procedure, **not hardware evidence**. An unattended end-to-end
 run needs a physical-control fixture or an explicitly authorized test interface.
+
+The optional [USB-hook HIL runner](../hil/README.md) now supplies the local actions
+above without an actuator/person. Production BLE ownership rules are unchanged;
+only explicitly configured TEST BUILDs expose serial input.

@@ -3,6 +3,10 @@
  */
 #include "preview_runtime.h"
 #include "board.h"
+#include "timing.h"
+#ifdef REMOTE_TEST_HOOK
+#include "test_hook.h"
+#endif
 #include "lvgl.h"
 #include "src/libs/lodepng/lodepng.h"
 #include <assert.h>
@@ -17,7 +21,7 @@ static uint32_t now=450;
 static bool touched, fail_flush, fail_touch;
 static uint16_t touch_x,touch_y;
 static unsigned haptics,pairs,answers,revokes,events,flushes;
-static bool accepted, skip_render, interrupt_render, modal_during_render;
+static bool accepted, skip_render, interrupt_render, modal_during_render, wait_expired;
 static unsigned mutex_depth, input_during_render;
 static uint32_t flush_delay;
 static unsigned sent_pixels;
@@ -29,12 +33,14 @@ bool preview_render_wait(void)
 {
     assert(!mutex_depth);
     if(skip_render) return false;
-    ui_tick(); return true;
+    ui_tick(); return !wait_expired;
 }
 static bool phone(const vr_phone_t *p)
 {
     remote_lock(); bool ok=ui_phone(p); remote_unlock(); return ok;
 }
+void *board_ui_alloc(size_t bytes) { return getenv("VR_UI_NO_CACHE")?NULL:malloc(bytes); }
+unsigned board_ui_strip_rows(void) { return 32; }
 const board_info_t *board_info(void) { return &info; }
 esp_err_t board_init(void) { return ESP_OK; }
 bool board_button(unsigned button) { (void)button; return false; }
@@ -176,8 +182,9 @@ static void check(void)
     skip_render=true; assert(!phone(&remote_state.phone)); skip_render=false;
     ui_tick(); /* A timed-out request cannot acknowledge on a later frame. */
     before=target_hash();
-    flush_delay=50; assert(!phone(&remote_state.phone));
-    ui_tick(); assert(target_hash()==before); /* Failed request rolls back. */
+    flush_delay=175; assert(phone(&remote_state.phone)); /* Measured streaming redraw. */
+    wait_expired=true; flush_delay=450; assert(phone(&remote_state.phone)); wait_expired=false; /* Completed draw wins even after the wait budget. */
+    before=target_hash(); ui_tick(); assert(target_hash()==before); /* Successful slow draw stays applied. */
     touched=true; touch_x=233; touch_y=233;
     interrupt_render=true; assert(phone(&candidate));
     assert(input_during_render==1 && events==old_events); /* Input sampled mid-DMA. */
@@ -203,9 +210,10 @@ static void check(void)
     sent_pixels=0; advance(1000); assert(sent_pixels==0); /* Held, but producer stopped. */
     remote_state.input.streaming=1; ui_refresh(); advance(100);
     sent_pixels=0;min_x=min_y=466;max_x=max_y=0; advance(1000);
-    assert(sent_pixels>0 && sent_pixels<=6*268*268);
+    assert(sent_pixels>0 && sent_pixels<6*30000);
     assert(min_x>=99 && min_y>=99 && max_x<367 && max_y<367);
     printf("Pulse: %u pixels flushed in 1s, bounded to (%d,%d)-(%d,%d).\n",sent_pixels,min_x,min_y,max_x,max_y);
+    for(unsigned phase=0;phase<10;phase++) { now+=200; ui_tick(); partial_matches_full(); }
     remote_state.input.ptt=0; ui_refresh(); advance(100);
     sent_pixels=0; advance(1000); assert(sent_pixels>0); /* Producer is the sole source. */
     remote_state.input.streaming=0; ui_refresh(); advance(100);
@@ -258,10 +266,36 @@ static void check(void)
     remote_state.input.syncing=0; ui_refresh(); ui_tick(); assert(target_hash()!=sync_target);
     remote_state.input.waiting=0; ui_refresh(); ui_tick(); partial_matches_full();
     printf("Offline UI checks passed: disconnected/reconnected listening, full/waiting in OFF, syncing, partial redraws.\n");
+#ifdef REMOTE_TEST_HOOK
+    extern void ui_test_control(unsigned actions,uint8_t capture);
+    uint8_t mode=remote_state.input.mode;
+    ui_test_control(VR_TEST_SELECT|VR_TEST_MODE,VR_REC);
+    advance(20); assert(remote_state.input.capture==VR_OFF && remote_state.input.mode==mode);
+    advance(10); assert(remote_state.input.capture==VR_REC && remote_state.input.mode!=mode);
+    assert(!remote_state.armed); /* hook cannot set phone authority */
+    ui_test_control(VR_TEST_SELECT,VR_PTT); advance(30);
+    assert(remote_state.input.capture==VR_PTT && remote_state.input.mode!=mode);
+    ui_test_control(VR_TEST_MODE,VR_OFF); advance(30);
+    assert(remote_state.input.capture==VR_PTT && remote_state.input.mode==mode);
+    unsigned mark=(455*466+233)*4;
+    assert(pixels[mark]>200 && pixels[mark+1]<50 && pixels[mark+2]>200);
+    ui_pair_number(123456); ui_tick();
+    assert(pixels[mark]>200 && pixels[mark+1]<50 && pixels[mark+2]>200);
+#endif
+    timing_report();
     printf("Preview interaction checks passed: touch, direct selection, modals, haptics, render/flush barrier.\n");
 }
 int main(int argc,char **argv)
 {
+    if(argc==2 && !strcmp(argv[1],"--timing")) {
+        fixture(); ui_init(); timing_report();
+        for(unsigned i=0;i<100;i++) { tap(42,210); tap(233,40); tap(424,210); tap(233,233); }
+        puts("Control redraw aggregates (native host, no DMA latency):"); timing_report();
+        remote_state.input.streaming=1; ui_refresh(); advance(100);
+        timing_report();
+        advance(20000); puts("Pulse redraw aggregates (native host):"); timing_report();
+        return 0;
+    }
     if(argc==2 && !strcmp(argv[1],"--check")) { check(); return 0; }
     if(argc!=3) { fprintf(stderr,"Usage: %s STATE OUTPUT.png | --check\n",argv[0]); return 2; }
     fixture(); const char *state=argv[1];
@@ -271,7 +305,7 @@ int main(int argc,char **argv)
     else if(!strcmp(state,"rec-listening-ai")) { remote_state.input.capture=VR_REC;remote_state.input.mode=1;remote_state.input.streaming=1; }
     else if(!strcmp(state,"auto-target")) remote_state.phone.active=0;
     else if(!strcmp(state,"named-target")) { remote_state.phone.active=2;strcpy(remote_state.phone.resolved,"Laptop"); }
-    else if(!strcmp(state,"long-name")) strcpy(remote_state.phone.resolved,"A very long destination name 1234");
+    else if(!strcmp(state,"long-name")) strcpy(remote_state.phone.resolved,"A very long destination name 123");
     else if(!strcmp(state,"error-text")) strcpy(remote_state.phone.error,"Destination unavailable");
     else if(!strcmp(state,"no-link")) { remote_state.secure=false;remote_state.has_phone=false; }
     else if(!strcmp(state,"offline-recording")) { remote_state.secure=false;remote_state.has_phone=false;remote_state.input.offline=1;remote_state.input.ptt=1; }

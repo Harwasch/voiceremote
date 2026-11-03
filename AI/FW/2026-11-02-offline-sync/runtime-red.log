@@ -1,0 +1,12 @@
+[ 16%] Building C object CMakeFiles/offline_runtime_tests.dir/test_offline_runtime.c.o
+[ 33%] Building C object CMakeFiles/offline_runtime_tests.dir/home/harrison/Documents/Projects/voiceremote/.claude/worktrees/codex-feat-fw-stopwatch/FW/app/offline_store.c.o
+[ 50%] Building C object CMakeFiles/offline_runtime_tests.dir/home/harrison/Documents/Projects/voiceremote/.claude/worktrees/codex-feat-fw-stopwatch/FW/app/offline_capture.c.o
+[ 66%] Building C object CMakeFiles/offline_runtime_tests.dir/home/harrison/Documents/Projects/voiceremote/.claude/worktrees/codex-feat-fw-stopwatch/FW/app/protocol.c.o
+[ 83%] Building C object CMakeFiles/offline_runtime_tests.dir/home/harrison/Documents/Projects/voiceremote/.claude/worktrees/codex-feat-fw-stopwatch/FW/app/state.c.o
+[100%] Linking C executable offline_runtime_tests
+[100%] Built target offline_runtime_tests
+[ 33%] Building C object CMakeFiles/offline_store_tests.dir/test_offline_store.c.o
+[ 66%] Building C object CMakeFiles/offline_store_tests.dir/home/harrison/Documents/Projects/voiceremote/.claude/worktrees/codex-feat-fw-stopwatch/FW/app/offline_store.c.o
+[100%] Linking C executable offline_store_tests
+[100%] Built target offline_store_tests
+offline_runtime_tests: /home/harrison/Documents/Projects/voiceremote/.claude/worktrees/codex-feat-fw-stopwatch/FW/tests/test_offline_runtime.c:119: pending_begin_off: Assertion `!opening && !writing && !finishing && !remote_state.input.full && offline_live_allowed()' failed.

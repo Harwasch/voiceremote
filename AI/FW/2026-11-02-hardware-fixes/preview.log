@@ -1,0 +1,110 @@
+# Purpose: final preview verification. Inputs: working firmware + pinned offline toolchain.
+# Verification: command status checked by reproduce.sh; hardware unverified.
+-- /home/harrison/Documents/Projects/voiceremote/.claude/worktrees/codex-feat-fw-stopwatch/FW/tools/ui_preview/lv_conf.h
+-- Using configuration: /home/harrison/Documents/Projects/voiceremote/.claude/worktrees/codex-feat-fw-stopwatch/FW/tools/ui_preview/lv_conf.h
+-- Configuring done (0.0s)
+-- Generating done (0.0s)
+-- Build files have been written to: /home/harrison/Documents/Projects/voiceremote/.claude/worktrees/codex-feat-fw-stopwatch/FW/build-preview/native
+[ 96%] Built target lvgl
+[100%] Built target ui_preview_hook
+[100%] Built target ui_preview
+ui host: artwork_cache_bytes=1109850 dma_strip_bytes=29824
+Destination update: 44270 pixels, y=356..450.
+Pulse: 144690 pixels flushed in 1s, bounded to (99,99)-(366,366).
+Offline UI checks passed: disconnected/reconnected listening, full/waiting in OFF, syncing, partial redraws.
+timing host: us mean/max redraw=455/2423 n=104 touch_to_dma_est=0/0 n=0 loop=0/0 period=0/0 touch_poll=0/1 dma_strip=25/222 n=1319 queue_high=0/4 flush_errors=1 barrier=0/0 rejects=3
+Preview interaction checks passed: touch, direct selection, modals, haptics, render/flush barrier.
+ui host: artwork_cache_bytes=0 dma_strip_bytes=29824
+Destination update: 44270 pixels, y=356..450.
+Pulse: 144690 pixels flushed in 1s, bounded to (99,99)-(366,366).
+Offline UI checks passed: disconnected/reconnected listening, full/waiting in OFF, syncing, partial redraws.
+timing host: us mean/max redraw=502/1147 n=104 touch_to_dma_est=0/0 n=0 loop=0/0 period=0/0 touch_poll=0/1 dma_strip=18/53 n=1319 queue_high=0/4 flush_errors=1 barrier=0/0 rejects=3
+Preview interaction checks passed: touch, direct selection, modals, haptics, render/flush barrier.
+ui host: artwork_cache_bytes=1109850 dma_strip_bytes=29824
+Destination update: 44270 pixels, y=356..450.
+Pulse: 144690 pixels flushed in 1s, bounded to (99,99)-(366,366).
+Offline UI checks passed: disconnected/reconnected listening, full/waiting in OFF, syncing, partial redraws.
+timing host: us mean/max redraw=347/851 n=108 touch_to_dma_est=0/0 n=0 loop=0/0 period=0/0 touch_poll=0/1 dma_strip=19/59 n=1355 queue_high=0/4 flush_errors=1 barrier=0/0 rejects=3
+Preview interaction checks passed: touch, direct selection, modals, haptics, render/flush barrier.
+ui host: artwork_cache_bytes=1109850 dma_strip_bytes=29824
+timing host: us mean/max redraw=824/824 n=1 touch_to_dma_est=0/0 n=0 loop=0/0 period=0/0 touch_poll=0/0 dma_strip=47/54 n=15 queue_high=0/4 flush_errors=0 barrier=0/0 rejects=0
+Control redraw aggregates (native host, no DMA latency):
+timing host: us mean/max redraw=272/833 n=400 touch_to_dma_est=0/0 n=0 loop=0/0 period=0/0 touch_poll=0/1 dma_strip=29/76 n=3099 queue_high=0/4 flush_errors=0 barrier=0/0 rejects=0
+timing host: us mean/max redraw=235/235 n=1 touch_to_dma_est=0/0 n=0 loop=0/0 period=0/0 touch_poll=0/1 dma_strip=26/28 n=5 queue_high=0/4 flush_errors=0 barrier=0/0 rejects=0
+Pulse redraw aggregates (native host):
+timing host: us mean/max redraw=242/257 n=100 touch_to_dma_est=0/0 n=0 loop=0/0 period=0/0 touch_poll=0/1 dma_strip=2/8 n=2400 queue_high=0/4 flush_errors=0 barrier=0/0 rejects=0
+ui host: artwork_cache_bytes=0 dma_strip_bytes=29824
+timing host: us mean/max redraw=1315/1315 n=1 touch_to_dma_est=0/0 n=0 loop=0/0 period=0/0 touch_poll=0/0 dma_strip=52/60 n=15 queue_high=0/4 flush_errors=0 barrier=0/0 rejects=0
+Control redraw aggregates (native host, no DMA latency):
+timing host: us mean/max redraw=435/789 n=400 touch_to_dma_est=0/0 n=0 loop=0/0 period=0/0 touch_poll=0/4 dma_strip=27/73 n=3099 queue_high=0/4 flush_errors=0 barrier=0/0 rejects=0
+timing host: us mean/max redraw=377/377 n=1 touch_to_dma_est=0/0 n=0 loop=0/0 period=0/0 touch_poll=0/1 dma_strip=30/32 n=5 queue_high=0/4 flush_errors=0 barrier=0/0 rejects=0
+Pulse redraw aggregates (native host):
+timing host: us mean/max redraw=461/512 n=100 touch_to_dma_est=0/0 n=0 loop=0/0 period=0/0 touch_poll=0/1 dma_strip=2/14 n=2400 queue_high=0/4 flush_errors=0 barrier=0/0 rejects=0
+ui host: artwork_cache_bytes=1109850 dma_strip_bytes=29824
+FW/build-preview/off.png (466x466)
+ui host: artwork_cache_bytes=0 dma_strip_bytes=29824
+FW/build-preview/no-cache/off.png (466x466)
+ui host: artwork_cache_bytes=1109850 dma_strip_bytes=29824
+FW/build-preview/ptt-armed.png (466x466)
+ui host: artwork_cache_bytes=0 dma_strip_bytes=29824
+FW/build-preview/no-cache/ptt-armed.png (466x466)
+ui host: artwork_cache_bytes=1109850 dma_strip_bytes=29824
+FW/build-preview/ptt-listening-transcribe.png (466x466)
+ui host: artwork_cache_bytes=0 dma_strip_bytes=29824
+FW/build-preview/no-cache/ptt-listening-transcribe.png (466x466)
+ui host: artwork_cache_bytes=1109850 dma_strip_bytes=29824
+FW/build-preview/rec-listening-ai.png (466x466)
+ui host: artwork_cache_bytes=0 dma_strip_bytes=29824
+FW/build-preview/no-cache/rec-listening-ai.png (466x466)
+ui host: artwork_cache_bytes=1109850 dma_strip_bytes=29824
+FW/build-preview/auto-target.png (466x466)
+ui host: artwork_cache_bytes=0 dma_strip_bytes=29824
+FW/build-preview/no-cache/auto-target.png (466x466)
+ui host: artwork_cache_bytes=1109850 dma_strip_bytes=29824
+FW/build-preview/named-target.png (466x466)
+ui host: artwork_cache_bytes=0 dma_strip_bytes=29824
+FW/build-preview/no-cache/named-target.png (466x466)
+ui host: artwork_cache_bytes=1109850 dma_strip_bytes=29824
+FW/build-preview/long-name.png (466x466)
+ui host: artwork_cache_bytes=0 dma_strip_bytes=29824
+FW/build-preview/no-cache/long-name.png (466x466)
+ui host: artwork_cache_bytes=1109850 dma_strip_bytes=29824
+FW/build-preview/error-text.png (466x466)
+ui host: artwork_cache_bytes=0 dma_strip_bytes=29824
+FW/build-preview/no-cache/error-text.png (466x466)
+ui host: artwork_cache_bytes=1109850 dma_strip_bytes=29824
+FW/build-preview/no-link.png (466x466)
+ui host: artwork_cache_bytes=0 dma_strip_bytes=29824
+FW/build-preview/no-cache/no-link.png (466x466)
+ui host: artwork_cache_bytes=1109850 dma_strip_bytes=29824
+FW/build-preview/pairing-number.png (466x466)
+ui host: artwork_cache_bytes=0 dma_strip_bytes=29824
+FW/build-preview/no-cache/pairing-number.png (466x466)
+ui host: artwork_cache_bytes=1109850 dma_strip_bytes=29824
+FW/build-preview/forget-confirm.png (466x466)
+ui host: artwork_cache_bytes=0 dma_strip_bytes=29824
+FW/build-preview/no-cache/forget-confirm.png (466x466)
+ui host: artwork_cache_bytes=338688 dma_strip_bytes=15360
+FW/build-preview/rectangular.png (240x280)
+ui host: artwork_cache_bytes=0 dma_strip_bytes=15360
+FW/build-preview/no-cache/rectangular.png (240x280)
+ui host: artwork_cache_bytes=1109850 dma_strip_bytes=29824
+FW/build-preview/offline-recording.png (466x466)
+ui host: artwork_cache_bytes=0 dma_strip_bytes=29824
+FW/build-preview/no-cache/offline-recording.png (466x466)
+ui host: artwork_cache_bytes=1109850 dma_strip_bytes=29824
+FW/build-preview/offline-waiting.png (466x466)
+ui host: artwork_cache_bytes=0 dma_strip_bytes=29824
+FW/build-preview/no-cache/offline-waiting.png (466x466)
+ui host: artwork_cache_bytes=1109850 dma_strip_bytes=29824
+FW/build-preview/storage-full.png (466x466)
+ui host: artwork_cache_bytes=0 dma_strip_bytes=29824
+FW/build-preview/no-cache/storage-full.png (466x466)
+ui host: artwork_cache_bytes=1109850 dma_strip_bytes=29824
+FW/build-preview/recordings-waiting.png (466x466)
+ui host: artwork_cache_bytes=0 dma_strip_bytes=29824
+FW/build-preview/no-cache/recordings-waiting.png (466x466)
+ui host: artwork_cache_bytes=1109850 dma_strip_bytes=29824
+FW/build-preview/syncing.png (466x466)
+ui host: artwork_cache_bytes=0 dma_strip_bytes=29824
+FW/build-preview/no-cache/syncing.png (466x466)

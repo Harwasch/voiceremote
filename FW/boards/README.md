@@ -20,9 +20,12 @@ PSRAM. Both keep the Opus task stack internal. No codec pins leak into shared co
 
 Panel SPI/DMA belongs to the lower-priority renderer, outside the app mutex.
 Touch/IOE/codec I2C remains serialized by the input/audio path. StopWatch QSPI now
-matches the vendor’s 80 MHz; CPU/I2C clocks and the C6 stub are unchanged.
+matches the vendor’s 80 MHz; StopWatch CPU is 240 MHz, I2C stays 100 kHz and C6 stays 160 MHz.
 
 Offline recording is StopWatch-only (bit 7); the C6 retains its 4 MiB table and
 no offline allocation. StopWatch defaults keep existing NVS/PHY/app offsets,
 select the remaining-flash data partition and enable an IRAM-safe I2S ISR.
 Generated tables are checked by `FW/tests/check_partitions.py`.
+
+Optional artwork allocation also belongs to the board: StopWatch uses PSRAM
+without internal fallback, C6 returns NULL. DMA strips are 32/16 rows respectively.

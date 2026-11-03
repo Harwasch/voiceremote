@@ -1,5 +1,14 @@
 cmake_minimum_required(VERSION 3.16)
 option(REMOTE_TIMING "Log UI/input/audio scheduling aggregates every five seconds" ON)
+option(REMOTE_TEST_HOOK "Enable conspicuous USB serial local-input test hook" OFF)
+option(REMOTE_RELEASE "Build distributable firmware (forbids test hook)" OFF)
+set(remote_release_signal "${REMOTE_RELEASE}")
+if("$ENV{CI_COMMIT_TAG}" MATCHES "^fw-v" OR "$ENV{GITHUB_REF}" MATCHES "^refs/tags/fw-v")
+    set(remote_release_signal ON)
+endif()
+if(REMOTE_TEST_HOOK AND remote_release_signal)
+    message(FATAL_ERROR "REMOTE_TEST_HOOK is forbidden in release builds")
+endif()
 set(REMOTE_BOARD m5stopwatch CACHE STRING "m5stopwatch or waveshare_c6_169")
 if(NOT REMOTE_BOARD MATCHES "^(m5stopwatch|waveshare_c6_169)$")
     message(FATAL_ERROR "Unknown REMOTE_BOARD")
@@ -9,4 +18,11 @@ set(SDKCONFIG_DEFAULTS "${CMAKE_CURRENT_LIST_DIR}/sdkconfig.defaults;${CMAKE_CUR
 set(EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/app;${CMAKE_CURRENT_LIST_DIR}/boards/${REMOTE_BOARD}")
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 idf_build_set_property(DEPENDENCIES_LOCK "dependencies.lock.${REMOTE_BOARD}")
+# Carry options into IDF's isolated early dependency-discovery pass.
+idf_build_set_property(REMOTE_TEST_HOOK "${REMOTE_TEST_HOOK}")
+idf_build_set_property(REMOTE_BOARD "${REMOTE_BOARD}")
 project(voice_remote VERSION 0.3.0)
+
+# GCC 14 reports bounds warnings in ESP-IDF NimBLE store at -O2.
+idf_component_get_property(bt_lib bt COMPONENT_LIB)
+target_compile_options(${bt_lib} PRIVATE -Wno-error=array-bounds)

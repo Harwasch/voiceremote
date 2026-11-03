@@ -12,6 +12,7 @@ flowchart LR
 
 | Folder | Purpose | Status |
 |---|---|---|
+| [hil/](hil/) | Unattended USB-hook + BLE offline/live regression, existing bond | 🟡 Fake-tested; hardware pending |
 | [ui_preview/](ui_preview/) | Real firmware Orb UI, synthetic pointer/barrier tests, PNG output | ✅ Native verified |
 | [ble_client/](ble_client/) | uv/Bleak scanner, explicit Numeric Comparison, Input acknowledgements, fragmented Phone state writer, Opus reassembly/WAV recorder and deferred sync simulator | 🟡 Hardware unverified |
 

@@ -29,3 +29,6 @@ characteristics are omitted and no flash store/queue/task is allocated. Its 4 Mi
 build retains the original single-app-large partition table, checked against the
 16 MiB-only StopWatch table by `tests/check_partitions.py`. No PSRAM assumption
 enters the shared storage/policy code.
+
+The shared UI cache policy returns NULL on C6; its strip policy stays 16 rows.
+`-O2` does not add a PSRAM requirement; the CPU default remains 160 MHz.

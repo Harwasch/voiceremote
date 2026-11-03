@@ -27,6 +27,7 @@ flowchart LR
 | `layout.h` | Scaled Orb geometry, hit tests, live/offline producer-bit listening, ASCII fallback | ✅ Host tested |
 | `audio.[ch]` | Bounded packet queue, segment/frame IDs, MTU fragmentation, START/END/LAST | ✅ Host tested |
 | `audio_runtime.c` | Dedicated encoder task, generation cancellation, gating, stop/backpressure and serial metrics | 🟡 Built; hardware unverified |
+| `test_hook.h` | Optional serial decoder; ordinary slider/button sampling, no authority override | ✅ Host decoder + UI debounce tests |
 | `board.h` | Synchronous board interface and virtual/physical slider layout flag | 🟡 Hardware unverified |
 | `main.c`, `runtime.h` | Priority 5 input/transport, priority 4 encoder, priority 1 renderer; short mailbox lock | 🟡 Hardware unverified |
 | `ble.c` | Secure Connections, explicit Numeric Comparison, bonding/revoke | 🟡 Hardware unverified |
@@ -70,7 +71,7 @@ toggle the producer bit; runtime/UI timing still needs hardware verification.
 | Memory | Board allocates encoder state; 48 KiB internal task stack for alloca scratch; four encoded packets, each bounded to 512 bytes; board DMA also bounded |
 | Gate | Fresh authenticated session + subscriptions/info/snapshot + complete current-ack arm; local OFF always wins; local or phone hold requires PTT; tap-lock disabled |
 | OFF | Disable RX DMA, suspend in-flight computation, invalidate its generation, discard queues; only END then stopped Input; no data flush |
-| Stop/loss | END sequence accounts for every encoded packet, including discarded queued tail. A lost tail is reported as interrupted by the client. Overflow/notify failure latches stop until snapshot resync and release/repress PTT or fresh REC selection |
+| Stop/loss | END follows the last notification sent; entirely unsent queued tail consumes no wire sequence. A partially sent packet still reports interruption. Overflow/notify failure latches stop until snapshot resync and release/repress PTT or fresh REC selection |
 | Transport | One pending data notification; reserve one extra pending slot for END. Actual ATT MTU per frame; 15–30 ms interval / zero latency / 4 s timeout requested, OS decides |
 | Recovery | END retries at most 1 s, then disconnect; pending data timeout 200 ms; reconnect resets IDs and state; wrap closes segment / disconnects before segment reuse |
 | Metrics | Once per segment: encoder mean/max µs, queue high-water, known discarded frames, notify failures, free internal/PSRAM + segment deltas, CPU Hz, stack watermark; boot allocation deltas separately |
@@ -78,9 +79,13 @@ toggle the producer bit; runtime/UI timing still needs hardware verification.
 Live audio uses transient RAM. Offline Opus frames persist unencrypted until phone confirmation; firmware never logs audio contents. See [storage format and capacity](offline-storage.md).
 Audio timing, runtime memory sufficiency, gain and quality are **TBC** on device.
 
-The pulse runs at 5 Hz inside the orb bounds, using the existing 16-row internal
-DMA strip. No shared PSRAM dependency. [Handoff](../handoff.md) records measured
-native flush bounds, static sizes, timing choices and hardware-only checks.
+The pulse runs at 5 Hz in conservative horizontal bands outside the filled disc.
+Sector arcs/icons and six static Orb styles rasterize once into optional board-
+allocated opaque RGB565 tiles. StopWatch permits PSRAM cache allocation and a
+32-row internal DMA strip; allocation failure uses the identical primitives.
+C6 requires no PSRAM and keeps 16 rows. All 17 PNGs match the original pixels;
+[hardware-fix evidence](../../AI/FW/2026-11-02-hardware-fixes/README.md) records
+native timing and RAM. Sub-50 ms control latency remains **hardware-unverified**.
 
 REQ-18 waits for actual rendering and synchronous DMA before acknowledging a
 phone update; either modal blocks it. Scanout visibility remains **unverified**.
@@ -99,11 +104,12 @@ destination/error/pips invalidate the target strip. Overlay transitions and
 recovery after a failed flush redraw the whole screen.
 
 `ui_phone` is called with the app mutex at depth one and releases it for a
-maximum 40 ms semaphore wait. Success requires matching completed DMA, no modal,
-and completion observed before the deadline; failure restores the authoritative mailbox
-asynchronously. BLE rechecks security, then applies the existing ack/control-epoch
+maximum 400 ms semaphore wait (`PHONE_RENDER_WAIT_MS`). Success checks matching
+completed DMA and no modal once, after reacquiring the mutex; elapsed wall time
+or a timeout racing completed rendering cannot reject an already drawn update.
+Failure restores the authoritative mailbox asynchronously. BLE rechecks security, then applies the existing ack/control-epoch
 arm checks. Notifications still run once per main-loop pass; see
-[handoff](../handoff.md) for NimBLE callback source evidence and hardware limits.
+[handoff](../../AI/FW/2026-11-02-offline-handoff.md) for NimBLE callback source evidence and hardware limits.
 
 `REMOTE_TIMING=ON` logs mean/max microseconds for redraws, sampled touch→DMA
 estimate, loop work/period, I2C touch polling, DMA strips and phone barriers, plus
@@ -125,3 +131,7 @@ preserve the verified prefix. Sync pauses before live capture, never uses Audio,
 and keeps IDs/boot/capture-time snapshots across reconnect/reflash. Read
 [offline-storage.md](offline-storage.md) before changing persistence; it records
 flash-cache stalls and unmeasured timing/wear assumptions.
+
+`REMOTE_TEST_HOOK=ON` adds USB input to the same slider mailbox/button debounce.
+It logs TEST BUILD and adds a top-layer magenta mark; release signals reject it.
+See [HIL](../tools/hil/README.md).

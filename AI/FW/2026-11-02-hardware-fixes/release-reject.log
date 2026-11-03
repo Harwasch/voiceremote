@@ -1,0 +1,7 @@
+# Purpose: final release-reject verification. Inputs: working firmware + pinned offline toolchain.
+# Verification: command status checked by reproduce.sh; hardware unverified.
+CMake Error at CMakeLists.txt:10 (message):
+  REMOTE_TEST_HOOK is forbidden in release builds
+
+
+-- Configuring incomplete, errors occurred!

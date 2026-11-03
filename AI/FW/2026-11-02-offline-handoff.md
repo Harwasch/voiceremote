@@ -1,5 +1,12 @@
 # Offline recording handoff — 2026-11-02
 
+Purpose: preserved pre-hardware handoff. Inputs: stage-2 firmware at b0daefb.
+Verification: historical host/build evidence below; hardware conclusions superseded
+by [hardware fixes](2026-11-02-hardware-fixes/README.md).
+
+The USB test hook now provides local input; the historical fixture limitation below
+applies to ordinary firmware only. See [unattended runner](../../FW/tools/hil/README.md).
+
 ```mermaid
 flowchart LR
     Trigger[Owner bond + deliberate local trigger / live link loss] --> Opus[20 ms Opus]
@@ -23,13 +30,13 @@ of measured hardware compliance. Owner's `hw_mic_cut=0` prototype exception rema
 
 | Entry point | Result |
 |---|---|
-| [Storage design](app/offline-storage.md) | Raw sector journal: independently CRC/commit-protected frames, verified-prefix recovery, immutable finalized export, persistent ID/boot and durable deletion intent |
-| `app/offline_capture.c`, `offline_runtime.c` | Fresh owner-trigger policy, live-loss boundary, locally owned reconnect, stored mode/clock, full/failure stop, OFF volatile-tail discard, bounded writer queue and separate sync |
-| `app/audio_runtime.c` | One encoder history across offline reconnect; generation cancellation prevents stale PCM/Opus output after OFF |
-| `app/ble.c`, `protocol.c` | Contract 1.1, firmware 0.3.0; StopWatch caps `0xbf`, C6 `0x00`; authenticated sync characteristics omitted on C6 |
-| `app/ui_input.h`, board touch API | A failed I2C read holds prior state for <100 ms; timeout cancels and requires a real up. Failed-first regression observed before fix |
-| `app/ui.c`, [preview](tools/ui_preview/README.md) | Truthful offline listening + Bluetooth-off target; small full/waiting/sync icons; 17 states, original 12 PNGs unchanged |
-| [Client procedure](tools/ble_client/deferred.md) | `--sync DIR --remote-id ID`, resumable fsynced copies, structure/count/CRC, WAV/time/mode, short disposition, idempotent confirm, `--set-clock`, timed disconnect |
+| [Storage design](../../FW/app/offline-storage.md) | Raw sector journal: independently CRC/commit-protected frames, verified-prefix recovery, immutable finalized export, persistent ID/boot and durable deletion intent |
+| `FW/app/offline_capture.c`, `offline_runtime.c` | Fresh owner-trigger policy, live-loss boundary, locally owned reconnect, stored mode/clock, full/failure stop, OFF volatile-tail discard, bounded writer queue and separate sync |
+| `FW/app/audio_runtime.c` | One encoder history across offline reconnect; generation cancellation prevents stale PCM/Opus output after OFF |
+| `FW/app/ble.c`, `protocol.c` | Contract 1.1, firmware 0.3.0; StopWatch caps `0xbf`, C6 `0x00`; authenticated sync characteristics omitted on C6 |
+| `FW/app/ui_input.h`, board touch API | A failed I2C read holds prior state for <100 ms; timeout cancels and requires a real up. Failed-first regression observed before fix |
+| `FW/app/ui.c`, [preview](../../FW/tools/ui_preview/README.md) | Truthful offline listening + Bluetooth-off target; small full/waiting/sync icons; 17 states, original 12 PNGs unchanged |
+| [Client procedure](../../FW/tools/ble_client/deferred.md) | `--sync DIR --remote-id ID`, resumable fsynced copies, structure/count/CRC, WAV/time/mode, short disposition, idempotent confirm, `--set-clock`, timed disconnect |
 
 The raw journal avoids filesystem dependency and exposes every write boundary to
 fake flash. Frame body/commit are separate writes; two journal sectors protect
@@ -147,7 +154,7 @@ heavy idf.py -C FW -B FW/build-c6 -DREMOTE_BOARD=waveshare_c6_169 build
 heavy idf.py -C FW -B FW/build-c6 size
 ```
 
-[Reproduction script and evidence](../AI/FW/2026-11-02-offline-sync/README.md)
+[Reproduction script and evidence](2026-11-02-offline-sync/README.md)
 include final host/preview/build/size/table logs and the failed-touch observation.
 All **10 host suites** pass, including 26 Python cases, production runtime/audio
 harnesses, contract hex round trips, 15 capture mutation boundaries and 10 deletion

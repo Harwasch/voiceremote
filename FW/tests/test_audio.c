@@ -69,12 +69,13 @@ static void gating_and_overflow(void)
     CHECK(!produce(&state,&s)); CHECK(!s.running && !s.count && s.ending);
     CHECK(s.dropped==VR_AUDIO_QUEUE+1);
     vr_audio_t end; CHECK(vr_stream_peek(&s,23,bytes,sizeof bytes)==12);
-    CHECK(vr_audio_decode(bytes,12,512,&end) && end.flags==6 && end.frame==5);
+    CHECK(vr_audio_decode(bytes,12,512,&end) && end.flags==6 && end.frame==1);
     CHECK(!vr_stream_begin(&s)); vr_stream_sent(&s); CHECK(vr_stream_begin(&s));
     CHECK(produce(&state,&s)); CHECK(vr_stream_peek(&s,247,bytes,sizeof bytes)==72); vr_stream_sent(&s);
     CHECK(produce(&state,&s));
     vr_control(&state,VR_CAPTURE,VR_OFF,10); vr_stream_stop(&s);
     CHECK(!produce(&state,&s)); CHECK(vr_stream_peek(&s,247,bytes,sizeof bytes)==12);
+    CHECK(vr_audio_decode(bytes,12,512,&end) && end.frame==1); /* Dropped queued tail consumes no wire sequence. */
     vr_stream_sent(&s); CHECK(!vr_stream_peek(&s,247,bytes,sizeof bytes)); /* OFF: no flush */
     state=ready(); state.audio_fault=true; state.recovery_release=false;
     CHECK(!vr_capture_gate(&state)); vr_control(&state,VR_DOWN,1,11); CHECK(state.audio_fault);
@@ -92,7 +93,7 @@ static void gating_and_overflow(void)
     CHECK(vr_audio_decode(bytes,12,512,&end) && end.frame==65535); vr_stream_sent(&s);
     s.segment=UINT32_MAX; CHECK(!vr_stream_begin(&s) && s.exhausted);
 }
-static void fixture(unsigned mtu,const char *hex)
+static void fixture(unsigned mtu,const char *hex,bool drop)
 {
     uint8_t packet[512],bytes[524]; size_t n=0;
     if(hex) {
@@ -106,12 +107,14 @@ static void fixture(unsigned mtu,const char *hex)
             putchar(len&255); putchar(len>>8); assert(fwrite(bytes,1,len,stdout)==len); vr_stream_sent(&s);
         }
     }
+    if(drop) assert(vr_stream_push(&s,packet,n)); /* Encoded but never sent. */
     vr_stream_stop(&s); size_t len=vr_stream_peek(&s,mtu,bytes,sizeof bytes); assert(len==12);
     putchar(len); putchar(0); assert(fwrite(bytes,1,len,stdout)==len);
 }
 int main(int argc,char **argv)
 {
-    if(argc>=3 && !strcmp(argv[1],"--fixture")) { fixture(atoi(argv[2]),argc>3?argv[3]:NULL); return 0; }
+    if(argc>=3 && !strcmp(argv[1],"--fixture")) { fixture(atoi(argv[2]),argc>3?argv[3]:NULL,false); return 0; }
+    if(argc>=3 && !strcmp(argv[1],"--fixture-drop")) { fixture(atoi(argv[2]),NULL,true); return 0; }
     framing(23); framing(247); gating_and_overflow();
     printf("Audio: %u checks passed (fake encoder, MTU23/247, flags, gates, OFF, overflow, wrap).\n",checks);
 }

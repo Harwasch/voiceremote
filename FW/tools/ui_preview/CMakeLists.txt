@@ -12,11 +12,17 @@ set(CONFIG_LV_BUILD_DEMOS OFF CACHE BOOL "" FORCE)
 set(CONFIG_LV_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(CONFIG_LV_USE_THORVG_INTERNAL OFF CACHE BOOL "" FORCE)
 add_subdirectory("${LVGL_DIR}" "lvgl")
-add_executable(ui_preview main.c "${FW_ROOT}/app/ui.c" "${FW_ROOT}/app/state.c"
+target_compile_options(lvgl PRIVATE -O2)
+set(PREVIEW_SOURCES main.c "${FW_ROOT}/app/timing.c" "${FW_ROOT}/app/ui.c" "${FW_ROOT}/app/state.c"
     "${FW_ROOT}/app/protocol.c" "${FW_ROOT}/app/icons/sparkle.c" "${FW_ROOT}/app/fonts/lexend_24.c"
     "${FW_ROOT}/app/fonts/lexend_30.c" "${FW_ROOT}/app/fonts/lexend_42.c"
     "${FW_ROOT}/app/fonts/lexend_84.c")
-target_include_directories(ui_preview PRIVATE . stubs "${FW_ROOT}/app")
-target_compile_definitions(ui_preview PRIVATE UI_PREVIEW=1)
-target_compile_options(ui_preview PRIVATE -Wall -Wextra -Werror -UNDEBUG)
-target_link_libraries(ui_preview PRIVATE lvgl::lvgl m)
+foreach(preview ui_preview ui_preview_hook)
+add_executable(${preview} ${PREVIEW_SOURCES})
+target_include_directories(${preview} PRIVATE . stubs "${FW_ROOT}/app")
+target_compile_definitions(${preview} PRIVATE UI_PREVIEW=1 VR_TIMING=1)
+target_compile_options(${preview} PRIVATE -O2 -Wall -Wextra -Werror -UNDEBUG)
+target_link_libraries(${preview} PRIVATE lvgl::lvgl m)
+
+endforeach()
+target_compile_definitions(ui_preview_hook PRIVATE REMOTE_TEST_HOOK=1)

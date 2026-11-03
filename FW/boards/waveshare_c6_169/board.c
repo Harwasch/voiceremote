@@ -15,3 +15,6 @@ esp_err_t board_mic_start(void) { return ESP_ERR_NOT_SUPPORTED; }
 void board_mic_stop(void) {}
 esp_err_t board_mic_read(int16_t pcm[320]) { (void)pcm; return ESP_ERR_NOT_SUPPORTED; }
 void *board_audio_alloc(size_t bytes) { return heap_caps_malloc(bytes,MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT); }
+
+void *board_ui_alloc(size_t bytes) { (void)bytes; return NULL; }
+unsigned board_ui_strip_rows(void) { return 16; }

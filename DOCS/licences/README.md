@@ -12,24 +12,23 @@ flowchart LR
 
 | Notice | Applies to | Status |
 |---|---|---|
-| `M5Stack-MIT.txt` | Vendor UserDemo/PowerDemo board sequence adaptation | ✅ Header retained in `boards/m5stopwatch/board.c` |
+| `M5Stack-MIT.txt` | Vendor UserDemo/PowerDemo board sequence adaptation | ✅ Header retained in `FW/boards/m5stopwatch/board.c` |
 | `M5IOE1-MIT.txt`, `M5PM1-MIT.txt` | Referenced register definitions | ✅ Notices retained |
 | `LVGL-MIT.txt` | LVGL 9.5.0 code | ✅ Dependency licence checked |
-| `Lexend-OFL.txt` | Supplied Lexend SemiBold target/pairing subsets; generation in `app/fonts/` | ✅ OFL included |
+| `Lexend-OFL.txt` | Supplied Lexend SemiBold target/pairing subsets; generation in `FW/app/fonts/` | ✅ OFL included |
 | `Montserrat-OFL.txt`, `FontAwesome5.txt` | Bundled font glyphs: SIL OFL 1.1 (FontAwesome notice includes CC BY 4.0 / MIT) | ✅ Upstream notices included |
 | `Opus-BSD.txt`, `Opus-IPR.txt` | libopus from `78/esp-opus` 1.0.5; upstream BSD terms and patent notice | ✅ Copied from pinned component |
 | `opuslib-next-BSD.txt` | opuslib-next 1.3.1 Python ctypes binding; uses installed system libopus | ✅ Copied from locked wheel |
 | `Bleak-MIT.txt`, `dbus-fast-MIT.txt` | Bleak 3.0.2 / dbus-fast 5.2.0 client dependencies | ✅ Copied from locked wheels |
 | `Espressif-Apache-2.0.txt` | ES8311 register adaptation, CO5300 2.2.0 and cmake_utilities 0.5.3 | ✅ Dependency licences checked |
 
-Start with the [board provenance](../boards/m5stopwatch/README.md). Preserve MIT
+Start with the [board provenance](../../FW/boards/m5stopwatch/README.md). Preserve MIT
 copyright/permission notices in distributed copies and Apache licence/notices
 when redistributing dependencies. ESP-IDF/NimBLE retain their installed upstream
 licences (Apache-2.0; not vendored). Python tooling dependencies remain in uv's
 environment and are not copied into firmware. No GPL code copied.
 
-These notices are under FW/ by the explicit task exception; the coordinator can
-move them to `DOCS/licences/` at merge and update links.
+These external notices live in `DOCS/licences/`; firmware dependency sources keep their per-file headers.
 
 `78/esp-opus` registry metadata says MIT, but its libopus `COPYING`, source
 headers and `LICENSE_PLEASE_READ.txt` specify BSD-family licences. We preserve

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: MIT
  * Board sequences adapted from M5StopWatch-UserDemo hal_display/hal_ioe and
  * M5StopWatch-PowerDemo m5sw_display. Register definitions from M5IOE1/M5PM1.
- * See FW/licences/ and this board's README for sources and obligations.
+ * See DOCS/licences/ and this board's README for sources and obligations.
  */
 #include "board.h"
 #include "driver/gpio.h"
@@ -110,7 +110,7 @@ esp_err_t board_init(void)
         .mode=GPIO_MODE_INPUT,.pull_up_en=GPIO_PULLUP_ENABLE};
     ESP_ERROR_CHECK(gpio_config(&inputs));
     dma_done=xSemaphoreCreateBinary(); if(!dma_done) return ESP_ERR_NO_MEM;
-    spi_bus_config_t sc=CO5300_PANEL_BUS_QSPI_CONFIG(40,41,42,46,45,466*16*2);
+    spi_bus_config_t sc=CO5300_PANEL_BUS_QSPI_CONFIG(40,41,42,46,45,466*32*2);
     ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST,&sc,SPI_DMA_CH_AUTO));
     esp_lcd_panel_io_spi_config_t ic=CO5300_PANEL_IO_QSPI_CONFIG(39,transfer_done,dma_done);
     /* Same panel/pins as vendor UserDemo main/hal/hal_display.cpp:83. */
@@ -255,3 +255,10 @@ void *board_audio_alloc(size_t bytes)
     void *p=heap_caps_malloc(bytes,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
     return p?p:heap_caps_malloc(bytes,MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
 }
+
+void *board_ui_alloc(size_t bytes)
+{
+    /* Artwork is optional: never consume scarce internal memory on PSRAM failure. */
+    return heap_caps_malloc(bytes,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+}
+unsigned board_ui_strip_rows(void) { return 32; }

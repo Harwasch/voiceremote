@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(remote_logic_tests C)
+project(remote_logic_tests C CXX)
 enable_testing()
 add_executable(remote_tests test.c ../app/protocol.c ../app/state.c)
 target_include_directories(remote_tests PRIVATE ../app)
@@ -47,3 +47,19 @@ target_include_directories(audio_runtime_tests PRIVATE offline_stubs ../app)
 target_compile_features(audio_runtime_tests PRIVATE c_std_11)
 target_compile_options(audio_runtime_tests PRIVATE -Wall -Wextra -Werror -UNDEBUG)
 add_test(NAME audio_runtime COMMAND audio_runtime_tests)
+
+add_executable(test_hook_tests test_hook.c)
+target_include_directories(test_hook_tests PRIVATE ../app)
+target_compile_options(test_hook_tests PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+add_test(NAME test_hook COMMAND test_hook_tests)
+add_test(NAME hil_runner COMMAND ${Python3_EXECUTABLE} -m unittest discover
+    -s ${CMAKE_CURRENT_SOURCE_DIR}/../tools/hil -p test_*.py -v)
+
+# The real renderer/barrier must run here: pure state mocks missed slow hardware.
+add_subdirectory(../tools/ui_preview ui-preview)
+add_test(NAME phone_render_barrier COMMAND ui_preview --check)
+add_test(NAME ui_hook_debounce COMMAND ui_preview_hook --check)
+add_test(NAME ui_without_psram COMMAND ui_preview --check)
+set_tests_properties(ui_without_psram PROPERTIES ENVIRONMENT "VR_UI_NO_CACHE=1")
+add_test(NAME release_hook_guard COMMAND ${Python3_EXECUTABLE} -m unittest discover
+    -s ${CMAKE_CURRENT_SOURCE_DIR} -p test_config.py -v)

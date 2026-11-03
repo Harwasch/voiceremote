@@ -134,11 +134,11 @@ class AudioTests(unittest.TestCase):
             reconnect.input(input_value(0, capture=capture, ptt=ptt))
             self.assertFalse(reconnect.arm())  # snapshot never creates a trigger
 
-    def fixture_values(self, mtu, packet=None):
+    def fixture_values(self, mtu, packet=None, drop=False):
         executable = os.environ.get('VR_FRAMER', str(Path(__file__).resolve().parents[2]/'build-host/audio_tests'))
         if not Path(executable).is_file():
             self.fail('build FW/build-host/audio_tests before Python round-trip tests')
-        command = [executable, '--fixture', str(mtu)]
+        command = [executable, '--fixture-drop' if drop else '--fixture', str(mtu)]
         if packet is not None:
             command.append(packet.hex())
         data = subprocess.check_output(command)
@@ -155,6 +155,14 @@ class AudioTests(unittest.TestCase):
             events = [event for value in self.fixture_values(mtu) if (event := r.feed(value))]
             self.assertEqual([e.packet for e in events], [bytes(range(60))]*3 + [None])
             self.assertEqual([e.frame for e in events], [0, 1, 2, 3])
+
+    def test_end_after_entirely_unsent_tail_is_clean(self):
+        for mtu in (23, 247):
+            r = Reassembler()
+            events = [event for value in self.fixture_values(mtu, drop=True)
+                      if (event := r.feed(value))]
+            self.assertEqual([e.frame for e in events], [0, 1, 2, 3])
+            self.assertIsNone(events[-1].packet)
 
     def test_real_opus_firmware_framing_to_wav(self):
         try:

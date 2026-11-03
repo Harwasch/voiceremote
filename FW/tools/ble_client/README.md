@@ -26,7 +26,7 @@ sequenceDiagram
 Start here; [REQ-8]/[REQ-18]/[REQ-51] bench support. This records provisional
 PTT audio, including short presses; it does not implement iPhone STT/gesture policy.
 System `libopus.so.0` is required (`libopus0` on Debian); missing codec produces a
-clear error. No development headers, av or FFmpeg. See [licences](../../licences/).
+clear error. No development headers, av or FFmpeg. See [licences](../../../DOCS/licences/).
 
 Set the supplied offline uv environment in this sandbox, then prepare dependencies:
 
@@ -88,3 +88,8 @@ execution. Start with [deferred.md](deferred.md). `--sync DIR` requires
 length/frame-count/CRC validation and durable WAV/source or short-discard metadata.
 Recordings under 15 frames receive no WAV. Same-major peers connect; capability
 bit 7 gates all offline operations. C6 bit 7 clear is a clear unsupported error.
+
+END must be next after the last transmitted Audio frame. The C/Python regression
+covers discarding an entirely unsent queued tail without declaring a gap; partial
+transmission still interrupts. For unattended local triggers and reboot, use
+[the optional USB hook runner](../hil/README.md).

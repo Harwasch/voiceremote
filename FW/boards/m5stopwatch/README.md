@@ -18,7 +18,7 @@ flowchart LR
 | File / resource | Purpose / provenance | Status |
 |---|---|---|
 | `board.c` | Own IDF C display/control driver + vendor-derived ES8311 register setup / bounded RX DMA | 🟡 Controls owner-confirmed; mic hardware unverified |
-| `sdkconfig.defaults` | 16 MB flash, octal PSRAM; UI strip stays internal | 🟡 Hardware unverified |
+| `sdkconfig.defaults` | 16 MB flash, octal PSRAM; 240 MHz; optional PSRAM artwork, 32-row internal strip | 🟡 Hardware unverified |
 | `idf_component.yml` | Espressif CO5300 2.2.0, Apache-2.0 | ✅ Offline resolved |
 | `BUTTON_GPIOS` in `board.c` | Single mapping constant: G2 yellow/PTT, G1 blue/cycle; logs GPIO edges | 🟡 Colour mapping unverified |
 
@@ -49,13 +49,13 @@ were supplied default-branch clones, so exact tag equivalence is **unverified**.
 Vendor uses 468 logical columns with x gap 6; this adapter exposes the requested
 466 with the same gap. Alignment, RGB order, touch orientation and scanout are
 **unverified** until flashed. Haptic is 20% PWM for 25 ms; perceived strength TBC.
-CPU stays at 160 MHz although UserDemo `sdkconfig.defaults:10` selects 240 MHz.
-No CPU power increase was introduced. QSPI switching power / shorter bus duty and
+CPU now uses 240 MHz, as UserDemo `sdkconfig.defaults:10` does; both board
+builds use `-O2`. The C6 stub retains 160 MHz. QSPI switching power / shorter bus duty and
 net battery impact **need hardware to tell**; no current estimate is claimed.
-The shared renderer keeps one 16-row internal DMA strip and runs outside the app
-mutex; the I2C reset-retry sequence is preserved. [Timing fields](../../handoff.md)
+The shared renderer keeps one 32-row internal DMA strip and runs outside the app
+mutex; the I2C reset-retry sequence is preserved. [Timing evidence](../../../AI/FW/2026-11-02-hardware-fixes/README.md)
 separate panel DMA from touch polling and overall redraw wall time.
-See [licences](../../licences/) for retained MIT and Apache notices.
+See [licences](../../../DOCS/licences/) for retained MIT and Apache notices.
 
 Reports `virtual_sliders=true`: the shared UI draws the Orb capture ring.
 
@@ -80,3 +80,8 @@ Encoder and storage-index allocations prefer PSRAM with an internal fallback;
 writer queue, flash IO buffers, task stacks and DMA remain internal. Flash
 operations still stall flash/PSRAM execution, BLE and display work; this config
 does not prove 20 ms timing. See [storage](../../app/offline-storage.md).
+
+`board_ui_alloc` uses PSRAM only and may return NULL; cache misses render the
+same primitives. No internal-memory fallback for optional artwork. Strip growth
+costs up to 14,912 additional internal heap bytes (falls back to 16 rows if
+allocation fails); cache sizing is in the linked evidence.

@@ -13,7 +13,7 @@ flowchart LR
 | `lexend_24.c`, `lexend_30.c`, `lexend_42.c` | Uncompressed 4 bpp U+0020–007E destination/error subsets | ✅ Native/IDF built |
 | `lexend_84.c` | Uncompressed 4 bpp U+0030–0039 pairing subset | ✅ Native/IDF built |
 | `generate.sh` | Exact converter flags and deterministic header normalization | ✅ Regenerated offline |
-| [Lexend-OFL.txt](../../licences/Lexend-OFL.txt) | Supplied font's SIL OFL notice | ✅ Included |
+| [Lexend-OFL.txt](../../../DOCS/licences/Lexend-OFL.txt) | Supplied font's SIL OFL notice | ✅ Included |
 
 Purpose: reproducible display assets. Inputs: owner-supplied static
 `Lexend-SemiBold.ttf`, instantiated at wght=600 from `Lexend[wght].ttf` with

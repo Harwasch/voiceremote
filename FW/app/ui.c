@@ -6,9 +6,13 @@
 #else
 #include "runtime.h"
 #include "esp_heap_caps.h"
+#include "esp_log.h"
 #endif
 #include "board.h"
 #include "ui_input.h"
+#ifdef REMOTE_TEST_HOOK
+#include "test_hook.h"
+#endif
 #include "timing.h"
 #include "lvgl.h"
 #include <stdio.h>
@@ -37,6 +41,7 @@ static uint32_t error_since, pulse_at, frame_at;
 static vr_ui_press_t press;
 static vr_phone_t barrier_phone;
 static uint32_t barrier_id, barrier_done;
+enum { PHONE_RENDER_WAIT_MS=400 };
 static bool barrier_active, barrier_ok;
 #ifndef UI_PREVIEW
 static SemaphoreHandle_t barrier_signal;
@@ -50,6 +55,8 @@ static bool long_recognised;
 static vr_debounce_t control_filters[2];
 static uint8_t control_values[2];
 static const uint32_t mode_colors[]={0x6fe3ff,0xff6ad5};
+typedef struct { lv_image_dsc_t image; lv_area_t area; } artwork_t;
+static artwork_t sectors[3][3], orbs[2][3];
 static uint32_t ticks(void) { return remote_now(); }
 static bool linked(void) { return view.secure && view.valid; }
 static bool listening(void)
@@ -189,6 +196,73 @@ static void target_label(void)
     }
     text(name,x,y,font,error?0xff453a:0xffffff,0);
 }
+static void draw_sector(unsigned i,bool selected)
+{
+    const float starts[]={-116,-29,50},ends[]={-50,29,116};
+    const uint32_t cols[]={0x8a9099,0xffd60a,0xff453a},dim[]={0x8a9099,0xa8922e,0xa8524d};
+    arc(233,233,193,starts[i],ends[i],60,selected?cols[i]:0x1d2024);
+    float a=(starts[i]+ends[i])/2*3.14159265358979323846f/180;
+    icon(i,233+193*sinf(a),233-193*cosf(a),1.8f,selected?0:dim[i]);
+}
+static void draw_orb_static(unsigned mode,unsigned state)
+{
+    float cx=layout.cx,cy=layout.cy,r=layout.radius;
+    uint32_t color=mode_colors[mode];
+    if(state==0) circle(cx,cy,r,0x3a3f45,6,255);
+    else circle(cx,cy,r,color,state==2?0:8,255);
+    icon(mode?IC_AI:IC_TYPE,cx,cy,r/34,state==0?0x5b616a:state==2?0:color);
+}
+static bool artwork_draw(const artwork_t *a)
+{
+    if(!a->image.data) return false;
+    lv_draw_image_dsc_t d; lv_draw_image_dsc_init(&d); d.src=&a->image;
+    lv_draw_image(layer,&d,&a->area); return true;
+}
+static size_t artwork_init(void)
+{
+    /* Rasterize with the very same RGB565 renderer and absolute coordinates.
+     * This preserves AA pixels exactly, replacing paths with clipped memcpy. */
+    static const float bounds[3][4]={{7,76,118,350},{107,7,359,97},{348,76,459,350}};
+    lv_obj_t *canvas=lv_canvas_create(screen);
+    lv_obj_add_flag(canvas,LV_OBJ_FLAG_HIDDEN);
+    lv_draw_buf_t buf;
+    size_t total=0;
+    for(unsigned kind=0;kind<2;kind++) for(unsigned i=0;i<(kind?2u:3u);i++)
+        for(unsigned j=0;j<3;j++) {
+            if(!kind && !layout.ring) continue;
+            artwork_t *a=kind?&orbs[i][j]:&sectors[i][j];
+            if(kind) a->area=(lv_area_t){sx(layout.cx-layout.radius),sy(layout.cy-layout.radius),
+                sx(layout.cx+layout.radius)-1,sy(layout.cy+layout.radius)-1};
+            else a->area=(lv_area_t){sx(bounds[i][0]),sy(bounds[i][1]),sx(bounds[i][2]),sy(bounds[i][3])};
+            int w=lv_area_get_width(&a->area),h=lv_area_get_height(&a->area);
+            unsigned stride=lv_draw_buf_width_to_stride(w,LV_COLOR_FORMAT_RGB565);
+            unsigned bytes=stride*h;
+            void *buffer=board_ui_alloc(bytes);
+            if(!buffer) continue;
+            total+=bytes;
+            memset(buffer,0,bytes);
+            configASSERT(lv_draw_buf_init(&buf,w,h,LV_COLOR_FORMAT_RGB565,stride,buffer,stride*h)==LV_RESULT_OK);
+            lv_canvas_set_draw_buf(canvas,&buf);
+            lv_layer_t cache_layer; lv_canvas_init_layer(canvas,&cache_layer);
+            cache_layer.buf_area=cache_layer._clip_area=cache_layer.phy_clip_area=a->area;
+            layer=&cache_layer;
+            if(kind) draw_orb_static(i,j);
+            else for(unsigned sector=0;sector<3;sector++) draw_sector(sector,sector==j);
+            lv_canvas_finish_layer(canvas,&cache_layer);
+            a->image=(lv_image_dsc_t){.header=buf.header,.data_size=bytes,.data=buffer};
+
+        }
+    lv_obj_delete(canvas);
+    return total;
+}
+#ifdef REMOTE_TEST_HOOK
+void ui_test_control(unsigned actions,uint8_t capture)
+{
+    /* Same slider mailbox and 25 ms debounce as accepted touch selections. */
+    if(actions&VR_TEST_SELECT) control_values[0]=capture;
+    if(actions&VR_TEST_MODE) control_values[1]=!control_values[1];
+}
+#endif
 static void draw_base(lv_event_t *e)
 {
     layer=lv_event_get_layer(e);
@@ -210,15 +284,10 @@ static void draw_base(lv_event_t *e)
         } else icon(IC_BIN,cx,layout.ring?164:91,layout.ring?3.5f:2.5f,0x8a9099);
         return;
     }
-    if(layout.ring) {
-        const float starts[]={-116,-29,50},ends[]={-50,29,116};
-        const uint32_t cols[]={0x8a9099,0xffd60a,0xff453a},dim[]={0x8a9099,0xa8922e,0xa8524d};
-        for(int i=0;i<3;i++) {
-            bool selected=view.capture==i;
-            arc(233,233,193,starts[i],ends[i],60,selected?cols[i]:0x1d2024);
-            float a=(starts[i]+ends[i])/2*3.14159265358979323846f/180;
-            icon(i,233+193*sinf(a),233-193*cosf(a),1.8f,selected?0:dim[i]);
-        }
+    if(layout.ring) for(unsigned i=0;i<3;i++) {
+        /* Each opaque tile includes any neighbouring cap in its bounds for
+         * this capture state. No A8 blend or overlapping black-corner erasure. */
+        if(!artwork_draw(&sectors[i][view.capture])) draw_sector(i,view.capture==i);
     }
     /* Local storage indicators use the existing small-pip row. They remain
      * visible with OFF selected, and never claim a current destination. */
@@ -241,13 +310,12 @@ static void draw_orb(lv_event_t *e)
     float cx=layout.cx,cy=layout.cy,r=layout.radius;
     bool off=(!linked() && !view.offline) || view.capture==VR_OFF, live=listening();
     uint32_t color=mode_colors[view.mode==1];
-    if(off) circle(cx,cy,r,0x3a3f45,6,255);
-    else if(live) {
+    unsigned state=off?0:live?2:1;
+    if(!artwork_draw(&orbs[view.mode==1][state])) draw_orb_static(view.mode==1,state);
+    if(!off && live) {
         float phase=(frame_at%1800)/1800.f;
         circle(cx,cy,r+3+phase*17,color,3,(uint8_t)(100*(1-phase)));
-        circle(cx,cy,r,color,0,255);
-    } else circle(cx,cy,r,color,8,255);
-    icon(view.mode?IC_AI:IC_TYPE,cx,cy,r/34,off?0x5b616a:live?0:color);
+    }
 }
 /* Clip custom drawing to the changed regions; LVGL clears the old pixels too.
  * Bounds include rounded caps and antialiasing. Only overlay transitions are full screen. */
@@ -307,12 +375,20 @@ void ui_init(void)
     lv_init(); lv_tick_set_cb(ticks);
     display=lv_display_create(b->width,b->height); configASSERT(display);
     /* One internal DMA strip; the shared renderer never assumes PSRAM. */
-    size_t bytes=b->width*16u*2u;
+    size_t bytes=b->width*board_ui_strip_rows()*2u;
 #ifdef UI_PREVIEW
     void *buffer=malloc(bytes);
 #else
     void *buffer=heap_caps_malloc(bytes,MALLOC_CAP_DMA|MALLOC_CAP_INTERNAL);
 #endif
+    if(!buffer && board_ui_strip_rows()>16) {
+        bytes=b->width*16u*2u;
+#ifdef UI_PREVIEW
+        buffer=malloc(bytes);
+#else
+        buffer=heap_caps_malloc(bytes,MALLOC_CAP_DMA|MALLOC_CAP_INTERNAL);
+#endif
+    }
     configASSERT(buffer);
     lv_display_set_color_format(display,LV_COLOR_FORMAT_RGB565);
     lv_display_set_buffers(display,buffer,NULL,bytes,LV_DISPLAY_RENDER_MODE_PARTIAL);
@@ -328,6 +404,18 @@ void ui_init(void)
     lv_obj_set_pos(orb_obj,sx(layout.cx)-extent,sy(layout.cy)-extent); lv_obj_set_size(orb_obj,extent*2,extent*2);
     lv_obj_remove_flag(orb_obj,LV_OBJ_FLAG_CLICKABLE|LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_event_cb(orb_obj,draw_orb,LV_EVENT_DRAW_MAIN,NULL);
+#ifdef REMOTE_TEST_HOOK
+    lv_obj_t *mark=lv_obj_create(lv_layer_top()); lv_obj_remove_style_all(mark);
+    lv_obj_set_size(mark,6,6); lv_obj_set_pos(mark,sx(layout.cx)-3,sy(layout.ring?454:272));
+    lv_obj_set_style_bg_color(mark,lv_color_hex(0xff00ff),0); lv_obj_set_style_bg_opa(mark,255,0);
+    lv_obj_remove_flag(mark,LV_OBJ_FLAG_CLICKABLE|LV_OBJ_FLAG_SCROLLABLE);
+#endif
+    size_t cache_bytes=artwork_init();
+#ifdef UI_PREVIEW
+    printf("ui host: artwork_cache_bytes=%zu dma_strip_bytes=%zu\n",cache_bytes,bytes);
+#else
+    ESP_LOGI("ui","artwork_cache_bytes=%u dma_strip_bytes=%u",(unsigned)cache_bytes,(unsigned)bytes);
+#endif
     for(int i=0;i<2;i++) {
         control_values[i]=i?remote_state.input.mode:remote_state.input.capture;
         control_filters[i]=(vr_debounce_t){control_values[i],control_values[i],remote_now()};
@@ -343,8 +431,8 @@ bool ui_phone(const vr_phone_t *p)
     if(!display || current.overlay || barrier_active) return false;
     /* Called with remote_mutex taken exactly once by the ATT access callback.
      * Release it while LVGL works. Never wait on the renderer with the app lock.
-     * Budget the semaphore wait below the 80 ms audio queue horizon; on timeout
-     * reject the write and let the renderer restore the authoritative mailbox. */
+     * Measured streaming redraws reach 175 ms. Bound waiting, but accept a
+     * matching completed draw even if lock reacquisition is delayed. */
     uint32_t started=remote_now();
     barrier_phone=*p; barrier_active=true; barrier_ok=false;
     if(!++barrier_id) barrier_id++;
@@ -354,13 +442,12 @@ bool ui_phone(const vr_phone_t *p)
 #endif
     unlock();
 #ifdef UI_PREVIEW
-    bool signalled=preview_render_wait();
+    (void)preview_render_wait();
 #else
-    bool signalled=xSemaphoreTake(barrier_signal,pdMS_TO_TICKS(40))==pdTRUE;
+    (void)xSemaphoreTake(barrier_signal,pdMS_TO_TICKS(PHONE_RENDER_WAIT_MS));
 #endif
     lock();
-    bool ok=signalled && (uint32_t)(remote_now()-started)<40 &&
-        barrier_done==id && barrier_ok && barrier_active && !current.overlay;
+    bool ok=barrier_done==id && barrier_ok && barrier_active && !current.overlay;
     cancel_barrier();
     if(ok) {
         current.phone=*p; current.valid=true;
@@ -425,6 +512,23 @@ void ui_poll(void)
             remote_event(i?VR_MODE:VR_CAPTURE,control_values[i],sampled);
     }
 }
+static void invalidate_pulse(void)
+{
+    int cx=sx(layout.cx),cy=sy(layout.cy),outer=sz(layout.radius+22),inner=sz(layout.radius)-2;
+    /* Nonoverlapping bands stay below LVGL's invalidation-list capacity. The
+     * conservative inner chord includes both the old and new thin pulse ring. */
+    int band=(2*outer+11)/12;
+    for(int top=cy-outer;top<cy+outer;top+=band) {
+        int bottom=LV_MIN(top+band-1,cy+outer-1);
+        int dy=LV_MAX(abs(top-cy),abs(bottom-cy));
+        int half=dy<inner?(int)sqrtf(inner*inner-dy*dy):0;
+        int near=(top<=cy && bottom>=cy)?0:LV_MIN(abs(top-cy),abs(bottom-cy));
+        int edge=LV_MIN(outer,(int)ceilf(sqrtf(outer*outer-near*near))+1);
+        lv_area_t a={cx-edge,top,cx-half-1,bottom};
+        lv_area_t b={cx+half,top,cx+edge-1,bottom};
+        lv_obj_invalidate_area(orb_obj,&a); lv_obj_invalidate_area(orb_obj,&b);
+    }
+}
 /* Only the renderer task calls LVGL after initialization. */
 void ui_tick(void)
 {
@@ -440,7 +544,7 @@ void ui_tick(void)
     flush_ok=true; frame_flushed=false;
     invalidate_changes(job!=0);
     uint32_t now=remote_now();
-    if(!view.overlay && listening() && now-pulse_at>=200) { pulse_at=now; lv_obj_invalidate(orb_obj); }
+    if(!view.overlay && listening() && now-pulse_at>=200) { pulse_at=now; invalidate_pulse(); }
     /* Explicit refresh: no LVGL input/timer can call state or I2C while drawing. */
     lv_refr_now(display);
     if(flush_ok) { drawn=view; drawn_valid=true; } else drawn_valid=false;

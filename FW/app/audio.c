@@ -11,8 +11,10 @@ void vr_stream_stop(vr_stream_t *s)
 {
     s->running=false; s->dropped+=s->count;
     s->count=0; s->head=0; memset(s->queue,0,sizeof s->queue);
-    /* Every encoded packet owns a sequence, including dropped queue entries. */
-    s->frame=s->next_frame;
+    /* END follows the last notification sent, not the discarded encoded tail.
+     * A partially sent packet still consumes its wire sequence (client detects
+     * its incomplete payload); an entirely unsent packet consumes none. */
+    if(s->offset) s->frame++;
     s->offset=0; s->ending=s->started;
 }
 bool vr_stream_push(vr_stream_t *s,const uint8_t *p,size_t n)
