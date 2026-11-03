@@ -19,3 +19,5 @@ sanitation path. No Core source change was needed. Apple behavior is **unverifie
 Auto regressions compare two devices with extreme peer-clock skew, idle heartbeats beyond 60 seconds, unknown age and disconnect clearing. No physical focus sample is claimed.
 
 `LogicTests.InstallationAccountTests` covers legacy/default resolution, relaunch and refusal of changed/missing account settings after pinning (REQ-56). No real account credentials.
+
+`testPinnedHistoryEnvelopeMigratesLegacyAndRejectsMixedAccountsBeforeRetention` checks legacy migration under the pin, account-preserving reopen and rejection of wrong-account entries even when they would expire.

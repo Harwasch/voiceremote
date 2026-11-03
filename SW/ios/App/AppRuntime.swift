@@ -102,17 +102,17 @@ import VoiceRemoteProtocol
         keyboard = QueueWriter(sharedDirectory: group)
         try keyboard.maintain(listening: false)
         settingsStore = SettingsStore(url: root.appendingPathComponent("settings.json"))
-        offlineSync = try RemoteOfflineSync(url: root.appendingPathComponent("remote-offline.json"))
+        offlineSync = try RemoteOfflineSync(url: root.appendingPathComponent("remote-offline.json"), accountID: account)
         let peers = try PeerStore(url: root.appendingPathComponent("peers-" + PayloadDigest.sha256(Data(account.utf8)) + ".json"), accountID: account)
         link = ComputerLink(accountID: account, phoneID: phoneID, store: peers)
         registry = DeviceRegistry(accountID: account, revocation: link)
         pairing = PairingFlow(backend: link)
-        let history = try AppHistoryStore(url: root.appendingPathComponent("history.json"), now: Int64(Date().timeIntervalSince1970 * 1000))
+        let history = try AppHistoryStore(url: root.appendingPathComponent("history.json"), now: Int64(Date().timeIntervalSince1970 * 1000), accountID: account)
         historyStore = history
         let auditSlot = try AuditRecoveryController.activeSlot()
         let auditCheckpoints = try AuditRecoveryController.checkpoints(root: root, slot: auditSlot)
         let audit = try AuditLog(journal: FileAuditJournal(url: AuditRecoveryController.journalURL(root: root, slot: auditSlot)),
-            checkpoints: auditCheckpoints, retention: AuditRetention())
+            checkpoints: auditCheckpoints, retention: AuditRetention(), accountID: account)
         auditLog = audit
         let policy = try PolicyGate(audit: audit, biometric: LocalAuthenticationBiometric())
         taskStore = try RetainedTaskStore(url: root.appendingPathComponent("tasks.json"), accountID: account)
@@ -154,6 +154,7 @@ import VoiceRemoteProtocol
             guard let self else { throw SttFailure.unavailable }
             return try pinnedCapture()
         }
+        agentControl.routingDidChange = { [weak self] value in self?.model.settings.routing = value }
         agentControl.onChange = { [weak self] in Task { await self?.model.refreshTasks() } }
         model.settingsDidChange = { [weak self] settings in self?.saveSettings(settings) }
         model.onStateChange = { [weak self] in

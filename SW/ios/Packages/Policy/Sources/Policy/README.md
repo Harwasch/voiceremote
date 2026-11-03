@@ -24,3 +24,5 @@ rechecks state after suspension. Supply a trusted `AuditCheckpointStore`; there 
 unsafe default checkpoint reconstructed from the log. Trace: REQ-28–35, REQ-54–55.
 
 Recovery requires a fresh biometric/passcode challenge and a new gate instance. Checkpoint adapters must persist both the head and exact pending append intent; there is no implicit reset or unexplained-tail acceptance.
+
+`AuditAccountEnvelope` version 2 adds hashed account identity to newly hashed record bodies. Legacy records retain their canonical bytes; `accountBound` survives compaction and encrypted archive round trips. `ownerCompleted` records an operation/session digest from a fresh trusted phone event; its sealed receipt conveys completion only, with no execution authority.

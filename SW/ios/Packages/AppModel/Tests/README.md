@@ -43,3 +43,10 @@ AgentControl retention regression uses the real RetainedTaskStore, expires an of
 Review regressions cover model-selected sessions without user choice, a dismissed/open review, spoken cancellation of an open linked review, stale held-task cancellation and dispatched app replies holding successors.
 
 The socket fake enforces same-device replacement and destructive queue drain, matching `SW/relay/src/room.ts`. Repeated wake registration stays on the existing socket; reconnect automatically submits retained registration. Nonempty or previously marked journals without checkpoints remain recovery/loss cases.
+
+| AI Control regression | Evidence |
+|---|---|
+| [AIControlGapTests.swift](AIControlGapTests.swift) | Positive grant-only HOLD; wrong/revoked/ambiguous scope and sensitive LA; open-capture cards, correction after queue failure; account migrations/rejections |
+| [AgentControlTests.swift](AgentControlTests.swift) | Two authenticated hosts/providers plus cloud: explicit/selected/recent/default, local/cloud fallback, held machine/named targets, actual replacement approval/dispatch; owner-observed file fixture, completion binding, stale/reconnect/cancellation negatives and linked phone workflow |
+
+These prove synthetic policy/routing behavior. The scoped result-file fixture is checked independently before the simulated owner tap; live provider effects and SwiftUI execution remain **unverified**.

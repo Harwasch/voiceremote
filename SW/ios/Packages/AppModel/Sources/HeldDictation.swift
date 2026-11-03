@@ -69,7 +69,7 @@ public actor HeldDictationPipeline {
         guard !clean.isEmpty else { return }
         let entries = Self.parts(clean).enumerated().map { index, part in
             HistoryEntry(segmentID: index == 0 ? segmentID : HistoryTextIdentity.copyID(segmentID + ":" + String(index)).uuidString,
-                         targetID: device.device_id, text: part, createdAt: now)
+                         targetID: device.device_id, text: part, createdAt: now, accountID: accountID)
         }
         // Journal every scalar before wire validation or delivery can fail.
         try await history.saveTexts(entries, now: now)
@@ -112,6 +112,7 @@ public actor HeldDictationPipeline {
         sending.insert(id); defer { sending.remove(id) }
         guard try await !history.retentionWarnings(now: now).contains(where: { $0.segmentID == id }) else { throw DictationDeliveryError.retentionChoiceRequired }
         guard let entry = try await history.entries(now: now).first(where: { $0.segmentID == id }),
+              entry.accountID == accountID,
               let state = await history.deliveryStates()[id], [.held, .failed, .unconfirmed].contains(state) else { throw CoreError.unknownSegment }
         if state == .unconfirmed {
             guard let availability = target as? any DictationAvailability else { throw DictationDeliveryError.unconfirmed }

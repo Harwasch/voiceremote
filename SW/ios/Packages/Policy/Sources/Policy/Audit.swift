@@ -95,13 +95,21 @@ public struct AuditPending: Codable, Equatable, Sendable {
 }
 
 public enum AuditEvent: String, Codable, Sendable {
-    case authorityReset, suggested, edited, authenticationRequired, approved, denied, queued, duplicate
+    case accountBound, ownerCompleted, authorityReset, suggested, edited, authenticationRequired, approved, denied, queued, duplicate
     case dismissed, expired, dispatched, running, succeeded, failed, cancelled, grantIssued, grantRevoked, sessionRevoked, recovered
 }
 
 /// All caller-controlled strings are hashed before reaching this record. No payload,
 /// recipient, URI, instruction, transcript, raw identifiers or error descriptions.
+/// Version 2 wraps newly written records with a hashed account identity. Legacy
+/// records keep their exact canonical bytes and hashes; accountBound anchors migration.
+public struct AuditAccountEnvelope: Codable, Equatable, Sendable {
+    public let version: Int
+    public let accountHash: String
+    init(accountHash: String) { version = 2; self.accountHash = accountHash }
+}
 public struct AuditRecord: Codable, Equatable, Sendable {
+    public let accountEnvelope: AuditAccountEnvelope?
     public let sequence: Int
     public let previousHash: String
     public let timestamp: Int64
@@ -114,12 +122,13 @@ public struct AuditRecord: Codable, Equatable, Sendable {
     public let recordHash: String
 
     fileprivate struct Body: Codable {
+        let accountEnvelope: AuditAccountEnvelope?
         let sequence: Int; let previousHash: String; let timestamp: Int64
         let event: AuditEvent; let subjectHash: String; let payloadHash: String
         let actorHash: String; let policyVersion: String; let scopeHash: String?
     }
     fileprivate var body: Body {
-        Body(sequence: sequence, previousHash: previousHash, timestamp: timestamp, event: event,
+        Body(accountEnvelope: accountEnvelope, sequence: sequence, previousHash: previousHash, timestamp: timestamp, event: event,
              subjectHash: subjectHash, payloadHash: payloadHash, actorHash: actorHash, policyVersion: policyVersion, scopeHash: scopeHash)
     }
 }
@@ -141,17 +150,30 @@ public struct AuditRetention: Sendable {
     public let retention: AuditRetention
     public private(set) var records: [AuditRecord]
     var checkpoint: AuditCheckpoint
+    public private(set) var accountHash: String?
     private var poisoned = false
     // One gate owns each log; sharing a journal across gates would split replay state.
     private var claimed = false
 
     public init(journal: any AuditJournal, checkpoints: any AuditCheckpointStore,
-                retention: AuditRetention) throws {
+                retention: AuditRetention, accountID: String? = nil) throws {
         self.journal = journal; self.checkpoints = checkpoints; self.retention = retention
         checkpoint = try checkpoints.load()
         guard checkpoint.retired != true else { throw PolicyError.auditUnavailable }
         guard try checkpoints.loadPending() == nil else { throw PolicyError.auditUnavailable }
         records = try Self.verify(journal.read(), against: checkpoint)
+        accountHash = records.compactMap(\.accountEnvelope).first?.accountHash
+        if let accountID {
+            guard !accountID.isEmpty, accountID != "*", accountID.unicodeScalars.count <= 128,
+                  !accountID.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else { throw PolicyError.invalid }
+            let requested = PayloadDigest.sha256(Data(accountID.utf8))
+            guard accountHash == nil || accountHash == requested else { throw PolicyError.tampered }
+            if accountHash == nil {
+                accountHash = requested
+                try append(event: .accountBound, subject: requested, payloadHash: checkpoint.head,
+                    actor: "", now: minimumTime())
+            }
+        }
     }
     func claim() throws {
         guard !claimed else { throw PolicyError.locked }
@@ -177,6 +199,7 @@ public struct AuditRetention: Sendable {
                   zip(result, result.dropFirst()).allSatisfy({ $0.sequence < $1.sequence }) else { throw PolicyError.tampered }
             head = capsule.base.head; sequence = capsule.base.count; timestamp = capsule.timestamp; remaining.removeFirst()
         }
+        var boundAccount = result.compactMap(\.accountEnvelope).first?.accountHash
         for line in remaining where !bytes.isEmpty {
             let record = try JSONDecoder().decode(AuditRecord.self, from: Data(line))
             guard try canonical(record) == Data(line), record.sequence == sequence, record.previousHash == head,
@@ -184,6 +207,13 @@ public struct AuditRetention: Sendable {
                   record.policyVersion == (checkpoint.authorityID.map { "policy-v1:" + $0 } ?? "policy-v1"),
                   record.timestamp >= 0, record.timestamp <= 9_007_199_254_740_991,
                   (record.event == .recovered || record.timestamp >= timestamp) else { throw PolicyError.tampered }
+            if let envelope = record.accountEnvelope {
+                guard envelope.version == 2, envelope.accountHash.count == 64,
+                      envelope.accountHash.allSatisfy({ "0123456789abcdef".contains($0) }),
+                      boundAccount == nil || boundAccount == envelope.accountHash,
+                      boundAccount != nil || [.accountBound, .authorityReset, .recovered].contains(record.event) else { throw PolicyError.tampered }
+                boundAccount = envelope.accountHash
+            } else if boundAccount != nil { throw PolicyError.tampered }
             head = record.recordHash; sequence += 1; timestamp = record.timestamp; result.append(record)
         }
         guard sequence == checkpoint.count, head == checkpoint.head else { throw PolicyError.tampered }
@@ -195,13 +225,13 @@ public struct AuditRetention: Sendable {
               try Self.verify(journal.read(), against: checkpoint) == records else { throw PolicyError.tampered }
     }
     static func makeRecord(event: AuditEvent, subject: String, payloadHash: String, actor: String,
-                           now: Int64, checkpoint: AuditCheckpoint, scopeHash: String? = nil) throws -> AuditRecord {
+                           now: Int64, checkpoint: AuditCheckpoint, scopeHash: String? = nil, accountHash: String? = nil) throws -> AuditRecord {
         guard now >= 0, now <= 9_007_199_254_740_991 else { throw PolicyError.clock }
-        let body = AuditRecord.Body(sequence: checkpoint.count, previousHash: checkpoint.head,
+        let body = AuditRecord.Body(accountEnvelope: accountHash.map { AuditAccountEnvelope(accountHash: $0) }, sequence: checkpoint.count, previousHash: checkpoint.head,
                                     timestamp: now, event: event, subjectHash: subject,
                                     payloadHash: payloadHash, actorHash: PayloadDigest.sha256(Data(actor.utf8)),
                                     policyVersion: checkpoint.authorityID.map { "policy-v1:" + $0 } ?? "policy-v1", scopeHash: scopeHash)
-        return AuditRecord(sequence: body.sequence, previousHash: body.previousHash, timestamp: now,
+        return AuditRecord(accountEnvelope: body.accountEnvelope, sequence: body.sequence, previousHash: body.previousHash, timestamp: now,
                            event: event, subjectHash: subject, payloadHash: payloadHash,
                            actorHash: body.actorHash, policyVersion: body.policyVersion, scopeHash: scopeHash,
                            recordHash: PayloadDigest.sha256(try canonical(body)))
@@ -211,7 +241,7 @@ public struct AuditRetention: Sendable {
             try checkIntegrity()
             guard event != .recovered, now >= (try minimumTime()) else { throw PolicyError.clock }
             let record = try Self.makeRecord(event: event, subject: subject, payloadHash: payloadHash,
-                                            actor: actor, now: now, checkpoint: checkpoint, scopeHash: scopeHash)
+                                            actor: actor, now: now, checkpoint: checkpoint, scopeHash: scopeHash, accountHash: accountHash)
             let next = AuditCheckpoint(count: checkpoint.count + 1, head: record.recordHash, compactionHash: checkpoint.compactionHash, authorityID: checkpoint.authorityID, authoritySessionHash: checkpoint.authoritySessionHash)
             var bytes = try canonical(record); bytes.append(10)
             guard try journal.read().count + bytes.count <= Self.maximumJournalBytes else { throw PolicyError.auditUnavailable }

@@ -313,3 +313,38 @@ private func rules(_ id: String) -> RoutingRules {
     }
 
 }
+
+extension RouterTests {
+    @MainActor func testOwnerCompletionSurvivesReopenOnlyWhenProtectedAuditBindsExactOperation() async throws {
+        let a = try Authority(), d = destination("laptop"), store = MemoryStore()
+        let router = try TaskRouter(store: store, policy: a.gate), target = FakeAgent(d)
+        let permit = try await a.issue(d, pinned: true)
+        try router.enqueue(permit, rules: rules(d.id), destinations: [d])
+        try router.reconnect(targets: [target])
+        try router.receive(TaskStatus(account_id: d.session.account, command_id: permit.command.command_id,
+            execution_state: .dispatched, updated_at: a.time, outcome: .dispatched), from: d.session)
+        let task = try XCTUnwrap(router.snapshot().first)
+        let operation = try TaskRouter.completionOperation(task)
+        let session = a.phone.session(account: d.session.account, actor: "test-actor", session: "fresh-owner-session",
+            device: d.id, project: d.session.workspace, destinationKind: .software)
+        let receipt = try a.gate.confirmOwnerCompletion(a.phone.ownerCompletion(session: session, commandID: task.command.command_id,
+            operationHash: operation), command: task.command, immutablePreview: task.immutablePreview)
+        try router.confirmOwnerCompletion(receipt)
+        let restored = try TaskRouter(store: store, policy: a.gate)
+        XCTAssertEqual(restored.snapshot().first?.ownerConfirmed, true)
+        // Copying an owner success flag to another route cannot restore success.
+        var forged = store.values
+        forged[0].route = RouteChoice(destination: destination("other-host"), cloudFallback: false)
+        store.values = forged
+        XCTAssertThrowsError(try TaskRouter(store: store, policy: a.gate))
+    }
+
+    @MainActor func testForgedStoredOwnerCompletionCannotReleaseDependencies() async throws {
+        let a = try Authority(), d = destination("laptop"), store = MemoryStore()
+        let router = try TaskRouter(store: store, policy: a.gate), target = FakeAgent(d)
+        let permit = try await a.issue(d, pinned: true)
+        try router.enqueue(permit, rules: rules(d.id), destinations: [d]); try router.reconnect(targets: [target])
+        store.values[0].state = .succeeded; store.values[0].outcome = .ok; store.values[0].ownerConfirmed = true
+        XCTAssertThrowsError(try TaskRouter(store: store, policy: a.gate))
+    }
+}

@@ -64,3 +64,13 @@ queued encrypted frame, infer execution from relay delivery, or blindly retry a
 side effect. Old-session ciphertext is rejected by the session generation checks.
 Repeated wake/outcome frames cannot mint a new permit. Phone registration,
 background handlers, task store wiring and locked-device acceptance are later work.
+
+## Local account envelope migration
+
+| Inner journal format | Account / integrity rule |
+|---|---|
+| Legacy records | Preserve exact bytes, sequence and record hashes. The protected installation account pin supplies migration ownership. Never reserialize/rewrite the old forensic prefix. |
+| Version-2 account wrapper | Append `accountBound` with the old head, then include `accountEnvelope: {version: 2, accountHash: SHA256(accountID)}` in each new record body and hash. Verify one matching account throughout the bound suffix; reject missing/mixed wrappers. |
+| Archive/recovery/compaction | Ciphertext remains opaque to the relay. Round trips preserve canonical inner bytes and wrapper binding; archive account must match. `accountBound` and `ownerCompleted` survive replay compaction, so binding and trusted completion cannot come from an editable queue snapshot. |
+
+This extends the local canonical record format inside the existing opaque ciphertext field, with no generated wire-schema changes. Legacy hashes remain valid. Evidence: Policy `accountEnvelopeMigrationPreservesLegacyBytesHashesAndArchiveBinding`; owner completion also has Router/AppModel regressions. A phone owner completion is an explicit attestation, never a relabelled agent reply or exit status.

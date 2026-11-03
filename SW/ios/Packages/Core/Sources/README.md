@@ -20,3 +20,5 @@ Start with `AppState.swift`. Requirements and adapter obligations: [package map]
 TargetPicker ranks native input age plus phone monotonic elapsed time. Missing age is inactive, disconnect clears focus, and idle heartbeats cannot reset the 60-second activity window.
 
 | [InstallationAccount.swift](InstallationAccount.swift) | Single-account migration/pin policy; changed account fails closed before private storage opens | ✅ Portable relaunch/switch tests; REQ-56 |
+
+`RecordAccount` validates account identifiers and binds legacy `HistoryEntry` values; `AccountRecordEnvelope` versions persisted history. `FileHistoryStore` validates every entry before retention and atomic replacement. Dictation records carry the registry account and still have no Brain dependency.

@@ -252,3 +252,44 @@ final class SuggestionTests: XCTestCase, @unchecked Sendable {
         XCTAssertEqual(update.routingNotice, .offlineUsingOnDevice)
     }
 }
+
+extension SuggestionTests {
+    func testAmbientHypothesesAreReplaceableWithoutCommittedCommandBoundaries() async throws {
+        let engine = try engine(EchoBrain())
+        func hypothesis(_ text: String, revision: Int) -> TranscriptSegment {
+            TranscriptSegment(id: "open-capture", revision: revision, text: text, isFinal: true, isComplete: false,
+                contextID: "ambient", hypothesis: true)
+        }
+        let initial = await engine.ingest(hypothesis("open synthetic dashboard", revision: 1), now: now)
+        let first = try XCTUnwrap(initial.cards.first)
+        _ = await engine.tap(.init(cardID: first.id, previewRevision: first.revision), now: now)
+        let authorized = await engine.authorized(cardID: first.id, revision: first.revision, now: now)
+        XCTAssertTrue(authorized)
+        // Authorization alone is not dispatch; a later correction invalidates it.
+        _ = await engine.ingest(hypothesis("no, do not open the dashboard", revision: 2), now: now)
+        let retried = await engine.authorized(cardID: first.id, revision: first.revision, now: now)
+        XCTAssertFalse(retried)
+        let history = await engine.history(now: now)
+        XCTAssertEqual(history.first(where: { $0.id == first.id })?.state, .expired)
+    }
+
+    func testCommittedIndependentCardSurvivesLaterSpeechAndLinkedTailNeedsCompletion() async throws {
+        let engine = try engine(EchoBrain(), max: 8)
+        let initial = await engine.ingest(TranscriptSegment(id: "open", revision: 1, text: "open synthetic dashboard then summarize it",
+            isFinal: true, isComplete: false, contextID: "ambient", hypothesis: true), now: now)
+        let first = try XCTUnwrap(initial.cards.first), last = try XCTUnwrap(initial.cards.last)
+        _ = await engine.tap(.init(cardID: first.id, previewRevision: 0), now: now)
+        _ = await engine.authorized(cardID: first.id, revision: 0, now: now)
+        await engine.executionCommitted(cardID: first.id, now: now)
+        let blocked = await engine.tap(.init(cardID: last.id, previewRevision: 0), now: now)
+        XCTAssertNil(blocked)
+        await engine.completed(cardID: first.id, succeeded: true, now: now)
+        let released = await engine.tap(.init(cardID: last.id, previewRevision: 0), now: now)
+        XCTAssertNotNil(released)
+        _ = await engine.ingest(TranscriptSegment(id: "open", revision: 2, text: "no, wait",
+            isFinal: true, isComplete: false, contextID: "ambient", hypothesis: true), now: now)
+        let history = await engine.history(now: now)
+        XCTAssertEqual(history.first(where: { $0.id == first.id })?.state, .succeeded)
+        XCTAssertEqual(history.first(where: { $0.id == last.id })?.state, .expired)
+    }
+}

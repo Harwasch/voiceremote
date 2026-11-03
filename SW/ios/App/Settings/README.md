@@ -29,3 +29,5 @@ After a successful share, start a new cohort for another microphone or command s
 Privacy/consent: Settings shows the fixed installation account, participant/cloud policy and full expired held text with explicit Keep for seven days / Delete choices (REQ-56/58). Cloud consent remains off by default and is saved synchronously. Owner review of provider wording and Apple UI behavior remains **unverified**.
 
 Named BLE sources export `voiceremote-named-source-benchmark-v1` with the board name and quality estimates; the comparison omits the shared schema's phone-only source label. Choose Remote in Devices and use REC or a fresh qualified HOLD before starting the recorder. Mixed named sources require a new cohort. Source scoring, first-word loss and board performance remain **unverified** (REQ-13/15/51/53).
+
+Active Settings shows Argmax unavailable until a licensed host adapter is loaded, and persists local/cloud provider fallback orders. Suggestions owns selected/default sessions, per-action cloud independence and exact-route reapproval. Apple UI execution remains **unverified**.

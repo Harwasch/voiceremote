@@ -5,7 +5,7 @@ import Foundation
 public enum InstallationAccount {
     public static func resolve(requested: String?, pinned: String?) throws -> String {
         let requested = requested ?? "owner-local"
-        guard !requested.isEmpty else { throw CoreError.wrongAccount }
+        try RecordAccount.validate(requested)
         if let pinned {
             guard requested == pinned else { throw CoreError.wrongAccount }
             return pinned

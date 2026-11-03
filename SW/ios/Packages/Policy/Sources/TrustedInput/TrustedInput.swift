@@ -50,6 +50,19 @@ public struct ApprovalEvidence: Sendable {
     }
 }
 
+/// A phone owner attests an observed effect. Not Codable and never model output.
+public struct OwnerCompletionEvidence: Sendable {
+    public let session: InputSession
+    public let eventID: UUID
+    public let commandID: String
+    public let operationHash: String
+    public let occurredAt: Int64
+    fileprivate init(session: InputSession, commandID: String, operationHash: String, now: Int64) {
+        self.session = session; eventID = UUID(); self.commandID = commandID
+        self.operationHash = operationHash; occurredAt = now
+    }
+}
+
 public struct GrantEvidence: Sendable {
     public let session: InputSession
     public let id: UUID
@@ -85,6 +98,11 @@ public struct GrantEvidence: Sendable {
                          source: ApprovalSource = .phone) -> ApprovalEvidence {
         ApprovalEvidence(session: session, eventID: UUID(), requestID: requestID,
                          payloadHash: payloadHash, source: source, occurredAt: now())
+    }
+    /// Called only by the phone's "This finished" confirmation, after showing the
+    /// exact task and provider session. It conveys no execution or approval authority.
+    public func ownerCompletion(session: InputSession, commandID: String, operationHash: String) -> OwnerCompletionEvidence {
+        OwnerCompletionEvidence(session: session, commandID: commandID, operationHash: operationHash, now: now())
     }
     /// Called after an explicit grant-settings confirmation, never by proposal decoding.
     public func grant(session: InputSession, capability: Capability, risk: RiskClass,

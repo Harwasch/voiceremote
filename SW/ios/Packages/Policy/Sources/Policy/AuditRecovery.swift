@@ -23,6 +23,8 @@ extension AuditLog {
         let bytes = try await AuditArchive.verifiedBytes(client: client, cipher: cipher, anchor: state.anchor, against: trusted)
         let flat = state.anchor.verificationCheckpoint
         let history = try verify(bytes, against: flat)
+        let accountHash = history.compactMap(\.accountEnvelope).first?.accountHash
+        guard accountHash == nil || accountHash == PayloadDigest.sha256(Data(session.account.utf8)) else { throw PolicyError.tampered }
         let sessionHash = identityDigest([session.account, session.actor, session.session])
         guard session.destinationKind == .software, session.account == state.anchor.account,
               trusted.authoritySessionHash == nil || trusted.authoritySessionHash == sessionHash,
@@ -45,7 +47,7 @@ extension AuditLog {
               try destinationJournal.read().isEmpty, try destinationCheckpoints.load() == .empty,
               try destinationCheckpoints.loadPending() == nil else { throw PolicyError.tampered }
         let recovered = try makeRecord(event: .recovered, subject: sessionHash, payloadHash: binding,
-            actor: session.actor, now: completed, checkpoint: flat)
+            actor: session.actor, now: completed, checkpoint: flat, accountHash: accountHash)
         var complete = bytes; complete.append(try canonical(recovered)); complete.append(10)
         let next = AuditCheckpoint(count: flat.count + 1, head: recovered.recordHash, compactionHash: flat.compactionHash, authorityID: flat.authorityID, authoritySessionHash: flat.authoritySessionHash)
         _ = try verify(complete, against: next)
@@ -82,6 +84,8 @@ extension AuditLog {
         let original = try journal.read()
         let (complete, head) = try reconciled(original, checkpoint: checkpoint, pending: pending)
         let history = try verify(complete, against: head)
+        let accountHash = history.compactMap(\.accountEnvelope).first?.accountHash
+        guard accountHash == nil || accountHash == PayloadDigest.sha256(Data(session.account.utf8)) else { throw PolicyError.tampered }
         let sessionHash = identityDigest([session.account, session.actor, session.session])
         guard session.destinationKind == .software,
               head.authoritySessionHash == nil || head.authoritySessionHash == sessionHash,
@@ -105,7 +109,7 @@ extension AuditLog {
         guard try journal.read() == original, try checkpoints.load() == checkpoint,
               try checkpoints.loadPending() == pending else { throw PolicyError.tampered }
         let recovered = try makeRecord(event: .recovered, subject: sessionHash, payloadHash: binding,
-                                       actor: session.actor, now: completed, checkpoint: head)
+                                       actor: session.actor, now: completed, checkpoint: head, accountHash: accountHash)
         var recoveryBytes = try canonical(recovered); recoveryBytes.append(10)
         let next = AuditCheckpoint(count: head.count + 1, head: recovered.recordHash, compactionHash: head.compactionHash, authorityID: head.authorityID, authoritySessionHash: head.authoritySessionHash)
         var finalBytes = complete; finalBytes.append(recoveryBytes)

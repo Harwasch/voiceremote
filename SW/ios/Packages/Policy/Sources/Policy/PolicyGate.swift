@@ -30,6 +30,18 @@ public struct ExecutionPermit: Sendable {
         self.command = command; self.immutablePreview = immutablePreview; self.expiresAt = expiresAt
     }
 }
+/// Issued only after an audited phone completion event. This cannot authorize execution.
+public struct OwnerCompletionReceipt: Sendable {
+    public let commandID: String
+    public let operationHash: String
+    public let eventHash: String
+    public let occurredAt: Int64
+    fileprivate init(commandID: String, operationHash: String, eventHash: String, occurredAt: Int64) {
+        self.commandID = commandID; self.operationHash = operationHash
+        self.eventHash = eventHash; self.occurredAt = occurredAt
+    }
+}
+
 public enum GateDecision: Sendable {
     case suggestion(Preview), authenticationRequired(Preview), queued(ExecutionPermit)
     case duplicate, denied(Denial)
@@ -73,7 +85,7 @@ public enum GateDecision: Sendable {
             input.activation == .inferred || (input.activation == .wakeWord && input.ambiguousMeetingWake)
         }
     }
-    private struct PreviewBody: Encodable {
+    private struct PreviewBody: Codable {
         let policy: String; let request: UUID; let revision: Int
         let account: String; let actor: String; let session: String; let device: String; let project: String
         let tool: ToolCall; let risk: RiskClass; let expiresAt: Int64
@@ -131,7 +143,8 @@ public enum GateDecision: Sendable {
     private func valid(_ session: InputSession) -> Bool {
         [session.account, session.actor, session.session, session.device, session.project].allSatisfy {
             !$0.isEmpty && $0.unicodeScalars.count <= 128 && $0 != "*"
-        } && (audit.checkpoint.authoritySessionHash == nil || audit.checkpoint.authoritySessionHash == sessionKey(session))
+        } && (audit.accountHash == nil || audit.accountHash == PayloadDigest.sha256(Data(session.account.utf8)))
+          && (audit.checkpoint.authoritySessionHash == nil || audit.checkpoint.authoritySessionHash == sessionKey(session))
           && !revokedSessions.contains(sessionKey(session))
     }
     private func record(_ event: AuditEvent, _ input: ActivationEvidence, hash: String, time: Int64) throws {
@@ -344,6 +357,46 @@ public enum GateDecision: Sendable {
                   valid(grant.session), grant.expiresAt > time else { throw PolicyError.invalid }
         }
         return issued
+    }
+
+    /// Completion is independent of proposal expiry. Prove the retained task was
+    /// authorized from the durable reservation, then audit a fresh owner event.
+    /// The owner, rather than a model reply/exit status, attests the effect.
+    public func confirmOwnerCompletion(_ evidence: OwnerCompletionEvidence, command: AuthorizedCommand,
+                                      immutablePreview: Data) throws -> OwnerCompletionReceipt {
+        try audit.checkIntegrity()
+        let time = try now(), session = evidence.session
+        let body = try JSONDecoder().decode(PreviewBody.self, from: immutablePreview)
+        guard valid(session), session.destinationKind == .software,
+              evidence.commandID == command.command_id, evidence.operationHash.count == 64,
+              evidence.operationHash.allSatisfy({ "0123456789abcdef".contains($0) }),
+              evidence.occurredAt <= time, time - evidence.occurredAt < approvalLifetime,
+              body.account == session.account, body.actor == session.actor,
+              body.device == session.device, body.project == session.project,
+              body.account == command.account_id, body.actor == command.authenticated_actor,
+              body.device == command.destination_id, body.tool == command.immutable_task_payload,
+              body.request.uuidString == command.candidate_id, body.policy == command.policy_version,
+              !revokedSessions.contains(identityDigest([body.account, body.actor, body.session])),
+              !audit.records.contains(where: { $0.subjectHash == command.command_id && ($0.event == .cancelled || $0.event == .failed) }),
+              command.command_id == command.idempotency_key,
+              consumed[command.command_id] == command.payload_hash,
+              commands[command.command_id] == scopeKey(session),
+              command.payload_hash == PayloadDigest.sha256(immutablePreview),
+              try canonical(body) == immutablePreview else { throw PolicyError.invalid }
+        let eventHash = identityDigest([evidence.eventID.uuidString, session.account, session.actor, session.session])
+        // Retrying an uncertain queue save returns the same audited effect binding.
+        if !hasOwnerCompletion(commandID: command.command_id, operationHash: evidence.operationHash) {
+            try audit.append(event: .ownerCompleted, subject: command.command_id, payloadHash: evidence.operationHash,
+                actor: session.actor, now: time, scopeHash: eventHash)
+        }
+        guard let record = audit.records.last(where: { $0.event == .ownerCompleted && $0.subjectHash == command.command_id && $0.payloadHash == evidence.operationHash }),
+              let recordedEvent = record.scopeHash else { throw PolicyError.invalid }
+        return OwnerCompletionReceipt(commandID: command.command_id, operationHash: evidence.operationHash,
+            eventHash: recordedEvent, occurredAt: record.timestamp)
+    }
+    public func hasOwnerCompletion(commandID: String, operationHash: String) -> Bool {
+        guard (try? audit.checkIntegrity()) != nil else { return false }
+        return audit.records.contains { $0.event == .ownerCompleted && $0.subjectHash == commandID && $0.payloadHash == operationHash }
     }
 
     public func edit(requestID: UUID, modelJSON: Data) -> GateDecision {

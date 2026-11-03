@@ -7,6 +7,28 @@ import TrustedInput
 import Router
 import VoiceRemoteProtocol
 
+public struct AgentSessionUse: Codable, Equatable, Sendable {
+    public let session: SessionIdentity
+    public let timestamp: Int64
+}
+/// Persisted phone preferences. Cloud independence is an explicit owner choice;
+/// neither Brain nor a provider response can enable it.
+public struct AgentRoutingSettings: Codable, Equatable, Sendable {
+    public var project: String? = nil
+    public var selectedSession: SessionIdentity? = nil
+    public var defaultSession: SessionIdentity? = nil
+    public var recent: [AgentSessionUse] = []
+    public var localProviderOrder = ["codex", "claude"]
+    public var cloudProviderOrder = ["cloud"]
+    public var allowCloudFallback = false
+    /// One phone-confirmed action only; never restored from persisted settings.
+    public var independentCloudTasks = false
+    private enum CodingKeys: String, CodingKey {
+        case project, selectedSession, defaultSession, recent, localProviderOrder, cloudProviderOrder, allowCloudFallback
+    }
+    public init() {}
+}
+
 /// A live paired-session adapter. It queues transport work only after Router has
 /// durably reserved dispatch. A send error retains delivery uncertainty.
 public struct PairedAgentTarget: AgentAdapter {
@@ -52,6 +74,8 @@ private struct AgentPreviews: Sendable {
 @MainActor public final class AgentControl {
     public private(set) var destinations: [Destination] = []
     public private(set) var selected: SessionIdentity?
+    public private(set) var routing = AgentRoutingSettings()
+    public var routingDidChange: (@MainActor (AgentRoutingSettings) -> Void)?
     public var onChange: (@MainActor () -> Void)?
     private struct Connection {
         let epoch: UUID
@@ -118,7 +142,7 @@ private struct AgentPreviews: Sendable {
                 capabilityProfile: wire.capability_profile.rawValue, executionWorkspace: wire.workspace)
             guard seen.insert(identity).inserted else { throw RouterError.invalidStatus }
             return Destination(id: device, session: identity, isCloud: wire.provider == .cloud,
-                capabilities: wire.capabilities, available: true)
+                capabilities: wire.capabilities, available: true, lastUsed: routing.recent.first(where: { $0.session == identity })?.timestamp ?? 0)
         }
         // Commit only a fully validated snapshot. Removed sessions remain offline
         // for existing tasks; new inventory never silently changes a pinned route.
@@ -140,16 +164,104 @@ private struct AgentPreviews: Sendable {
     }
     public func choose(_ identity: SessionIdentity) throws {
         guard destinations.contains(where: { $0.session == identity }) else { throw AppRoutingError.unknownProviderSession }
-        selected = identity; onChange?()
+        selected = identity; routing.selectedSession = identity; routing.project = identity.workspace
+        routingDidChange?(routing); onChange?()
     }
     public func resolve(device: String, project: String, providerSession: String?) throws -> Destination {
         let matches = destinations.filter { $0.id == device && $0.session.workspace == project &&
-            (providerSession == nil || $0.session.providerSessionID == providerSession) &&
-            (selected == nil || $0.session == selected) }
+            (providerSession == nil || $0.session.providerSessionID == providerSession) }
         guard matches.count == 1 else { throw AppRoutingError.unknownProviderSession }
         return matches[0]
     }
-    public func enqueue(_ permit: ExecutionPermit, dependencies: [String] = [], replacingCommandID: String? = nil, expectedRoute: Destination? = nil) throws -> [QueuedTask] {
+    public func configureRouting(_ value: AgentRoutingSettings) {
+        // Reject persisted identities from another installation/account.
+        guard [value.selectedSession, value.defaultSession].compactMap({ $0 }).allSatisfy({ $0.account == account }),
+              value.recent.allSatisfy({ $0.session.account == account && $0.timestamp >= 0 }), value.recent.count <= 256 else { return }
+        routing = value; selected = value.selectedSession
+        for i in destinations.indices {
+            let d = destinations[i]
+            destinations[i] = Destination(id: d.id, session: d.session, isCloud: d.isCloud, capabilities: d.capabilities,
+                available: d.available, lastUsed: value.recent.first(where: { $0.session == d.session })?.timestamp ?? 0)
+        }
+        onChange?()
+    }
+    public func makeDefault(_ identity: SessionIdentity) throws {
+        guard destinations.contains(where: { $0.session == identity }) else { throw AppRoutingError.unknownProviderSession }
+        routing.defaultSession = identity; routing.project = identity.workspace
+        routingDidChange?(routing); onChange?()
+    }
+    public func clearSelection() {
+        selected = nil; routing.selectedSession = nil; routingDidChange?(routing); onChange?()
+    }
+    /// Five-step resolver input, populated from authenticated inventory and phone settings.
+    /// Textual names constrain routing; they never create authority or new sessions.
+    public func routingRules(project: String, text: String = "", capability: Capability = .delegate_task) throws -> RoutingRules {
+        var rules = RoutingRules(project: project)
+        rules.capability = capability
+        rules.selectedSession = selected; rules.selectedTarget = selected?.host
+        rules.defaultSession = routing.defaultSession; rules.defaultTarget = routing.defaultSession?.host
+        rules.localProviderOrder = routing.localProviderOrder; rules.cloudProviderOrder = routing.cloudProviderOrder
+        rules.allowCloudFallback = routing.allowCloudFallback
+        rules.cloudCapable = routing.independentCloudTasks && capability == .delegate_task
+        // Bind machine ownership after priority resolution. A lower-priority
+        // default must not veto a recent available session on another host.
+        rules.machineDependency = nil
+        let normalized = text.lowercased()
+        func mentions(_ name: String) -> Bool {
+            normalized.range(of: "(?<![\\p{L}\\p{N}_-])" + NSRegularExpression.escapedPattern(for: name.lowercased()) + "(?![\\p{L}\\p{N}_-])", options: .regularExpression) != nil
+        }
+        let hosts = Set(destinations.filter { mentions($0.id) }.map(\.id))
+        let providers = Set(destinations.filter { mentions($0.session.provider) }.map { $0.session.provider })
+        let sessions = Set(destinations.filter { mentions($0.session.providerSessionID) }.map(\.session))
+        guard hosts.count <= 1, providers.count <= 1, sessions.count <= 1 else { throw AppRoutingError.unknownProviderSession }
+        rules.explicitTarget = hosts.first; rules.explicitHost = hosts.first
+        rules.explicitProvider = providers.first; rules.explicitSession = sessions.first
+        // An unknown named session/provider/host must not fall through to a default.
+        for marker in ["on host", "using provider", "session"] {
+            if let range = normalized.range(of: "\\b" + marker + "\\s+([a-z0-9_-]+)", options: .regularExpression) {
+                let value = normalized[range].split(whereSeparator: \.isWhitespace).last.map(String.init) ?? ""
+                let known = destinations.contains { $0.id.lowercased() == value || $0.session.provider.lowercased() == value || $0.session.providerSessionID.lowercased() == value }
+                guard known else { throw AppRoutingError.unknownProviderSession }
+            }
+        }
+        if !rules.cloudCapable, let explicitHost = rules.explicitHost ?? rules.explicitSession?.host { rules.machineDependency = explicitHost }
+        return rules
+    }
+    public func updatedRules(_ previous: RoutingRules) -> RoutingRules {
+        var rules = previous
+        rules.selectedSession = selected; rules.selectedTarget = selected?.host
+        rules.defaultSession = routing.defaultSession; rules.defaultTarget = routing.defaultSession?.host
+        rules.allowCloudFallback = routing.allowCloudFallback
+        rules.localProviderOrder = routing.localProviderOrder; rules.cloudProviderOrder = routing.cloudProviderOrder
+        // Independence is fixed per approved action; changing a setting cannot
+        // convert existing machine/file-dependent work into a cloud task.
+        return rules
+    }
+    public func plan(_ rules: RoutingRules) -> RouteDecision {
+        RouteResolver.resolve(rules: rules, destinations: destinations)
+    }
+    /// An unavailable, exactly known local destination can still be reviewed
+    /// for a durable hold. This never changes live availability or implies delivery.
+    public func reviewDestination(_ rules: RoutingRules) -> Destination? {
+        switch plan(rules) {
+        case .dispatch(let choice): return choice.destination
+        case .hold(let reason):
+            guard reason == .unavailable || reason == .machineRequired else { return nil }
+            let candidates = destinations.filter { d in
+                !d.isCloud && !d.available && d.session.workspace == rules.project && d.capabilities.contains(rules.capability) &&
+                (rules.explicitTarget == nil || d.id == rules.explicitTarget) &&
+                (rules.explicitHost == nil || d.session.host == rules.explicitHost) &&
+                (rules.explicitProvider == nil || d.session.provider == rules.explicitProvider) &&
+                (rules.explicitSession == nil || d.session == rules.explicitSession) &&
+                (rules.machineDependency == nil || d.session.host == rules.machineDependency)
+            }
+            for identity in [rules.explicitSession, rules.selectedSession, rules.defaultSession].compactMap({ $0 }) {
+                if let destination = candidates.first(where: { $0.session == identity }) { return destination }
+            }
+            return candidates.count == 1 ? candidates.first : nil
+        }
+    }
+    public func enqueue(_ permit: ExecutionPermit, dependencies: [String] = [], replacingCommandID: String? = nil, expectedRoute: Destination? = nil, routingRules plannedRules: RoutingRules? = nil) throws -> [QueuedTask] {
         if case .cancelTaskTool(let tool) = permit.command.immutable_task_payload {
             guard let original = router.snapshot().first(where: { $0.command.command_id == tool.command_id }) else { throw RouterError.invalidAuthorization }
             try router.recordCancellation(permit)
@@ -171,14 +283,25 @@ private struct AgentPreviews: Sendable {
         let destination = try resolve(device: permit.command.destination_id, project: project, providerSession: permit.command.provider_session_id)
         guard expectedRoute == nil || (expectedRoute?.session == destination.session && expectedRoute?.capabilities == destination.capabilities && expectedRoute?.isCloud == destination.isCloud) else { throw RouterError.invalidAuthorization }
         guard destination.capabilities.contains(capability) else { throw AppRoutingError.unavailableDestination }
-        var rules = RoutingRules(project: project)
+        if let plannedRules, let expectedRoute {
+            guard let live = reviewDestination(updatedRules(plannedRules)), live.session == expectedRoute.session,
+                  live.capabilities == expectedRoute.capabilities else { throw RouterError.invalidAuthorization }
+        }
+        var rules = plannedRules ?? RoutingRules(project: project)
         rules.capability = capability
+        if plannedRules == nil {
         rules.explicitTarget = destination.id; rules.explicitSession = destination.session
         rules.explicitProvider = destination.session.provider
         rules.machineDependency = destination.isCloud ? nil : destination.session.host
         rules.cloudCapable = destination.isCloud
+        }
+        if !rules.cloudCapable, rules.machineDependency == nil { rules.machineDependency = destination.session.host }
         rules.dependencies = dependencies
-        _ = try router.enqueue(permit, rules: rules, destinations: [destination], replacingCommandID: replacingCommandID)
+        _ = try router.enqueue(permit, rules: rules, destinations: plannedRules == nil ? [destination] : destinations.filter { $0.session.workspace == project && $0.capabilities.contains(capability) }, replacingCommandID: replacingCommandID)
+        routing.independentCloudTasks = false
+        routing.recent.removeAll { $0.session == destination.session }
+        routing.recent.insert(AgentSessionUse(session: destination.session, timestamp: now()), at: 0)
+        routing.recent = Array(routing.recent.prefix(256)); configureRouting(routing); routingDidChange?(routing)
         try reconnect(); onChange?(); return router.snapshot()
     }
     private func targets() -> [any Target] {
@@ -209,10 +332,28 @@ private struct AgentPreviews: Sendable {
             }
         }
     }
+    public func completionEpoch(for task: QueuedTask) -> UUID? {
+        guard task.command.account_id == account, task.command.authenticated_actor == actor,
+              task.state == .dispatched, task.outcome == .dispatched, !task.cancellationRequested,
+              let route = task.route?.destination,
+              destinations.contains(where: { $0.session == route.session && $0.available }),
+              router.snapshot().contains(where: { $0 == task }) else { return nil }
+        return connections[task.command.destination_id]?.epoch
+    }
+    public func confirmOwnerCompletion(_ task: QueuedTask, epoch: UUID, evidence: OwnerCompletionEvidence) throws {
+        guard completionEpoch(for: task) == epoch, evidence.session.session == epoch.uuidString,
+              evidence.operationHash == (try TaskRouter.completionOperation(task)) else { throw RouterError.invalidStatus }
+        let receipt = try policy.confirmOwnerCompletion(evidence, command: task.command, immutablePreview: task.immutablePreview)
+        try router.confirmOwnerCompletion(receipt)
+        try reconnect(); onChange?()
+    }
     public func receive(_ status: TaskStatus, from device: String, epoch: UUID) throws {
         guard connections[device]?.epoch == epoch,
               let task = router.snapshot().first(where: { $0.command.command_id == status.command_id }),
               task.command.destination_id == device, let session = task.route?.destination.session else { return }
+        // CLI/agent turns attest delivery only. This surface has no independently
+        // verified effect-success contract; only the phone owner can complete it.
+        guard status.execution_state != .succeeded else { throw RouterError.invalidStatus }
         try router.receive(status, from: session)
         if let query = queries[status.command_id], query.device == device, query.epoch == epoch {
             finishQuery(status.command_id, token: query.token, error: nil)

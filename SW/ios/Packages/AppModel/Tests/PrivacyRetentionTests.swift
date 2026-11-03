@@ -8,9 +8,9 @@ import VoiceRemoteProtocol
 @Test func dormantHistoryExpiresOnRelaunchAndPrunesMetadata() async throws {
     let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: url) }
-    let store = try AppHistoryStore(url: url, now: 1000)
+    let store = try AppHistoryStore(url: url, now: 1000, accountID: "fixture")
     try await store.saveText(HistoryEntry(segmentID: "fixture", targetID: "phone", text: "Synthetic.", createdAt: 1000), state: .offline, now: 1000)
-    let reopened = try AppHistoryStore(url: url, now: 604_801_000)
+    let reopened = try AppHistoryStore(url: url, now: 604_801_000, accountID: "fixture")
     #expect(try await reopened.entries(now: 604_801_000).isEmpty)
     #expect(await reopened.deliveryStates().isEmpty)
 }
@@ -18,17 +18,17 @@ import VoiceRemoteProtocol
 @Test func heldExpiryRequiresDurableExplicitChoice() async throws {
     let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: url) }
-    let store = try AppHistoryStore(url: url, now: 1000)
+    let store = try AppHistoryStore(url: url, now: 1000, accountID: "fixture")
     for state in [TextDeliveryState.held, .failed, .unconfirmed] {
         try await store.saveText(HistoryEntry(segmentID: state.rawValue, targetID: "desktop", text: "Synthetic held text.", createdAt: 1000), state: state, now: 1000)
     }
     let expired: Int64 = 604_801_000
-    let reopened = try AppHistoryStore(url: url, now: expired)
+    let reopened = try AppHistoryStore(url: url, now: expired, accountID: "fixture")
     #expect(try await reopened.retentionWarnings(now: expired).count == 3)
     #expect(await reopened.deliveryStates()["held"] == .retentionReview)
     try await reopened.resolveRetention(id: "held", keep: true, now: expired)
     try await reopened.resolveRetention(id: "failed", keep: false, now: expired)
-    let again = try AppHistoryStore(url: url, now: expired + 1)
+    let again = try AppHistoryStore(url: url, now: expired + 1, accountID: "fixture")
     #expect(try await again.retentionWarnings(now: expired + 1).map(\.segmentID) == ["unconfirmed"])
     #expect(try await again.entries(now: expired + 1).count == 2)
     try await again.setDelivery(.delivered, id: "held")
@@ -42,7 +42,7 @@ import VoiceRemoteProtocol
     defer { try? FileManager.default.removeItem(at: url) }
     let entry = HistoryEntry(segmentID: "fixture", targetID: "phone", text: "Synthetic legacy text.", createdAt: 1000)
     try JSONEncoder().encode([entry]).write(to: url)
-    let reopened = try AppHistoryStore(url: url, now: 604_801_000)
+    let reopened = try AppHistoryStore(url: url, now: 604_801_000, accountID: "fixture")
     #expect(try await reopened.entries(now: 604_801_000).isEmpty)
     #expect(!String(decoding: try Data(contentsOf: url), as: UTF8.self).contains(entry.text))
 }

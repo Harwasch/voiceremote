@@ -21,7 +21,7 @@ import VoiceRemoteProtocol
     #expect(try await reopened.identity(peripheralID: peripheral, protectedAccess: true) == nil)
 }
 @Test func desktopInsertionStatusCorrelatesSegmentAndAuthenticatedTarget() async throws {
-    let history = try AppHistoryStore(now: 1000)
+    let history = try AppHistoryStore(now: 1000, accountID: "fixture")
     let entry = HistoryEntry(segmentID: "segment-fixture", targetID: "desktop", text: "Invented.", createdAt: 1000)
     try await history.saveText(entry, state: .unconfirmed, now: 1000)
     let failed = TaskStatus(account_id: "fixture", command_id: entry.segmentID, execution_state: .failed, updated_at: 1000, outcome: .unavailable)
@@ -59,7 +59,7 @@ import VoiceRemoteProtocol
 @Test func positiveDictationOutcomeIsAuthenticatedAndSurvivesRestart() async throws {
     let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: url) }
-    let history = try AppHistoryStore(url: url, now: 1000)
+    let history = try AppHistoryStore(url: url, now: 1000, accountID: "fixture")
     let entry = HistoryEntry(segmentID: "positive-fixture", targetID: "desktop", text: "Synthetic.", createdAt: 1000)
     try await history.saveText(entry, state: .unconfirmed, now: 1000)
     let reply = DictationOutcome(account_id: "fixture", segment_id: entry.segmentID, target_device_id: "desktop", outcome: .inserted)
@@ -67,7 +67,7 @@ import VoiceRemoteProtocol
     try await history.dictationOutcome(reply, from: "desktop", accountID: "other")
     #expect(await history.deliveryStates()[entry.segmentID] == .unconfirmed)
     try await history.dictationOutcome(reply, from: "desktop", accountID: "fixture")
-    let reopened = try AppHistoryStore(url: url, now: 1001)
+    let reopened = try AppHistoryStore(url: url, now: 1001, accountID: "fixture")
     #expect(await reopened.deliveryStates()[entry.segmentID] == .delivered)
     // A delayed failure cannot downgrade a proven insertion.
     try await history.dictationOutcome(DictationOutcome(account_id: "fixture", segment_id: entry.segmentID, target_device_id: "desktop", outcome: .unavailable), from: "desktop", accountID: "fixture")

@@ -55,3 +55,13 @@ Delegate review requires the user's selected provider/project/session. Approval 
 Wake invalidates old queued permits before inventory can release them; durable dispatched identities are queried without blind replay. Named-source recorder exports use a separate envelope because `BenchRun` currently excludes remote sources. Pending archive intents, read-back loss and fresh biometric recovery use the unchanged Policy v2 contract (REQ-29/32/34–35/54–55/61).
 
 Cross-review: scene resume requires a prior background transition; Live Activity failures are presentation-only. Capture factories pin at the trigger (including HOLD press) before suspension; remote triggers never borrow local PTT authority. BLE arming accepts the modulo interval from latest control event through latest Input; status snapshots need no new acknowledgement. Empty legacy audit journals can initialize a missing checkpoint; marked or nonempty missing-anchor history fails closed.
+
+| AI Control path | Entry / boundary |
+|---|---|
+| Scoped HOLD | `AppModel.submitExplicitTarget`: exact target-selection grammar, pinned device/project, live grant; no Brain authority |
+| Ambient review | `TranscriptSegment.hypothesis`: incomplete slices stay inferred; corrections cancel unqueued reviews/permits |
+| Production routes | `AgentControl.routingRules` + `plan`: authenticated inventory, persisted selection/recency/default/orders; machine ownership pins the chosen local route after priority resolution; per-action cloud independence clears after enqueue/restart |
+| Owner completion | `reviewTaskCompletion` → `confirmTaskFinished`: exact task/session/operation card; sealed evidence and audited receipt; provider replies never prove success |
+| Account records | `AppHistoryStore` / `RemoteOfflineSync`: version-2 account envelopes; validate whole input before use and migrate legacy data under the pin |
+
+An exact known offline local route remains reviewable as an explicit durable hold; its preview says it will wait. Availability is never rewritten for review, and only the same approved provider session can release it on reconnect.

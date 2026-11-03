@@ -22,3 +22,5 @@ flowchart LR
 Start with `everySchemaToolEveryTierRequiresCorrectAuthority`. Run the full Policy package command to include both gate and archive suites. Test helpers
 use fake time, memory checkpoints and authentication; the production Apple adapter is
 **unverified** here. Trace: REQ-28–35, REQ-54–55, REQ-61.
+
+`accountEnvelopeMigrationPreservesLegacyBytesHashesAndArchiveBinding` checks unchanged legacy forensic bytes, wrong-account rejection, encrypted archive round trip and compaction retention. `externalModuleCannotConstructOrDecodeAuthority` also proves owner completion evidence/receipts cannot be decoded by an external caller.

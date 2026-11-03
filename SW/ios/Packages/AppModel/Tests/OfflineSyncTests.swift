@@ -185,9 +185,9 @@ private actor OfflineResult {
     #expect(origin.label.contains("Capture time unknown"))
     let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: url) }
-    let store = try AppHistoryStore(url: url, now: 2000)
+    let store = try AppHistoryStore(url: url, now: 2000, accountID: "fixture")
     try await store.saveText(HistoryEntry(segmentID: "offline-fixture", targetID: "phone", text: "Invented.", createdAt: 2000), state: .offline, now: 2000, origin: origin)
-    let reopened = try AppHistoryStore(url: url, now: 2001)
+    let reopened = try AppHistoryStore(url: url, now: 2001, accountID: "fixture")
     #expect(await reopened.offlineOrigins()["offline-fixture"] == origin)
 }
 @Test func olderSettingsDecodeWithDeploymentModelAndVersionDefaults() throws {

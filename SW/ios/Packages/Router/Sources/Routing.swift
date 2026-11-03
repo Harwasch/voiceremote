@@ -40,6 +40,8 @@ public struct RoutingRules: Codable, Equatable, Sendable {
     public var explicitProvider: String?
     public var explicitHost: String?
     public var explicitSession: SessionIdentity?
+    public var selectedSession: SessionIdentity?
+    public var defaultSession: SessionIdentity?
     public var selectedTarget: String?
     public var activeTextField: String?
     public var defaultTarget: String?
@@ -96,6 +98,7 @@ public enum RouteResolver {
         }
         let named = compatible.filter(matches)
         func lookup(_ id: String?) -> Destination? { named.first { $0.id == id } }
+        func session(_ identity: SessionIdentity?) -> Destination? { named.first { $0.session == identity } }
         let recent = named.filter { $0.available && $0.lastUsed > 0 }.sorted {
             $0.lastUsed == $1.lastUsed ? $0.id < $1.id : $0.lastUsed > $1.lastUsed
         }.first
@@ -103,8 +106,12 @@ public enum RouteResolver {
             r.explicitHost != nil || r.explicitSession != nil
         // A selected destination stays preferred even while offline. Recent sessions
         // alone skip offline entries; this is the five-step preference in §5.3.
-        let preferred = lookup(r.explicitTarget) ?? lookup(r.selectedTarget) ??
-            (r.mode == .dictation ? lookup(r.activeTextField) : nil) ?? recent ?? lookup(r.defaultTarget) ?? (explicit ? (named.first(where: { $0.available && !$0.isCloud }) ?? named.first) : nil)
+        let namedPreference: Destination? = session(r.explicitSession) ?? (explicit ? lookup(r.explicitTarget) : nil)
+        let selectedPreference: Destination? = session(r.selectedSession) ?? lookup(r.selectedTarget)
+        let fieldPreference: Destination? = r.mode == .dictation ? lookup(r.activeTextField) : nil
+        let defaultPreference: Destination? = session(r.defaultSession) ?? lookup(r.defaultTarget)
+        let explicitAlternative: Destination? = explicit ? (named.first(where: { $0.available && !$0.isCloud }) ?? named.first) : nil
+        let preferred = namedPreference ?? selectedPreference ?? fieldPreference ?? recent ?? defaultPreference ?? explicitAlternative
         guard let primary = preferred else {
             return .hold(explicit ? .unavailable : .noAuthorizedDestination)
         }

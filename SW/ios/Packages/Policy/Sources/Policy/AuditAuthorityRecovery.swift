@@ -72,7 +72,7 @@ extension AuditLog {
         let sessionHash = identityDigest([fresh.account, fresh.actor, fresh.session])
         let base = AuditCheckpoint(count: 0, head: AuditCheckpoint.empty.head, authorityID: authority, authoritySessionHash: sessionHash)
         let record = try makeRecord(event: .authorityReset, subject: sessionHash, payloadHash: binding,
-            actor: fresh.actor, now: completed, checkpoint: base)
+            actor: fresh.actor, now: completed, checkpoint: base, accountHash: PayloadDigest.sha256(Data(fresh.account.utf8)))
         var bytes = try canonical(record); bytes.append(10)
         let next = AuditCheckpoint(count: 1, head: record.recordHash, authorityID: authority, authoritySessionHash: sessionHash)
         _ = try verify(bytes, against: next)

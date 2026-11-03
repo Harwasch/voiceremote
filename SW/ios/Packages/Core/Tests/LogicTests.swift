@@ -163,7 +163,8 @@ final class LogicTests: XCTestCase, @unchecked Sendable {
         let entries = try await reopened.entries(now: 604_800_002)
         XCTAssertTrue(entries.isEmpty)
         let raw = try String(contentsOf: url, encoding: .utf8)
-        XCTAssertEqual(raw, "[]")
+        let envelope = try JSONDecoder().decode(AccountRecordEnvelope<[HistoryEntry]>.self, from: Data(raw.utf8))
+        XCTAssertEqual(envelope.accountID, "owner-local"); XCTAssertTrue(envelope.records.isEmpty)
         let permissions = try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? Int
         XCTAssertEqual(permissions, 0o600)
     }
@@ -510,5 +511,23 @@ final class InstallationAccountTests: XCTestCase {
         XCTAssertThrowsError(try InstallationAccount.resolve(requested: "other", pinned: first))
         XCTAssertThrowsError(try InstallationAccount.resolve(requested: nil, pinned: first))
         XCTAssertEqual(try InstallationAccount.resolve(requested: nil, pinned: nil), "owner-local")
+    }
+}
+
+extension LogicTests {
+    func testPinnedHistoryEnvelopeMigratesLegacyAndRejectsMixedAccountsBeforeRetention() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let legacy = HistoryEntry(segmentID: "synthetic", targetID: "phone", text: "Invented", createdAt: 1)
+        try JSONEncoder().encode([legacy]).write(to: url)
+        let store = try FileHistoryStore(url: url, now: 1, accountID: "test")
+        let entries = try await store.entries(now: 1)
+        XCTAssertEqual(entries.first?.accountID, "test")
+        XCTAssertThrowsError(try FileHistoryStore(url: url, now: 1, accountID: "wrong"))
+        let wrong = HistoryEntry(segmentID: "wrong", targetID: "phone", text: "Invented", createdAt: 0, accountID: "wrong")
+        try JSONEncoder().encode([legacy, wrong]).write(to: url)
+        let before = try Data(contentsOf: url)
+        XCTAssertThrowsError(try FileHistoryStore(url: url, now: 604_800_001, accountID: "test"))
+        XCTAssertEqual(try Data(contentsOf: url), before)
     }
 }

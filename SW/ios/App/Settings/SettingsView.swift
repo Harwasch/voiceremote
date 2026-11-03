@@ -22,6 +22,7 @@ struct SettingsView: View {
                     if ArgmaxBuild.engine != nil { Text("Argmax Pro (licensed, loaded)").tag("argmax") }
                     Text("ElevenLabs Scribe").tag("elevenlabs-scribe"); Text("AssemblyAI").tag("assemblyai")
                 }
+                if ArgmaxBuild.engine == nil { Text("Argmax unavailable — requires a licence and a loaded host adapter.").font(.footnote) }
                 Toggle("Allow cloud processing", isOn: $model.settings.cloudConsent)
                 Text("Cloud speech sends live audio to your configured proxy. Cloud brain sends text for proposals. Provider retention depends on your service. No vendor key is stored here.").font(.footnote)
                 Toggle("Maximum accuracy", isOn: $model.settings.maxAccuracy)
@@ -48,6 +49,15 @@ struct SettingsView: View {
                 TextField("Relay Claude model", text: $model.settings.cloudModel).textInputAutocapitalization(.never).autocorrectionDisabled()
                 TextField("Relay Anthropic API version", text: $model.settings.cloudAPIVersion).textInputAutocapitalization(.never).autocorrectionDisabled()
                 Text("Model and API version must match the relay deployment.").font(.footnote)
+            }
+            Section("Agent routing") {
+                TextField("Local providers in fallback order (comma separated)", text: Binding(
+                    get: { model.settings.routing.localProviderOrder.joined(separator: ",") },
+                    set: { model.settings.routing.localProviderOrder = $0.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty } }))
+                TextField("Cloud providers in fallback order (comma separated)", text: Binding(
+                    get: { model.settings.routing.cloudProviderOrder.joined(separator: ",") },
+                    set: { model.settings.routing.cloudProviderOrder = $0.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty } }))
+                Text("Choose the project, selected session and default in Suggestions. Named destinations stay constraints. Machine or file dependent work waits for its host.").font(.footnote)
             }
             Section("Vocabulary") {
                 TextField("One word or phrase per line", text: Binding(get: { host.model.settings.vocabulary.joined(separator: "\n") },
