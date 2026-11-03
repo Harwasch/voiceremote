@@ -14,6 +14,7 @@ flowchart LR
 | File / folder | What it is | Status |
 |---|---|---|
 | [protocol.schema.json](protocol.schema.json) | Version 1 wire records, enums and discriminated unions | ✅ |
+| [relay-join.md](relay-join.md) | Room enrollment and exact cloud proxy challenge/header/query-normalization contract | ✅ synthetic relay tests; live client/vendor integration unverified |
 | [noise.md](noise.md) | Exact Noise suite, enrollment, relay auth, fragment framing and published ciphertext vectors | ✅ synthetic Rust tests; Swift/deployment unverified |
 | [wire-contract.md](wire-contract.md) | Boundaries, encoding rules and runtime obligations | ✅ contract; runtime integration unverified |
 | [vectors/](vectors/) | Shared synthetic valid and invalid fixtures | ✅ |

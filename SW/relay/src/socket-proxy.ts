@@ -4,6 +4,8 @@
 export function proxySocket(response: Response): Response {
   const backend = response.webSocket!;
   const pair = new WebSocketPair(), client = pair[0], server = pair[1];
+  // The configured Workers date defaults binary messages to Blob. Preserve PCM bytes.
+  backend.binaryType = "arraybuffer"; server.binaryType = "arraybuffer";
   backend.accept({ allowHalfOpen: false }); server.accept({ allowHalfOpen: false });
   function close(target: WebSocket, code: number, reason: string): void {
     if (target.readyState === 1) target.close(code === 1005 || code === 1006 ? 1000 : code, reason);

@@ -73,28 +73,32 @@ export async function secretMatches(header: string | null, secret?: string): Pro
   for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
   return diff === 0;
 }
-export async function body(request: Request): Promise<string> {
+export async function body(request: Request, maxBytes: number = LIMITS.controlBytes, timeoutMs = 2000, signal?: AbortSignal): Promise<string> {
   requireThat(!request.headers.has("content-encoding"));
   const reader = request.body?.getReader();
   if (!reader) return "";
   let timer: ReturnType<typeof setTimeout>;
+  let abort: () => void;
   const timeout = new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(() => {
-      reject(new Refusal(408, "body_timeout"));
-      void reader.cancel().catch(() => {});
-    }, 2000);
+    const cancel = (error: Refusal) => {
+      reject(error); void reader.cancel().catch(() => {});
+    };
+    abort = () => cancel(new Refusal(503, "unavailable"));
+    timer = setTimeout(() => cancel(new Refusal(408, "body_timeout")), timeoutMs);
+    signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) abort();
   });
-  try { return await Promise.race([readBody(reader), timeout]); }
-  finally { clearTimeout(timer!); }
+  try { return await Promise.race([readBody(reader, maxBytes), timeout]); }
+  finally { clearTimeout(timer!); signal?.removeEventListener("abort", abort!); }
 }
-async function readBody(reader: ReadableStreamDefaultReader<Uint8Array>): Promise<string> {
+async function readBody(reader: ReadableStreamDefaultReader<Uint8Array>, maxBytes: number): Promise<string> {
   const chunks: Uint8Array[] = [];
   let size = 0;
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
     size += value.byteLength;
-    if (size > LIMITS.controlBytes) { await reader.cancel(); throw new Refusal(413, "too_large"); }
+    if (size > maxBytes) { await reader.cancel(); throw new Refusal(413, "too_large"); }
     chunks.push(value);
   }
   const bytes = new Uint8Array(size);

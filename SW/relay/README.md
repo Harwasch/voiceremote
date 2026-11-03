@@ -2,6 +2,9 @@
 flowchart LR
   Desktop[Desktop: own relay + Noise keys] <-->|opaque frames| Worker[Worker: admission + close forwarding]
   Phone[Phone: own relay + Noise keys] <-->|opaque frames| Worker
+  Phone -->|plaintext cloud audio / prompts, TLS| Cloud[Room-authorized cloud proxy]
+  Cloud --> Vendors[Fixed ElevenLabs / AssemblyAI / Anthropic APIs]
+  Cloud --> Budget[Global reservation ledger]
   Worker --> Room[Hibernating room DO: account + room]
   Room <--> Queue[SQLite: bounded queue per recipient]
   Room --> Wake[WakeProvider DO: cached JWT]
@@ -13,9 +16,9 @@ flowchart LR
 | [src/](src/README.md) | Enrollment, hibernating sockets, per-device queues, APNs | ✅ local runtime |
 | [test/](test/README.md) | Real room/socket regressions and security mutations | ✅ |
 | [relay-join.md](../../SYS/protocol/relay-join.md) | First-pair/client signing contract and transport limits | ✅ implemented; client pairing unverified |
-| [SECURITY.md](SECURITY.md) | Trust, storage and delivery boundary | ✅ |
+| [SECURITY.md](SECURITY.md) | Trust, storage, cloud endpoint/auth contract and spend configuration | ✅ synthetic tests; live vendors unverified |
 | [ci/](ci/README.md) / [relay.yml](../../.github/workflows/relay.yml) | Daily/tag/manual CI; version, credential and main-ancestry deployment guards | ✅ local guards; hosted run unverified |
-| [wrangler.jsonc](wrangler.jsonc) | Room, Admission and WakeProvider SQLite bindings/migrations | ✅ dry-run configuration |
+| [wrangler.jsonc](wrangler.jsonc) | Room, Admission, WakeProvider and CloudBudget SQLite bindings/migrations | ✅ dry-run configuration |
 | [package.json](package.json), [package-lock.json](package-lock.json), [tsconfig.json](tsconfig.json), [vitest.config.ts](vitest.config.ts) | Pinned tooling; strict TypeScript; ≤4 parallel workers | ✅ |
 
 Start: `npm ci --prefix SW/relay --ignore-scripts`, then
@@ -54,6 +57,23 @@ For local or guaranteed HTTP/2, use an owner-controlled authenticated gateway
 with an explicit Node `http2`/nginx HTTP/2 upstream, receiving only the fixed wake
 signal and device registration. No gateway is built here.
 
-Trace: REQ-22–26, REQ-61. **Real-network test across two networks: unverified until
+Cloud proxy: `GET .../proxy/elevenlabs`, `GET .../proxy/assemblyai` (WebSocket)
+and `POST .../proxy/anthropic` (Messages), for current room members using the same
+Ed25519 challenge flow. Cloud access requires configured trusted provisioning,
+a room created through it, paired redemption, and two current members. See [SECURITY.md](SECURITY.md#cloud-proxy-contract) for
+canonical query signing and headers, fixed destinations, caps and client integration changes.
+Worker secrets `ANTHROPIC_API_KEY`, `ELEVENLABS_API_KEY`, `ASSEMBLYAI_API_KEY` stay
+off the phone. Missing keys disable their provider; checked-in zero policy vars
+disable all cloud calls. Limits/reservation prices are **TBC** before deployment.
+
+**Room frames remain ciphertext-only. Cloud proxy audio, vocabulary, transcripts,
+and prompts are plaintext to the Worker and selected vendor by design**, over TLS;
+the proxy does not log or store them. **The app must show when cloud is in use**
+(REQ-56/58); app integration/indicator and provider retention are **unverified**.
+The Worker never approves or executes model output. Synthetic fake-upstream tests
+cover authentication, revocation, forwarding, secret/content containment and caps;
+live vendor access and billing calibration remain **unverified**.
+
+Trace: REQ-9/11, REQ-22–26, REQ-37, REQ-56/58, REQ-61. **Real-network test across two networks: unverified until
 deployed.** Actual client Noise/phone wake, delivery latency and hosted CI remain
 **unverified**. No deployment performed.
