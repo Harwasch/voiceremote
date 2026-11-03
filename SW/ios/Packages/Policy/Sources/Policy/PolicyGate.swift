@@ -44,6 +44,7 @@ public enum GateDecision: Sendable {
     private let proposalLifetime: Int64
     private var lastTime: Int64
     private var proposals: [UUID: Proposal] = [:]
+    private var issuedPermits: [String: ExecutionPermit] = [:]
     private var grants: [UUID: GrantEvidence] = [:]
     private var consumed: [String: String] = [:]
     private var commands: [String: String] = [:] // command ID → authenticated scope digest
@@ -316,7 +317,31 @@ public enum GateDecision: Sendable {
         var queued = p; queued.state = .queued; queued.authenticating = false
         queued.grantID = approval == nil ? UUID(uuidString: scope) : nil
         proposals[p.input.requestID] = queued
-        return .queued(ExecutionPermit(command: command, immutablePreview: p.bytes, expiresAt: p.expiresAt))
+        let permit = ExecutionPermit(command: command, immutablePreview: p.bytes, expiresAt: p.expiresAt)
+        issuedPermits[command.command_id] = permit
+        return .queued(permit)
+    }
+
+    /// Revalidates retained routing storage against a permit actually issued by
+    /// this live gate. Raw commands/preview hashes cannot mint authority. A new
+    /// gate after restart requires reapproval, matching the existing restart rule.
+    public func verifyExecution(command: AuthorizedCommand, immutablePreview: Data,
+                                expiresAt: Int64) throws -> ExecutionPermit {
+        try audit.checkIntegrity()
+        let time = try now()
+        guard let issued = issuedPermits[command.command_id], issued.command == command,
+              issued.immutablePreview == immutablePreview, issued.expiresAt == expiresAt,
+              PayloadDigest.sha256(immutablePreview) == command.payload_hash,
+              time < expiresAt, let request = UUID(uuidString: command.candidate_id),
+              let p = proposals[request], p.key == command.idempotency_key,
+              p.hash == command.payload_hash, p.tool == command.immutable_task_payload,
+              p.input.session.device == command.destination_id, valid(p.input.session),
+              [.queued, .dispatched, .running].contains(p.state) else { throw PolicyError.invalid }
+        if let id = p.grantID {
+            guard let grant = grants[id], !revokedGrantIDs.contains(grantKey(id)),
+                  valid(grant.session), grant.expiresAt > time else { throw PolicyError.invalid }
+        }
+        return issued
     }
 
     public func edit(requestID: UUID, modelJSON: Data) -> GateDecision {

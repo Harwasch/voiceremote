@@ -19,6 +19,7 @@ flowchart LR
 | [Configuration/](Configuration/README.md) | Shared App Group entitlement; generated Info plists | ✅ Configuration |
 | [Packages/Core/](Packages/Core/README.md) | Independent mode/capture, triggers, Auto target, text history, registry and safe dictation | ✅ Linux unit tests; UI adapters pending |
 | [Packages/Pairing/](Packages/Pairing/README.md) | Noise XX, QR checks, four-word phrase and both-screen confirmation gate | ✅ Cacophony/Linux tests; live desktop pairing **unverified** |
+| [Packages/Router/](Packages/Router/README.md) | Policy-permit routing, destination-bound holds, labelled cloud candidates and durable task queue (REQ-34/42–45/60) | ✅ Linux Policy integration tests; UI/provider wiring **unverified** |
 | [Packages/Protocol/](Packages/Protocol/README.md) | Generated validating wire codecs | ✅ Linux round-trip tests |
 | [Packages/](Packages/README.md) | Stt and Brain skeletons; portable package map | 🟡 Feature implementations pending |
 | [Packages/](Packages/README.md) | Core, Stt, Brain: portable Swift skeletons with tests | ✅ Linux tests; features not implemented |

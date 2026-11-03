@@ -9,6 +9,7 @@ flowchart LR
 
 | File | Content | Status |
 |---|---|---|
+| [RoutingPermitTests.swift](RoutingPermitTests.swift) | Exact stored command/preview/hash/destination binding, revocation, expiry and gate restart | ✅ Linux |
 | [GateTests.swift](GateTests.swift) | Every schema tool × tiers 1–3; injection, scope, expiry, races and replay | ✅ Synthetic Linux tests |
 | [AuditTests.swift](AuditTests.swift) | SHA-256 vectors, tampering, crash failures, actual file reopen and locking | ✅ Linux |
 | [AuthorityBoundaryTests.swift](AuthorityBoundaryTests.swift) | External swiftc invocation proves authority constructors/decoding are unavailable and registry kind is required; repository lint fixtures | ✅ Linux |

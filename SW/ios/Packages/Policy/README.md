@@ -34,3 +34,5 @@ archival remain **unverified**. Retention marks records due for archival; it nev
 live audit history or replay tombstones. See the security model before app integration.
 
 Cross-review hardening: risk cannot fall on edit; grants have per-risk TTL caps and durable revocation; dismissal/cancellation survive reconnect and restart. Explicit authenticated audit recovery preserves history and records clock correction. The Policy suite also enforces the TrustedInput import boundary in Brain/Stt and their Apple packages.
+
+Router integrations use `PolicyGate.verifyExecution(command:immutablePreview:expiresAt:)` to check stored data against an actually issued live permit, exact command/preview/hash, expiry, revocation and audit integrity. Loading raw Codable commands never mints a permit. A new gate after restart requires reapproval; see `RoutingPermitGateTests`.
