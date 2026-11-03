@@ -2,18 +2,42 @@ import ActivityKit
 import AppIntents
 
 @MainActor final class ListeningActivity {
-    private var activity: Activity<VoiceRemoteAttributes>?
+    // Activity is not Sendable in the SDK. Only its ID crosses actor boundaries;
+    // the nonisolated operations below obtain their own task-local SDK handle.
+    private var activityID: String?
+    private var pendingUpdate: Task<Void, Never>?
     func setListening(_ listening: Bool, destination: String) {
         if listening {
-            let content = ActivityContent(state: VoiceRemoteAttributes.ContentState(status: "Listening", destination: destination), staleDate: nil)
             do {
-                if let activity { Task { await activity.update(content) } }
-                else { activity = try Activity.request(attributes: VoiceRemoteAttributes(), content: content, pushType: nil) }
+                if let id = activityID {
+                    enqueue { await ListeningActivityOperations.update(id: id, destination: destination) }
+                } else { activityID = try ListeningActivityOperations.request(destination: destination) }
             } catch { AppRuntime.shared?.model.interrupt() }
-        } else if let current = activity {
-            activity = nil
-            Task { await current.end(nil, dismissalPolicy: .immediate) }
+        } else if let id = activityID {
+            activityID = nil
+            enqueue { await ListeningActivityOperations.end(id: id) }
         }
+    }
+    private func enqueue(_ operation: @escaping @Sendable () async -> Void) {
+        let previous = pendingUpdate
+        pendingUpdate = Task { await previous?.value; await operation() }
+    }
+}
+
+private enum ListeningActivityOperations {
+    nonisolated static func request(destination: String) throws -> String {
+        try Activity.request(attributes: VoiceRemoteAttributes(), content: content(destination), pushType: nil).id
+    }
+    nonisolated static func update(id: String, destination: String) async {
+        guard let activity = Activity<VoiceRemoteAttributes>.activities.first(where: { $0.id == id }) else { return }
+        await activity.update(content(destination))
+    }
+    nonisolated static func end(id: String) async {
+        guard let activity = Activity<VoiceRemoteAttributes>.activities.first(where: { $0.id == id }) else { return }
+        await activity.end(nil, dismissalPolicy: .immediate)
+    }
+    nonisolated private static func content(_ destination: String) -> ActivityContent<VoiceRemoteAttributes.ContentState> {
+        ActivityContent(state: .init(status: "Listening", destination: destination), staleDate: nil)
     }
 }
 

@@ -183,7 +183,7 @@ private struct UnavailableBrain: LlmBrain {
     private(set) var online = false
     private let monitor = NWPathMonitor()
     init() {
-        monitor.pathUpdateHandler = { [weak self] path in
+        monitor.pathUpdateHandler = { @Sendable [weak self] path in
             let online = path.status == .satisfied
             Task { @MainActor [weak self] in self?.online = online }
         }

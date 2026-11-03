@@ -34,7 +34,7 @@ import Stt
     static func requestPermissions() async -> Bool {
         let microphone = await AVAudioApplication.requestRecordPermission()
         let speech = await withCheckedContinuation { continuation in
-            SFSpeechRecognizer.requestAuthorization { continuation.resume(returning: $0 == .authorized) }
+            SFSpeechRecognizer.requestAuthorization { @Sendable status in continuation.resume(returning: status == .authorized) }
         }
         return microphone && speech
     }
@@ -65,7 +65,7 @@ import Stt
     }
     private func observe(session: AVAudioSession) {
         let center = NotificationCenter.default
-        observers.append(center.addObserver(forName: AVAudioSession.routeChangeNotification, object: session, queue: .main) { [weak self] notification in
+        observers.append(center.addObserver(forName: AVAudioSession.routeChangeNotification, object: session, queue: .main) { @Sendable [weak self] notification in
             let reason = (notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt).flatMap(AVAudioSession.RouteChangeReason.init(rawValue:))
             let event: AudioRouteEvent
             switch reason {
@@ -77,11 +77,11 @@ import Stt
             }
             Task { @MainActor [weak self] in self?.handle(AudioRoutePolicy.action(for: event)) }
         })
-        observers.append(center.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
+        observers.append(center.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { @Sendable [weak self] _ in
             Task { @MainActor [weak self] in self?.handle(.restart) }
         })
         for name in [AVAudioSession.interruptionNotification, AVAudioSession.mediaServicesWereResetNotification] {
-            observers.append(center.addObserver(forName: name, object: session, queue: .main) { [weak self] notification in
+            observers.append(center.addObserver(forName: name, object: session, queue: .main) { @Sendable [weak self] notification in
                 if notification.name == AVAudioSession.interruptionNotification,
                    let kind = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
                    kind == AVAudioSession.InterruptionType.ended.rawValue { return }

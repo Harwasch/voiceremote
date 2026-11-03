@@ -23,3 +23,8 @@ Listening is the main app's last published capture state, not microphone use by 
 The app must publish and prune the queue; see the [producer contract](../Packages/KeyboardBridge/README.md).
 For unsupported fields use explicit copy/share in the main app; app UI integration and
 owner checks in Messages/Mail (including no auto-send) remain **unverified**.
+
+Swift 6 audit: the Darwin C callback is formed in a nonisolated factory, and the
+timer closure is explicitly Sendable. Both send only the MainActor controller
+reference to UI work. Linux strict-concurrency checks cover the callback pattern;
+UIKit SDK compilation and callback execution remain **unverified** pending CI.

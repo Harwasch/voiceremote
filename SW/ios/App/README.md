@@ -48,3 +48,16 @@ Apple references checked for this correction: [route reasons](https://developer.
 [gesture reset](https://developer.apple.com/documentation/swiftui/gesturestate),
 [engine reconfiguration](https://developer.apple.com/documentation/avfaudio/avaudioengineconfigurationchangenotification),
 [long-write distinction](https://developer.apple.com/documentation/corebluetooth/cbcharacteristicwritetype).
+
+Swift 6 audit: ActivityKit handles stay inside nonisolated operations; only IDs and
+strings enter the ordered update/end queue. Bluetooth delegates run synchronously
+on their configured main queue, without transferring SDK objects in Tasks. QR
+configuration/start/stop share one serial owner; permission, network, audio and
+share callbacks explicitly use Sendable closures. First BLE state write waits for
+subscriptions and requests a snapshot even if reconnect's initial notification was
+missed. Portable reconnect regression was reproduced failing first; Apple SDK build
+and device execution remain **unverified** pending CI.
+API references: [Activity lookup](https://developer.apple.com/documentation/activitykit/activity/activities),
+[async updates](https://developer.apple.com/documentation/activitykit/activity/update(_:alertconfiguration:)),
+[Bluetooth delegate queue](https://developer.apple.com/documentation/corebluetooth/cbcentralmanager/init(delegate:queue:)),
+[serial camera session](https://developer.apple.com/documentation/avfoundation/avcapturesession).

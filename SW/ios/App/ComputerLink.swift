@@ -234,13 +234,13 @@ private final class LANTransport: PairingTransport, @unchecked Sendable {
                 try await withTaskCancellationHandler {
                     try await withCheckedThrowingContinuation { continuation in
                         let once = DiscoveryResult(continuation)
-                        browser.browseResultsChangedHandler = { results, _ in
+                        browser.browseResultsChangedHandler = { @Sendable results, _ in
                             for result in results {
                                 if case .bonjour(let record) = result.metadata,
                                    record.dictionary["room"] == room { once.complete(.success(result.endpoint)); return }
                             }
                         }
-                        browser.stateUpdateHandler = { state in
+                        browser.stateUpdateHandler = { @Sendable state in
                             if case .failed(let error) = state { once.complete(.failure(error)) }
                             if case .cancelled = state { once.complete(.failure(CancellationError())) }
                         }

@@ -147,3 +147,9 @@ HOLD failure/cancellation, Auto presentation, real Router queue/retry, persisted
 restoration, PairingFlow, revoke cleanup, consent withdrawal and cold-runtime bootstrap.
 Apple route reconfiguration, local Bindable fixes, gestures and BLE display writes remain
 **unverified** until `ios-ci-*` and phone checks. No Core package modification was needed.
+
+Swift 6 follow-up audits all App, LiveActivity, KeyboardExt and intent sources:
+ActivityKit ID-only operations, serial camera ownership, synchronous main-queue BLE
+delegates, and explicit Sendable callbacks. Reconnect requests an Input snapshot in
+the first state write after subscriptions. Portable regression reproduced failing
+first; Apple SDK compilation and device execution of these changes **unverified**.

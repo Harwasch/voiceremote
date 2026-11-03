@@ -16,7 +16,7 @@ flowchart LR
 | [AppHistoryStore.swift](AppHistoryStore.swift) | Private text-only file, seven-day retention, delete | ✅ Synthetic Linux tests |
 | [CaptureSegmenter.swift](CaptureSegmenter.swift) | Bounded in-memory continuous utterances | 🟡 Synthetic tests; speech thresholds **TBC** |
 | [PairingFlow.swift](PairingFlow.swift) | Cancel-safe UI state and small ComputerPairing adapter protocol | 🟡 Package contracts; live transport **unverified** |
-| [RemoteContract.swift](RemoteContract.swift) | Draft BLE info/input/audio/state parsing, fragmentation, source scoring | 🟡 Synthetic vectors; hardware **unverified** |
+| [RemoteContract.swift](RemoteContract.swift) | Draft BLE info/input/audio/state parsing, first-write snapshot recovery, fragmentation, source scoring | 🟡 Synthetic vectors; hardware **unverified** |
 | [BenchmarkRecorder.swift](BenchmarkRecorder.swift) | Prompt reader, explicit private PCM store, A/B and export lifecycle | ✅ Synthetic schema/deletion tests; phone **unverified** |
 
 Start with `VoiceAppModel`. Purpose/inputs/verification and REQ trace: [package map](../README.md).

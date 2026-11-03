@@ -1,7 +1,7 @@
 import ActivityKit
 
-struct VoiceRemoteAttributes: ActivityAttributes {
-    struct ContentState: Codable, Hashable {
+struct VoiceRemoteAttributes: ActivityAttributes, Sendable {
+    struct ContentState: Codable, Hashable, Sendable {
         var status: String
         var destination: String
     }
