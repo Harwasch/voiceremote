@@ -57,6 +57,7 @@ void app_main(void)
     audio_init();
     ble_start();
 #ifdef REMOTE_TEST_HOOK
+    esp_log_level_set("*",ESP_LOG_INFO); /* Test runs read the port, so detail is safe here. */
     ESP_LOGW("test_hook","TEST BUILD: USB local-input hook ENABLED (o/p/r d/u h t x B Y)");
     usb_serial_jtag_driver_config_t hook_config=USB_SERIAL_JTAG_DRIVER_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&hook_config));

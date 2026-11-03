@@ -2,7 +2,7 @@
 #include "protocol.h"
 #define VR_AUDIO_SAMPLES 320
 #define VR_AUDIO_BITRATE 24000 /* Starting point, throughput/quality unverified. */
-#define VR_AUDIO_QUEUE 4
+#define VR_AUDIO_QUEUE 8
 /* Pure bounded encoded-packet queue. Caller serializes access. */
 typedef struct { uint16_t size, frame; uint8_t data[VR_MAX_PACKET]; } vr_packet_t;
 typedef struct {
