@@ -81,7 +81,13 @@ public struct BenchRun: Encodable, Sendable {
         return try runs.dropFirst().reduce(first) { try $0.merging($1) }
     }
     static func validID(_ value: String) -> Bool {
-        value.range(of: "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$", options: .regularExpression) != nil
+        // Check the entire scalar sequence: regex "$" can stop before a trailing CRLF.
+        let points = value.unicodeScalars.map(\.value)
+        func alphanumeric(_ point: UInt32) -> Bool {
+            (0x41...0x5a).contains(point) || (0x61...0x7a).contains(point) || (0x30...0x39).contains(point)
+        }
+        guard (1...128).contains(points.count), let first = points.first, alphanumeric(first) else { return false }
+        return points.dropFirst().allSatisfy { alphanumeric($0) || [0x5f, 0x2e, 0x3a, 0x2d].contains($0) }
     }
     public func json() throws -> Data {
         let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]

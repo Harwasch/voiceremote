@@ -6,7 +6,7 @@
 | References | Local `$defs` and cross-document refs to the two locally registered `$id` values; no remote fetching or cycles |
 | Unions | `oneOf` of named records, distinguished by unique literal `kind` fields |
 | Presence | `required` + absence for optionals; no nullable fields or free-form maps |
-| Constraints | `const`, `enum`, numeric bounds, string/array lengths, the contract's portable regex patterns |
+| Constraints | `const`, `enum`, numeric bounds, string/array lengths, the contract's reviewed pattern strings |
 | Conditions | `allOf`, `if` + `then`, `not` for trusted-command approval rules and text/byte constraints |
 | Annotations | `$schema`, `$id`, `$defs`, `title`, `description` |
 
@@ -32,3 +32,7 @@ No third-party generator code is copied. Runtime dependencies are serde,
 serde_json and regex (MIT/Apache-2.0), Ajv and Vitest (MIT), TypeScript
 (Apache-2.0); installed package manifests supply their license declarations.
 No Hex/Handy source is reused. Full transitive license audit is **unverified**.
+
+Swift implements the six reviewed patterns with scalar-value predicates and full-sequence ASCII
+checks rather than regex. This avoids CRLF grapheme splitting and platform-specific anchor rules.
+The generator invariant checks matcher coverage whenever the pattern allowlist changes.

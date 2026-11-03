@@ -54,7 +54,16 @@ struct BenchSchemaValidator {
         }
         if let text = value as? String {
             if let minimum = schema["minLength"] as? Int { try require(text.count >= minimum) }
-            if let pattern = schema["pattern"] as? String { try require(text.range(of: pattern, options: .regularExpression) != nil) }
+            if let pattern = schema["pattern"] as? String {
+                // This is the sole pattern used by run v1. Do not use platform regex anchors.
+                guard pattern == "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$" else { throw Invalid.value }
+                let points = text.unicodeScalars.map(\.value)
+                func alphanumeric(_ point: UInt32) -> Bool {
+                    (65...90).contains(point) || (97...122).contains(point) || (48...57).contains(point)
+                }
+                try require((1...128).contains(points.count) && points.first.map(alphanumeric) == true)
+                try require(points.dropFirst().allSatisfy { alphanumeric($0) || [95, 46, 58, 45].contains($0) })
+            }
         }
         if let number, !boolean {
             try require(number.doubleValue.isFinite)
