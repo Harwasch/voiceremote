@@ -132,12 +132,15 @@ import VoiceRemoteProtocol
     }
     private func pump() {
         guard activeWrite == nil, !queue.isEmpty, info != nil,
+              inputSubscribed, audioSubscribed,
               let peripheral, let characteristic = stateCharacteristic else { return }
         let request = queue.removeFirst()
         do {
             transaction &+= 1
             let budget = RemotePhoneState.writeBudget(osMaximum: peripheral.maximumWriteValueLength(for: .withResponse))
-            writes = try request.state.fragments(transaction: transaction, budget: budget)
+            var nextTracker = tracker
+            writes = try nextTracker.stateForWrite(request.state).fragments(transaction: transaction, budget: budget)
+            tracker = nextTracker
             activeWrite = request; displayReady = false
             peripheral.writeValue(writes.removeFirst(), for: characteristic, type: .withResponse)
         } catch { request.completion?.resume(throwing: error); pump() }
@@ -159,47 +162,48 @@ import VoiceRemoteProtocol
         disconnect()
         status = "Interrupted — reconnect and use a fresh trigger"
     }
+    // The central is created on .main; its peripheral delegates use that same
+    // queue. Handle callbacks synchronously there: never send CB objects in Tasks.
     nonisolated func centralManagerDidUpdateState(_ central: CBCentralManager) {
-        Task { @MainActor [weak self] in
-            guard let self else { return }
+        MainActor.assumeIsolated { [self] in
             if central.state == .poweredOn { if wantsScan { scan() } }
             else if central.state != .unknown && central.state != .resetting { disconnect(); status = "Bluetooth is unavailable" }
         }
     }
     nonisolated func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral,
         advertisementData: [String: Any], rssi RSSI: NSNumber) {
-        Task { @MainActor [weak self] in
-            guard let self, !discovered.contains(where: { $0.identifier == peripheral.identifier }) else { return }
+        MainActor.assumeIsolated { [self] in
+            guard !discovered.contains(where: { $0.identifier == peripheral.identifier }) else { return }
             discovered.append(peripheral)
         }
     }
     nonisolated func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
-        Task { @MainActor [weak self] in
-            guard self?.peripheral === peripheral else { return }
+        MainActor.assumeIsolated { [self] in
+            guard self.peripheral === peripheral else { return }
             peripheral.discoverServices([Self.service])
         }
     }
     nonisolated func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
-        Task { @MainActor [weak self] in
-            guard self?.peripheral === peripheral else { return }; self?.loss()
+        MainActor.assumeIsolated { [self] in
+            guard self.peripheral === peripheral else { return }; self.loss()
         }
     }
     nonisolated func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
-        Task { @MainActor [weak self] in
-            guard self?.peripheral === peripheral else { return }; self?.disconnect()
+        MainActor.assumeIsolated { [self] in
+            guard self.peripheral === peripheral else { return }; self.disconnect()
         }
     }
     nonisolated func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
-        Task { @MainActor [weak self] in
-            guard self?.peripheral === peripheral else { return }
-            guard error == nil, let service = peripheral.services?.first(where: { $0.uuid == Self.service }) else { self?.loss(); return }
+        MainActor.assumeIsolated { [self] in
+            guard self.peripheral === peripheral else { return }
+            guard error == nil, let service = peripheral.services?.first(where: { $0.uuid == Self.service }) else { self.loss(); return }
             peripheral.discoverCharacteristics([Self.infoID, Self.inputID, Self.stateID, Self.audioID], for: service)
         }
     }
     nonisolated func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
-        Task { @MainActor [weak self] in
-            guard self?.peripheral === peripheral else { return }
-            guard let self, error == nil, let characteristics = service.characteristics, characteristics.count == 4 else { self?.loss(); return }
+        MainActor.assumeIsolated { [self] in
+            guard self.peripheral === peripheral else { return }
+            guard error == nil, let characteristics = service.characteristics, characteristics.count == 4 else { self.loss(); return }
             for characteristic in characteristics {
                 switch characteristic.uuid {
                 case Self.infoID: peripheral.readValue(for: characteristic)
@@ -211,18 +215,18 @@ import VoiceRemoteProtocol
         }
     }
     nonisolated func peripheral(_ peripheral: CBPeripheral, didUpdateNotificationStateFor characteristic: CBCharacteristic, error: Error?) {
-        Task { @MainActor [weak self] in
-            guard self?.peripheral === peripheral else { return }
-            guard let self, error == nil, characteristic.isNotifying else { self?.loss(); return }
+        MainActor.assumeIsolated { [self] in
+            guard self.peripheral === peripheral else { return }
+            guard error == nil, characteristic.isNotifying else { self.loss(); return }
             if characteristic.uuid == Self.inputID { inputSubscribed = true }
             if characteristic.uuid == Self.audioID { audioSubscribed = true }
+            pump()
         }
     }
     nonisolated func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
-        let value = characteristic.value
-        Task { @MainActor [weak self] in
-            guard self?.peripheral === peripheral else { return }
-            guard let self, error == nil, let value else { self?.loss(); return }
+        MainActor.assumeIsolated { [self] in
+            guard self.peripheral === peripheral else { return }
+            guard error == nil, let value = characteristic.value else { self.loss(); return }
             do {
                 switch characteristic.uuid {
                 case Self.infoID:
@@ -249,9 +253,9 @@ import VoiceRemoteProtocol
         }
     }
     nonisolated func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
-        Task { @MainActor [weak self] in
-            guard self?.peripheral === peripheral else { return }
-            guard let self, error == nil, characteristic.uuid == Self.stateID else { self?.loss(); return }
+        MainActor.assumeIsolated { [self] in
+            guard self.peripheral === peripheral else { return }
+            guard error == nil, characteristic.uuid == Self.stateID else { self.loss(); return }
             guard let request = activeWrite else { return }
             if writes.isEmpty {
                 activeWrite = nil; displayReady = true

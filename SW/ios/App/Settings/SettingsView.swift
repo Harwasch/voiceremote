@@ -97,11 +97,13 @@ private struct RecorderView: View {
 }
 private struct RunShareSheet: UIViewControllerRepresentable {
     let url: URL
-    let completion: @MainActor (Bool) -> Void
+    let completion: @MainActor @Sendable (Bool) -> Void
     func makeUIViewController(context: Context) -> UIActivityViewController {
         let controller = UIActivityViewController(activityItems: [url], applicationActivities: nil)
-        controller.completionWithItemsHandler = { _, completed, _, error in
-            Task { @MainActor in completion(completed && error == nil) }
+        let completion = completion
+        controller.completionWithItemsHandler = { @Sendable _, completed, _, error in
+            let success = completed && error == nil
+            Task { @MainActor in completion(success) }
         }
         return controller
     }

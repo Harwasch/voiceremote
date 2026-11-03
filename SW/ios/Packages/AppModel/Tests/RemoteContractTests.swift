@@ -4,6 +4,26 @@ import Stt
 @testable import AppModel
 
 private func bytes(_ hex: String) -> Data { Data(hex.split(separator: " ").map { UInt8($0, radix: 16)! }) }
+@Test func reconnectRequestsSnapshotWithoutWaitingForInitialNotification() throws {
+    var tracker = RemoteInputTracker()
+    let first = tracker.stateForWrite(RemotePhoneState())
+    #expect(first.requestSnapshot)
+    #expect(!first.arm)
+    #expect(try first.fragments(transaction: 1, budget: 20).first?[6] == 1)
+    #expect(!tracker.synchronized)
+    // A retry still requests recovery until an actual Input snapshot arrives.
+    #expect(tracker.stateForWrite(RemotePhoneState()).requestSnapshot)
+    #expect(try !tracker.accept(RemoteInput(bytes("2a 00 00 00 e8 03 00 00 00 01 01 00 00 00"))))
+    #expect(!tracker.stateForWrite(RemotePhoneState()).requestSnapshot)
+    var explicit = RemotePhoneState(); explicit.requestSnapshot = true
+    #expect(tracker.stateForWrite(explicit).requestSnapshot)
+    tracker.reset()
+    // Even if subscription happened to deliver the initial snapshot, the first
+    // state write after reconnect explicitly requests a fresh one.
+    _ = try tracker.accept(RemoteInput(bytes("00 00 00 00 e8 03 00 00 00 01 01 00 00 00")))
+    #expect(tracker.stateForWrite(RemotePhoneState()).requestSnapshot)
+    #expect(!tracker.stateForWrite(RemotePhoneState()).requestSnapshot)
+}
 @Test func draftInfoAndSmallMTUAudioVectors() throws {
     let info = try RemoteInfo(bytes("01 00 ff ff 00 01 02 00 3f 00 01 01 f0 00 18 01 00 02 00 00"))
     #expect(info.maxPacket == 512); #expect(!info.hardwareMicCut)

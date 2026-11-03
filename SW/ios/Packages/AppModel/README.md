@@ -45,3 +45,7 @@ TaskRouter; missing machine executors produce durable holds. Unsupported executo
 unknown pinned provider sessions report queue-confirmation failure, never a fictional hold.
 Settings persistence is synchronous on change, including consent withdrawal. Core itself
 needed no change: PeerStore restores only active metadata with a present Keychain key.
+BLE reconnect regression: the first actual phone-state write requests an Input
+snapshot, including when the unsolicited reconnect snapshot arrived before subscription.
+Further writes request recovery until synchronized; reset restores the first-write rule.
+Synthetic test reproduced the missing flag before the fix; BLE hardware **unverified**.

@@ -15,3 +15,5 @@ SW/bench schema/sets; verification: syntax parse only. REQ-9–14/37/56; accurac
 Cross-review: local Bindable references avoid writable key paths through runtime lets.
 Settings changes persist immediately to a protected private file; consent withdrawal
 also stops active capture. Apple compilation remains **unverified**.
+Share completion is explicitly Sendable and sends only a success Bool to MainActor;
+UIKit callback arguments remain inside the callback. SDK compilation **unverified**.

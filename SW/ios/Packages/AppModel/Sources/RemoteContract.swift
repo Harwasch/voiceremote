@@ -42,6 +42,7 @@ public struct RemoteInput: Sendable {
 public struct RemoteInputTracker: Sendable {
     public private(set) var last: RemoteInput?
     public private(set) var synchronized = false
+    private var hasWrittenState = false
     public init() {}
     public mutating func accept(_ input: RemoteInput) throws -> Bool {
         if let last {
@@ -61,7 +62,16 @@ public struct RemoteInputTracker: Sendable {
         guard synchronized else { return false }
         return true
     }
-    public mutating func reset() { last = nil; synchronized = false }
+    public mutating func reset() { last = nil; synchronized = false; hasWrittenState = false }
+
+    /// Call at the first actual write, after Input subscription, not when enqueuing.
+    /// Reconnect's unsolicited snapshot can precede subscription; never wait for it.
+    public mutating func stateForWrite(_ state: RemotePhoneState) -> RemotePhoneState {
+        var value = state
+        value.requestSnapshot = value.requestSnapshot || !hasWrittenState || !synchronized
+        hasWrittenState = true
+        return value
+    }
 }
 
 /// Binary layout from draft remote-ble-draft.md, v1.0. No concealment or splicing.
