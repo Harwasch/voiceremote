@@ -34,28 +34,35 @@ public final class URLSessionBrainTransport: BrainHTTPTransport, Sendable {
 }
 
 /// One reader per request; enforce the cap on headers and every chunk before appending.
-private final class BoundedBrainReader: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+final class BoundedBrainReader: NSObject, URLSessionDataDelegate, @unchecked Sendable {
     private let lock = NSLock()
     private var continuation: CheckedContinuation<BrainHTTPResponse, any Error>?
     private var task: URLSessionDataTask?
-    private var cancelled = false
+    private var result: Result<BrainHTTPResponse, any Error>?
     private var data = Data()
     private var status = 0
     private let limit = 1_048_576
     func start(session: URLSession, request: URLRequest,
                continuation: CheckedContinuation<BrainHTTPResponse, any Error>) {
         lock.lock()
-        if cancelled { lock.unlock(); continuation.resume(throwing: CancellationError()); return }
+        if let result { lock.unlock(); continuation.resume(with: result); return }
         self.continuation = continuation
         let task = session.dataTask(with: request); self.task = task
         lock.unlock(); task.resume()
     }
     func cancel() {
-        lock.lock(); cancelled = true; let task = task; lock.unlock()
-        task?.cancel(); finish(.failure(CancellationError()))
+        // Settle first: URLSession cancellation is asynchronous and may deliver
+        // more delegate callbacks, including URLError.cancelled.
+        finish(.failure(CancellationError()))
+        lock.lock(); let task = task; lock.unlock()
+        task?.cancel()
     }
     private func finish(_ result: Result<BrainHTTPResponse, any Error>) {
-        lock.lock(); let pending = continuation; continuation = nil; lock.unlock()
+        lock.lock()
+        guard self.result == nil else { lock.unlock(); return }
+        self.result = result
+        let pending = continuation; continuation = nil
+        lock.unlock()
         pending?.resume(with: result)
     }
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse,
@@ -63,20 +70,46 @@ private final class BoundedBrainReader: NSObject, URLSessionDataDelegate, @unche
         guard let http = response as? HTTPURLResponse else {
             finish(.failure(BrainError.invalidResponse)); completionHandler(.cancel); return
         }
+        // Check both length representations; neither is a substitute for counting
+        // the delivered body. Invalid/overflowing declared lengths fail closed.
+        if let declared = http.value(forHTTPHeaderField: "Content-Length") {
+            guard let length = UInt64(declared.trimmingCharacters(in: .whitespacesAndNewlines)),
+                  length <= UInt64(limit) else {
+                finish(.failure(BrainError.responseTooLarge)); completionHandler(.cancel); return
+            }
+        }
         guard response.expectedContentLength <= Int64(limit) else {
             finish(.failure(BrainError.responseTooLarge)); completionHandler(.cancel); return
         }
-        status = http.statusCode; completionHandler(.allow)
+        lock.lock()
+        let active = result == nil
+        if active { status = http.statusCode }
+        lock.unlock()
+        completionHandler(active ? .allow : .cancel)
     }
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive chunk: Data) {
+        lock.lock()
+        guard result == nil else { lock.unlock(); return }
         guard chunk.count <= limit - data.count else {
-            dataTask.cancel(); finish(.failure(BrainError.responseTooLarge)); return
+            // Latch the cap decision under the same lock as the byte count.
+            // Neither cancellation nor a queued completion can replace it.
+            let failure: Result<BrainHTTPResponse, any Error> = .failure(BrainError.responseTooLarge)
+            result = failure
+            let pending = continuation; continuation = nil
+            lock.unlock()
+            pending?.resume(with: failure)
+            dataTask.cancel()
+            return
         }
         data.append(chunk)
+        lock.unlock()
     }
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: (any Error)?) {
         if let error { finish(.failure(error)) }
-        else { finish(.success(BrainHTTPResponse(data: data, statusCode: status))) }
+        else {
+            lock.lock(); let response = BrainHTTPResponse(data: data, statusCode: status); lock.unlock()
+            finish(.success(response))
+        }
     }
     func urlSession(_ session: URLSession, task: URLSessionTask,
                     willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest,

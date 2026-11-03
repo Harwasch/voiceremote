@@ -173,9 +173,10 @@ jobs:
           NO_STRIP: true
         with:
           projectPath: SW/desktop/crates/tray
-          args: --locked --features gui --bundles ${{ matrix.bundles }} --config tauri.bundle.conf.json ${{ env.TRAY_SIGNING_ARGS }}
+          # Tauri options precede --; Cargo receives the lockfile guard after it.
+          args: --features gui --bundles ${{ matrix.bundles }} --config tauri.bundle.conf.json ${{ env.TRAY_SIGNING_ARGS }} -- --locked
           tagName: ${{ startsWith(github.ref, 'refs/tags/desktop-v') && github.ref_name || '' }}
-          releaseName: Voice Receiver ${{ github.ref_name }}
+          releaseName: ${{ startsWith(github.ref, 'refs/tags/desktop-v') && format('Voice Receiver {0}', github.ref_name) || '' }}
           releaseBody: Windows NSIS and Linux deb/AppImage. Native desktop and physical phone acceptance remain unverified. Unsigned Windows builds may trigger SmartScreen.
           releaseDraft: true
           prerelease: false
