@@ -135,6 +135,7 @@ enum Command {
 }
 #[derive(Subcommand)]
 enum DictateCommand {
+    /// Stop phone capture. Starting its microphone requires a tap on the phone.
     Toggle,
 }
 struct UnavailableInjector;
@@ -327,7 +328,7 @@ async fn main() -> Result<()> {
         .try_init();
     if matches!(cli.command, Command::Dictate { .. }) {
         control::send(&cli.state_dir).await?;
-        println!("Phone confirmed capture request");
+        println!("Phone confirmed stop");
         return Ok(());
     }
     let _lease = if !matches!(cli.command, Command::Devices | Command::Revoke { .. }) {

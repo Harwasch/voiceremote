@@ -29,6 +29,8 @@ pub struct Status {
 #[derive(Default)]
 pub struct Hub {
     next: u64,
+    gesture: CaptureTrigger,
+    gesture_context: Option<(u64, Option<Mode>, Option<CaptureState>)>,
     sessions: BTreeMap<u64, mpsc::Sender<Toggle>>,
     pub status: Status,
     pub presentation_required: bool,
@@ -36,6 +38,10 @@ pub struct Hub {
     pub revocations: BTreeMap<String, oneshot::Sender<bool>>,
 }
 impl Hub {
+    pub fn clear_gesture(&mut self) {
+        self.gesture = CaptureTrigger::default();
+        self.gesture_context = None;
+    }
     #[allow(dead_code)] // Read by the GUI, not the CLI.
     pub fn snapshot(&self) -> Status {
         if self.sessions.len() == 1 {
@@ -93,6 +99,7 @@ impl Drop for Registration {
     fn drop(&mut self) {
         let mut hub = self.hub.lock().unwrap();
         hub.sessions.remove(&self.id);
+        hub.clear_gesture();
         hub.status = Status {
             connected: !hub.sessions.is_empty(),
             ..Status::default()
@@ -106,6 +113,7 @@ pub fn register(hub: Arc<Mutex<Hub>>) -> (Registration, mpsc::Receiver<Toggle>) 
         h.next += 1;
         let id = h.next;
         h.sessions.insert(id, tx);
+        h.clear_gesture();
         h.status = Status {
             connected: true,
             ..Status::default()
@@ -140,6 +148,10 @@ pub async fn toggle(hub: &Arc<Mutex<Hub>>) -> Result<()> {
             h.sessions.len() == 1,
             "need exactly one connected phone session"
         );
+        ensure!(
+            h.status.capture.is_some() && h.status.capture != Some(CaptureState::Off),
+            "Tap the phone to start its microphone"
+        );
         h.sessions.values().next().unwrap().clone()
     };
     let (reply, receive) = oneshot::channel();
@@ -153,6 +165,93 @@ pub async fn toggle(hub: &Arc<Mutex<Hub>>) -> Result<()> {
         "phone state unknown, request expired or phone refused"
     );
     Ok(())
+}
+/// Same 300/500 ms classifier as Core.CaptureTrigger. It produces intent only.
+#[derive(Default)]
+pub struct CaptureTrigger {
+    capture: u8,
+    pressed: Option<u64>,
+    previous_release: Option<u64>,
+    last: u64,
+    began_locked: bool,
+}
+impl CaptureTrigger {
+    pub fn feed(&mut self, event: &str, time: u64) -> u8 {
+        if event == "cancel" {
+            *self = Self::default();
+            return 0;
+        }
+        if time < self.last
+            || (event == "press" && self.pressed.is_some())
+            || (event == "release" && self.pressed.is_none())
+        {
+            return self.capture;
+        }
+        self.last = time;
+        match event {
+            "press" if self.pressed.is_none() => {
+                self.pressed = Some(time);
+                self.began_locked = self.capture == 2;
+            }
+            "advance" if self.pressed.is_some_and(|start| time - start >= 300) => {
+                self.previous_release = None;
+                self.capture = 1;
+            }
+            "release" => {
+                if let Some(start) = self.pressed.take() {
+                    if time - start >= 300 {
+                        self.capture = 0;
+                        self.previous_release = None;
+                    } else if self.began_locked {
+                        self.previous_release = None;
+                    } else if self
+                        .previous_release
+                        .is_some_and(|previous| start - previous <= 500)
+                    {
+                        self.capture = 2;
+                        self.previous_release = None;
+                    } else {
+                        self.capture = 0;
+                        self.previous_release = Some(time);
+                    }
+                }
+            }
+            _ => {}
+        }
+        self.capture
+    }
+}
+/// GUI edges share the classifier, but never acquire peer mic-start authority.
+#[allow(dead_code)]
+pub async fn gesture(hub: &Arc<Mutex<Hub>>, event: &str, milliseconds: u64) -> Result<String> {
+    ensure!(
+        ["press", "advance", "release", "cancel"].contains(&event),
+        "invalid gesture"
+    );
+    let (after, released_hold) = {
+        let mut h = hub.lock().unwrap();
+        let context = (h.next, h.status.mode.clone(), h.snapshot().capture);
+        if h.gesture_context.as_ref() != Some(&context) {
+            h.gesture = CaptureTrigger::default();
+            h.gesture_context = Some(context);
+        }
+        let released_hold = event == "release"
+            && h.gesture.pressed.is_some_and(|start| {
+                milliseconds
+                    .checked_sub(start)
+                    .is_some_and(|duration| duration >= 300)
+            });
+        let after = h.gesture.feed(event, milliseconds);
+        (after, released_hold)
+    };
+    if after != 0 {
+        return Ok("Tap the phone to start its microphone".into());
+    }
+    if released_hold {
+        toggle(hub).await?;
+        return Ok("Phone confirmed stop".into());
+    }
+    Ok("Single short tap: no capture".into())
 }
 #[allow(dead_code)] // Used by the GUI; CLI has a clap default.
 pub fn default_state_dir() -> PathBuf {
@@ -196,7 +295,7 @@ async fn request<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin>(
     stream.read_exact(&mut response).await?;
     ensure!(
         &response == b"sent\n",
-        "phone unavailable, state unknown, or request refused"
+        "Stop unavailable or refused. Tap the phone to start its microphone"
     );
     Ok(())
 }
@@ -393,6 +492,114 @@ pub async fn send(root: &Path) -> Result<()> {
 mod tests {
     use super::*;
     #[test]
+    fn phone_remote_desktop_timed_traces_match() {
+        for (events, expected) in [
+            (vec![("press", 0), ("release", 299)], vec![0, 0]),
+            (
+                vec![("press", 0), ("advance", 300), ("release", 300)],
+                vec![0, 1, 0],
+            ),
+            (
+                vec![
+                    ("press", 0),
+                    ("release", 20),
+                    ("press", 520),
+                    ("release", 540),
+                ],
+                vec![0, 0, 0, 2],
+            ),
+            (
+                vec![
+                    ("press", 0),
+                    ("release", 20),
+                    ("press", 521),
+                    ("release", 540),
+                ],
+                vec![0, 0, 0, 0],
+            ),
+            (
+                vec![
+                    ("press", 0),
+                    ("release", 20),
+                    ("press", 50),
+                    ("advance", 350),
+                    ("release", 350),
+                    ("press", 400),
+                    ("release", 420),
+                ],
+                vec![0, 0, 0, 1, 0, 0, 0],
+            ),
+        ] {
+            let mut trigger = CaptureTrigger::default();
+            assert_eq!(
+                events
+                    .iter()
+                    .map(|(event, time)| trigger.feed(event, *time))
+                    .collect::<Vec<_>>(),
+                expected
+            );
+            assert_eq!(trigger.feed("cancel", 0), 0);
+        }
+    }
+    #[tokio::test]
+    async fn off_phone_requires_phone_tap_and_never_enqueues_start() {
+        let hub = Arc::new(Mutex::new(Hub::default()));
+        let (_registration, mut rx) = register(hub.clone());
+        hub.lock().unwrap().status.capture = Some(CaptureState::Off);
+        assert!(
+            toggle(&hub)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("Tap the phone")
+        );
+        for (event, time) in [
+            ("press", 0),
+            ("release", 20),
+            ("press", 40),
+            ("release", 60),
+        ] {
+            let _ = gesture(&hub, event, time).await.unwrap();
+        }
+        assert!(rx.try_recv().is_err());
+    }
+    #[tokio::test]
+    async fn batch_delayed_hold_release_still_sends_only_stop() {
+        let hub = Arc::new(Mutex::new(Hub::default()));
+        let (_registration, mut rx) = register(hub.clone());
+        hub.lock().unwrap().status.capture = Some(CaptureState::Continuous);
+        gesture(&hub, "press", 0).await.unwrap();
+        let copy = hub.clone();
+        let release = tokio::spawn(async move { gesture(&copy, "release", 300).await });
+        let request = tokio::time::timeout(Duration::from_millis(100), rx.recv())
+            .await
+            .expect("hold release must request stop even without timer delivery")
+            .unwrap();
+        request.reply.send(true).unwrap();
+        assert_eq!(release.await.unwrap().unwrap(), "Phone confirmed stop");
+    }
+    #[tokio::test]
+    async fn reconnect_mode_and_off_clear_pending_double_tap() {
+        let hub = Arc::new(Mutex::new(Hub::default()));
+        let (registration, _rx) = register(hub.clone());
+        hub.lock().unwrap().status.capture = Some(CaptureState::Off);
+        for (event, time) in [("press", 0), ("release", 20)] {
+            gesture(&hub, event, time).await.unwrap();
+        }
+        hub.lock().unwrap().clear_gesture(); // same hook used by mode/OFF reports
+        for (event, time) in [("press", 40), ("release", 60)] {
+            gesture(&hub, event, time).await.unwrap();
+        }
+        assert_eq!(hub.lock().unwrap().gesture.capture, 0);
+        drop(registration);
+        let (_new, _rx) = register(hub.clone());
+        hub.lock().unwrap().status.capture = Some(CaptureState::Off);
+        for (event, time) in [("press", 70), ("release", 90)] {
+            gesture(&hub, event, time).await.unwrap();
+        }
+        assert_eq!(hub.lock().unwrap().gesture.capture, 0);
+    }
+    #[test]
     fn disconnected_or_ambiguous_sessions_never_show_stale_phone_state() {
         let hub = Arc::new(Mutex::new(Hub::default()));
         let (first, _rx) = register(hub.clone());
@@ -422,6 +629,7 @@ mod tests {
         let dir = tempfile::tempdir()?;
         let hub = Arc::new(Mutex::new(Hub::default()));
         let (_registration, mut rx) = register(hub.clone());
+        hub.lock().unwrap().status.capture = Some(CaptureState::Continuous);
         let path = dir.path().to_owned();
         let task = tokio::spawn(async move { serve(&path, hub).await });
         let phone = tokio::spawn(async move {
@@ -450,6 +658,7 @@ mod tests {
         std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700))?;
         let hub = Arc::new(Mutex::new(Hub::default()));
         let (_registration, mut rx) = register(hub.clone());
+        hub.lock().unwrap().status.capture = Some(CaptureState::Continuous);
         let path = dir.path().to_owned();
         let task = tokio::spawn(async move { serve(&path, hub).await });
         for _ in 0..100 {

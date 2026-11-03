@@ -2,7 +2,7 @@
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Voice Receiver</title><link rel="stylesheet" href="style.css"><script src="app.js" defer></script></head>
 <body><main>
 <header><span class="mark">V</span><div><h1>Voice Receiver</h1><p>Your phone, this computer.</p></div></header>
-<section aria-label="Phone state"><div class="state"><strong id="mode">Mode unknown</strong><span id="capture">Phone disconnected</span></div><p>Destination: <strong id="destination">Waiting for phone</strong></p><button id="toggle">Request dictation toggle</button></section>
+<section aria-label="Phone state"><div class="state"><strong id="mode">Mode unknown</strong><span id="capture">Phone disconnected</span></div><p>Destination: <strong id="destination">Waiting for phone</strong></p><button id="toggle">Stop dictation</button><button id="gesture">Hold / double-tap capture</button><p class="hint">Starting the phone microphone requires a tap on the phone.</p></section>
 <section><h2>Pair a phone</h2><form id="pair-form">
 <label>Account ID <input id="account" required maxlength="128" autocomplete="off" placeholder="Use the account shown on your phone"></label>
 <label>Computer name <input id="device" required maxlength="128" value="desktop" autocomplete="off"></label>

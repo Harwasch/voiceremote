@@ -100,16 +100,16 @@ private func input(_ seq: UInt32, _ tick: UInt32, _ event: UInt8, _ capture: UIn
     bytes.append(contentsOf: [event, capture, mode, pressed ? 1 : 0, 0, 0])
     return try RemoteInput(bytes)
 }
-@Test func remoteSnapshotsShortTapsClockWrapAndModeChangesHaveNoApprovalOrLockPath() throws {
+@Test func remoteSnapshotsShortTapsClockWrapAndModeChangesHaveNoApprovalPath() throws {
     var controls = RemoteControls()
-    #expect(controls.accept(try input(0, 0, 0, 2), edge: false) == [.stop, .positions(.continuous, .dictation)])
-    _ = controls.accept(try input(1, 1, 4), edge: true)
+    #expect(controls.accept(try input(0, UInt32.max - 102, 0, 2), edge: false) == [.stop, .positions(.continuous, .dictation)])
+    _ = controls.accept(try input(1, UInt32.max - 101, 4), edge: true)
     #expect(controls.accept(try input(2, UInt32.max - 100, 1, 1, 0, true), edge: true).contains(.startHold))
     #expect(controls.accept(try input(3, 198, 2), edge: true).contains(.releaseHold(false)))
-    _ = controls.accept(try input(4, UInt32.max - 100, 1, 1, 0, true), edge: true)
-    #expect(controls.accept(try input(5, 199, 2), edge: true).contains(.releaseHold(true)))
-    #expect(controls.accept(try input(6, 200, 5, 1, 1), edge: true) == [.boundary, .positions(.hold, .ai_control)])
-    #expect(controls.accept(try input(7, 201, 3, 1, 1), edge: true).contains(.cycleTarget))
+    _ = controls.accept(try input(4, 200, 1, 1, 0, true), edge: true)
+    #expect(controls.accept(try input(5, 500, 2), edge: true).contains(.releaseHold(true)))
+    #expect(controls.accept(try input(6, 501, 5, 1, 1), edge: true) == [.boundary, .positions(.hold, .ai_control)])
+    #expect(controls.accept(try input(7, 502, 3, 1, 1), edge: true).contains(.cycleTarget))
     controls.reset()
     _ = controls.accept(try input(0, 0, 0, 1, 0, true), edge: false)
     #expect(!controls.accept(try input(1, 301, 1, 1, 0, true), edge: true).contains(.startHold))
@@ -122,8 +122,8 @@ private func input(_ seq: UInt32, _ tick: UInt32, _ event: UInt8, _ capture: UIn
     #expect(hold.qualify() == [.frame(frame)])
     let phone = CaptureMetrics(), remote = CaptureMetrics()
     phone.observe(.frame(frame)); remote.observe(.frame(frame)); remote.observe(.interrupted)
-    #expect(try CaptureMetrics.select(choice: .automatic, remoteReady: true,
-        phone: phone.quality(id: "phone"), remote: remote.quality(id: "remote")) == .phone)
+    #expect(throws: (any Error).self) { try CaptureMetrics.select(choice: .automatic, remoteReady: true,
+        phone: phone.quality(id: "phone"), remote: remote.quality(id: "remote")) }
     #expect(throws: (any Error).self) { try CaptureMetrics.select(choice: .remote, remoteReady: false, phone: nil, remote: nil) }
     #expect(remote.quality(id: "remote")?.dropouts == 1)
     #expect(remote.quality(id: "remote")?.clipping == 0.5)

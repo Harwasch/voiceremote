@@ -158,12 +158,12 @@ async fn serve_with_sampler(
             _=tokio::time::sleep_until(idle)=>voiceremote_core::bail!("application idle timeout"),
             request=requests.recv()=>{
                 let Some(request) = request else { continue; };
-                if request.expires <= tokio::time::Instant::now() || capture.is_none() || pending_toggle.is_some() {
+                if request.expires <= tokio::time::Instant::now() || !matches!(capture, Some(voiceremote_core::protocol::CaptureState::Hold | voiceremote_core::protocol::CaptureState::Continuous)) || pending_toggle.is_some() {
                     let _ = request.reply.send(false);
                     continue;
                 }
                 use voiceremote_core::protocol::{CaptureState, CaptureControl, CaptureControlKind};
-                let desired = if capture == Some(CaptureState::Off) { CaptureState::Continuous } else { CaptureState::Off };
+                let desired = CaptureState::Off;
                 let id = voiceremote_core::relay::new_room_id();
                 request_sequence += 1;
                 let ttl_ms = request.expires.saturating_duration_since(tokio::time::Instant::now()).as_millis().clamp(1, 2000) as u64;
@@ -216,10 +216,14 @@ async fn serve_with_sampler(
                     let mut h = hub.lock().unwrap();
                     match &message {
                         InnerMessage::CaptureStateReport(report) if report.device_id == peer.info.device_id => {
+                            if capture.as_ref() != Some(&report.capture_state) { h.clear_gesture(); }
                             capture = Some(report.capture_state.clone());
                             h.status.capture = capture.clone(); h.status.listening = report.listening;
                         }
-                        InnerMessage::ModeState(report) if report.device_id == peer.info.device_id => h.status.mode = Some(report.mode.clone()),
+                        InnerMessage::ModeState(report) if report.device_id == peer.info.device_id => {
+                            if h.status.mode.as_ref() != Some(&report.mode) { h.clear_gesture(); }
+                            h.status.mode = Some(report.mode.clone());
+                        },
                         InnerMessage::CaptureControlResult(report) if report.device_id == peer.info.device_id => {
                             if pending_toggle.as_ref().is_some_and(|(id, desired, request)| *id == report.request_id && (report.outcome != voiceremote_core::protocol::CaptureControlResultOutcome::Applied || *desired == report.capture_state) && request.expires > tokio::time::Instant::now()) {
                                 let (_, _, request) = pending_toggle.take().unwrap();
@@ -587,7 +591,7 @@ mod tests {
                 kind: CaptureStateReportKind::CaptureState,
                 account_id: "synthetic-account".into(),
                 device_id: "phone".into(),
-                capture_state: CaptureState::Off,
+                capture_state: CaptureState::Continuous,
             }),
         )
         .await?;
@@ -604,7 +608,7 @@ mod tests {
         let InnerMessage::CaptureControl(request) = request else {
             panic!("capture request expected")
         };
-        assert_eq!(request.capture_state, CaptureState::Continuous);
+        assert_eq!(request.capture_state, CaptureState::Off);
         assert_eq!(request.target_device_id, "phone");
         assert!(!toggle.is_finished(), "write is not phone confirmation");
         ps.send(
@@ -614,12 +618,12 @@ mod tests {
                 account_id: "synthetic-account".into(),
                 device_id: "phone".into(),
                 request_id: request.request_id,
-                capture_state: CaptureState::Off,
+                capture_state: CaptureState::Continuous,
                 outcome: voiceremote_core::protocol::CaptureControlResultOutcome::Unavailable,
             }),
         )
         .await?;
-        // A refusal reports actual OFF, not the desired Continuous selection.
+        // A refusal reports actual Continuous, not the requested OFF selection.
         // It must reach the requester immediately rather than timing out.
         assert!(
             tokio::time::timeout(Duration::from_millis(500), toggle)
@@ -658,7 +662,7 @@ mod tests {
         // Sending a request must not optimistically change reported mic state.
         assert_eq!(
             observed.lock().unwrap().status.capture,
-            Some(CaptureState::Off)
+            Some(CaptureState::Continuous)
         );
         let literal = "Synthetic 🦀 ".repeat(1000);
         let dictation = InnerMessage::DictationText(DictationText {

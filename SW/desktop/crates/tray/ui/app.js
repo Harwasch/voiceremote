@@ -23,6 +23,42 @@ $('confirm-form').addEventListener('submit', event => {
 });
 $('cancel').addEventListener('click', () => operation(() => invoke('cancel')));
 $('toggle').addEventListener('click', () => operation(async () => { await invoke('toggle'); $('message').textContent = 'Phone confirmed the capture request'; }));
+// Serialize physical edges, including when IPC delivery is delayed. No click
+// synthesis: keyboard and pointer share the same monotonic timed adapter.
+let gestureQueue = Promise.resolve();
+let held = false;
+let holdTimer;
+function gestureEdge(event, milliseconds = Math.floor(performance.now())) {
+  gestureQueue = gestureQueue.then(async () => {
+    try { $('message').textContent = await invoke('gesture', { event, milliseconds }); }
+    catch (error) { $('message').textContent = String(error); }
+  });
+}
+function pressGesture() {
+  if (held) return;
+  held = true;
+  gestureEdge('press');
+  holdTimer = setTimeout(() => { if (held) gestureEdge('advance'); }, 300);
+}
+function releaseGesture(cancel = false) {
+  if (!held) return;
+  held = false; clearTimeout(holdTimer);
+  gestureEdge(cancel ? 'cancel' : 'release');
+}
+$('gesture').addEventListener('pointerdown', event => {
+  if (event.button !== 0) return;
+  $('gesture').setPointerCapture(event.pointerId); pressGesture();
+});
+$('gesture').addEventListener('pointerup', () => releaseGesture());
+$('gesture').addEventListener('pointercancel', () => releaseGesture(true));
+$('gesture').addEventListener('lostpointercapture', () => releaseGesture(true));
+$('gesture').addEventListener('keydown', event => {
+  if ([' ', 'Enter'].includes(event.key)) { event.preventDefault(); pressGesture(); }
+});
+$('gesture').addEventListener('keyup', event => {
+  if ([' ', 'Enter'].includes(event.key)) { event.preventDefault(); releaseGesture(); }
+});
+window.addEventListener('blur', () => { releaseGesture(true); gestureEdge('cancel'); });
 $('autostart').addEventListener('change', () => operation(async () => {
   try { $('autostart').checked = await invoke('autostart', { enabled: $('autostart').checked }); }
   catch (error) { $('autostart').checked = !$('autostart').checked; throw error; }
@@ -42,7 +78,8 @@ async function refresh() {
     $('mode').textContent = status.mode === 'ai_control' ? 'AI Control' : status.mode === 'dictation' ? 'Dictation' : 'Mode unknown';
     $('capture').textContent = !status.connected ? 'Phone disconnected' : status.listening === false ? 'Not listening' : status.listening === true ? 'Listening' : 'Capture unknown';
     $('destination').textContent = status.destination || 'Waiting for phone';
-    $('toggle').disabled = !status.connected || !status.capture;
+    $('toggle').disabled = !status.connected || !status.capture || status.capture === 'off';
+    $('gesture').disabled = !status.connected;
     $('pair').disabled = view.pairing;
     $('cancel').hidden = !view.pairing;
     $('qr-panel').hidden = !view.qr;

@@ -39,7 +39,7 @@ import VoiceRemoteProtocol
     private var refreshingProgress = false
     private(set) var offlineStatus = ""
     func selectionChanged() {
-        controls.reset()
+        controls.reset(); provisionalComparison?.interrupt(); provisionalComparison = nil
         if let input = tracker.last { _ = controls.accept(input, edge: false) }
         if let model = AppRuntime.shared?.model { synchronize(model: model) }
     }
@@ -47,7 +47,7 @@ import VoiceRemoteProtocol
     var sourceIdentity: String? { enrolledRemoteIdentity }
     var hasCapture: Bool { source != nil }
     func prepareRecorderControls(model: VoiceAppModel) throws {
-        guard tracker.synchronized, let input = tracker.last, input.capture == 2 || input.pressed else { throw RemoteContractError.notReady }
+        guard tracker.synchronized, let input = tracker.last, input.capture == 2 || input.pressed || controls.triggerCapture == .continuous else { throw RemoteContractError.notReady }
         model.remotePositions(capture: input.capture == 2 ? .continuous : .hold, mode: input.mode == 0 ? .dictation : .ai_control)
     }
     private var controls = RemoteControls()
@@ -91,6 +91,7 @@ import VoiceRemoteProtocol
     private var authenticatedEnrollment = false
     private var enrolledRemoteIdentity: String?
     var isEnrolled: Bool { authenticatedEnrollment && enrolledRemoteIdentity != nil }
+    private var provisionalComparison: QualifiedCaptureSession?
     override init() { super.init() }
     func scan() {
         wantsScan = true
@@ -117,7 +118,7 @@ import VoiceRemoteProtocol
         source?.interrupt(); source = nil; watchdog?.cancel(); watchdog = nil
         if let peripheral { central.cancelPeripheralConnection(peripheral) }
         peripheral = nil; info = nil; stateCharacteristic = nil; highestSegment = 0; tracker.reset()
-        controls.reset()
+        controls.reset(); provisionalComparison?.interrupt(); provisionalComparison = nil
         failWrites(); lastPresentation = nil; displayReady = false; captureArmed = false
         authenticatedEnrollment = false; enrolledRemoteIdentity = nil; inputSubscribed = false; audioSubscribed = false
         status = "Disconnected"
@@ -125,12 +126,12 @@ import VoiceRemoteProtocol
     func makeCapture(model: VoiceAppModel) async throws -> any CaptureSession {
         guard authenticatedEnrollment, inputSubscribed, audioSubscribed,
               let info, tracker.synchronized, let input = tracker.last, input.capture != 0,
-              input.status & 2 == 0, input.capture == 2 || input.pressed else { throw RemoteContractError.notReady }
+              input.status & 2 == 0, input.capture == 2 || input.pressed || controls.triggerCapture == .continuous else { throw RemoteContractError.notReady }
         pauseSync(forLiveCapture: true)
         let expectedControls = tracker.controlRevision
         let id = UUID(); captureID = id
         let capture = try RemoteBLECaptureSource(maximum: info.maxPacket, afterSegment: highestSegment,
-            provisional: input.capture == 1 && input.pressed, stop: { [weak self] in self?.disarm(captureID: id) })
+            provisional: input.capture == 1 && input.pressed && controls.triggerCapture != .continuous && AppRuntime.shared?.captureChoice != .automatic, stop: { [weak self] in self?.disarm(captureID: id) })
         source = capture
         do {
             let state = try RemotePhoneState.presentation(controls: model.controls, devices: model.devices, phoneID: model.phoneID,
@@ -298,7 +299,7 @@ import VoiceRemoteProtocol
     }
     private func activateEnrollment(_ identity: String) {
         authenticatedEnrollment = true; enrolledRemoteIdentity = identity; enrollmentReady = false
-        controls.reset()
+        controls.reset(); provisionalComparison?.interrupt(); provisionalComparison = nil
         if let input = tracker.last { _ = controls.accept(input, edge: false) }
         status = "Enrolled remote connected"; startOfflineSync()
         if let model = AppRuntime.shared?.model { synchronize(model: model) }
@@ -506,29 +507,38 @@ import VoiceRemoteProtocol
                     let actions = controls.accept(input, edge: edge,
                         recording: source != nil && (host?.model.isRecording == true || host?.recorder.recording == true))
                     if authenticatedEnrollment, let host, host.captureChoice != .phone,
-                       edge || source != nil || host.captureChoice == .remote {
+                       edge || source != nil || host.captureChoice == .remote || actions.contains(.stop) {
                         let recordingBenchmark = host.recorder.busy
                         for action in actions {
                             switch action {
-                            case .stop: source?.interrupt(); host.model.stop(); host.recorder.cancel()
+                            case .stop: provisionalComparison?.interrupt(); provisionalComparison = nil; source?.interrupt(); host.model.stop(); host.recorder.cancel()
                             case .boundary:
                                 if host.recorder.busy { source?.finish(); host.recorder.finish() }
                                 else { host.model.finishUtterance() }
                             case .positions(let capture, let mode): host.model.remotePositions(capture: capture, mode: mode)
                             case .startHold:
                                 if !host.recorder.busy {
-                                    let factory = try host.pinnedCapture(choice: .remote)
+                                    let factory = try host.pinnedCapture(choice: host.captureChoice == .automatic ? .automatic : .remote)
                                     if source == nil, host.model.listening != .idle {
                                         host.model.stop()
                                         host.model.remotePositions(capture: .hold, mode: input.mode == 0 ? .dictation : .ai_control)
                                     }
-                                    host.model.beginRemote(capture: factory)
+                                    if host.captureChoice == .automatic {
+                                        let epoch = connectionEpoch
+                                        host.model.beginRemote(capture: { [weak self] in
+                                            let comparison = try await factory()
+                                            guard let self, connectionEpoch == epoch else { comparison.interrupt(); throw RemoteContractError.notReady }
+                                            let gate = QualifiedCaptureSession(source: comparison)
+                                            provisionalComparison = gate
+                                            return gate
+                                        })
+                                    } else { host.model.beginRemote(capture: factory) }
                                 }
                             case .startContinuous:
                                 guard !recordingBenchmark else { continue }
                                 let epoch = connectionEpoch, revision = tracker.controlRevision
                                 let generation = host.model.captureGeneration
-                                let factory = try host.pinnedCapture(choice: .remote)
+                                let factory = try host.pinnedCapture(choice: host.captureChoice == .automatic ? .automatic : .remote)
                                 Task { [weak self, weak host] in
                                     guard let self, let host, connectionEpoch == epoch, tracker.controlRevision == revision else { return }
                                     await host.model.awaitRemoteBoundary()
@@ -536,8 +546,13 @@ import VoiceRemoteProtocol
                                     host.model.beginRemote(capture: factory, generation: generation)
                                 }
                             case .releaseHold(let accepted):
-                                if accepted, let source { source.qualifyHold() }
-                                else { source?.interrupt(); host.model.interrupt() }
+                                if accepted {
+                                    source?.qualifyHold(); provisionalComparison?.qualify()
+                                    if source == nil { host.model.finishUtterance() }
+                                } else {
+                                    provisionalComparison?.interrupt(); source?.interrupt(); host.model.interrupt()
+                                }
+                                provisionalComparison = nil
                             case .cycleTarget: host.model.cycleRemoteTarget()
                             }
                         }

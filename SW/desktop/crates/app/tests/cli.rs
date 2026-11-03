@@ -76,7 +76,7 @@ async fn dictate_toggle_cli_sends_fixed_request_to_user_socket() -> anyhow::Resu
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(String::from_utf8_lossy(&output.stdout).contains("Phone confirmed capture request"));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("Phone confirmed stop"));
     server.await??;
     Ok(())
 }

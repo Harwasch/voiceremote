@@ -159,15 +159,15 @@ public struct SourceQuality: Sendable {
     public let snrDB: Double
     public let clipping: Double
     public let dropouts: Int
-    public let proximity: Double
-    public init(id: String, snrDB: Double, clipping: Double, dropouts: Int, proximity: Double) {
+    public let proximity: Double?
+    public init(id: String, snrDB: Double, clipping: Double, dropouts: Int, proximity: Double?) {
         self.id = id; self.snrDB = snrDB; self.clipping = clipping; self.dropouts = dropouts; self.proximity = proximity
     }
     /// Heuristic coefficients, TBC by named-device benchmarks; never authority evidence.
     public var score: Double? {
-        guard snrDB.isFinite, clipping.isFinite, proximity.isFinite, (0...1).contains(clipping),
-              (0...1).contains(proximity), dropouts == 0 else { return nil }
-        return snrDB - clipping * 40 + proximity * 6
+        guard snrDB.isFinite, clipping.isFinite, (0...1).contains(clipping),
+              proximity.map({ $0.isFinite && (0...1).contains($0) }) ?? true, dropouts == 0 else { return nil }
+        return snrDB - clipping * 40 + (proximity ?? 0) * 6
     }
     public static func best(_ sources: [Self]) -> String? {
         sources.filter { $0.score != nil }.sorted {
