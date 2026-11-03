@@ -30,6 +30,7 @@ impl Focus {
 pub struct FocusSnapshot {
     pub text_field_focused: bool,
     pub last_activity_at: u64,
+    pub activity_age_ms: Option<u64>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -218,20 +219,26 @@ impl LinuxInjector {
     }
     pub fn focus_snapshot(&self) -> FocusSnapshot {
         let focus = self.focus_report();
-        let activity = if focus.text_field_focused() {
+        let age = if focus.text_field_focused() {
             tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
-                .map(|r| r.block_on(focus::activity()))
-                .unwrap_or(0)
+                .ok()
+                .and_then(|r| r.block_on(focus::activity()))
         } else {
-            0
+            None
         };
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
         FocusSnapshot {
             text_field_focused: focus.text_field_focused(),
-            last_activity_at: activity,
+            last_activity_at: age.map(|age| now.saturating_sub(age)).unwrap_or(0),
+            activity_age_ms: age,
         }
     }
+
     pub fn focus_report(&self) -> Focus {
         let (send, receive) = mpsc::sync_channel(1);
         if self.send.send(Request::Focus(send)).is_err() {

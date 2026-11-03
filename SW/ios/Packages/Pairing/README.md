@@ -52,3 +52,5 @@ queue replay, real WebSocket/TCP resume, insertion and permanent refusal.
 Cloud adapters share [RelayProxy](Sources/RelayProxy.swift): fresh context-checked challenges, exact Messages bytes, ordered WHATWG form query bytes (including literal plus/apostrophe/Unicode), same-room route checks and proof headers. [Real local gate](../../../../SYS/tests/e2e/README.md) proves both speech vendors and Claude through the production Worker. Complete desktop JSON pairing codes and base64 copies are supported; a short-code resolver is absent from relay v1.
 
 User-requested relay cleanup uses `RelayMembershipCleanup`: peer 403 never skips self-revoke. An HTTP response is not an authenticated endpoint revocation.
+
+PhoneConnection is the shared app/e2e request and outcome seam; PreferredConnection chooses LAN before relay at connect/resume, without retrying text. The e2e executable also exercises the real Core Auto picker.

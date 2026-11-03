@@ -55,3 +55,50 @@ import VoiceRemoteProtocol
     #expect(HistoryTextIdentity.copyID(offline) == HistoryTextIdentity.copyID(offline))
     #expect(HistoryTextIdentity.copyID(offline) != HistoryTextIdentity.copyID(offline + "1"))
 }
+
+@Test func positiveDictationOutcomeIsAuthenticatedAndSurvivesRestart() async throws {
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: url) }
+    let history = try AppHistoryStore(url: url, now: 1000)
+    let entry = HistoryEntry(segmentID: "positive-fixture", targetID: "desktop", text: "Synthetic.", createdAt: 1000)
+    try await history.saveText(entry, state: .unconfirmed, now: 1000)
+    let reply = DictationOutcome(account_id: "fixture", segment_id: entry.segmentID, target_device_id: "desktop", outcome: .inserted)
+    try await history.dictationOutcome(reply, from: "other", accountID: "fixture")
+    try await history.dictationOutcome(reply, from: "desktop", accountID: "other")
+    #expect(await history.deliveryStates()[entry.segmentID] == .unconfirmed)
+    try await history.dictationOutcome(reply, from: "desktop", accountID: "fixture")
+    let reopened = try AppHistoryStore(url: url, now: 1001)
+    #expect(await reopened.deliveryStates()[entry.segmentID] == .delivered)
+    // A delayed failure cannot downgrade a proven insertion.
+    try await history.dictationOutcome(DictationOutcome(account_id: "fixture", segment_id: entry.segmentID, target_device_id: "desktop", outcome: .unavailable), from: "desktop", accountID: "fixture")
+    #expect(await history.deliveryStates()[entry.segmentID] == .delivered)
+}
+
+@Test @MainActor func captureControlCorrelatesExpiresAndNeverReplaysOrEnablesAI() async throws {
+    let rig = try Rig(), connection = UUID()
+    func request(_ id: String, state: CaptureState = .continuous) -> CaptureControl {
+        CaptureControl(account_id: "fixture", request_id: id, target_device_id: "phone", capture_state: state, ttl_ms: 2000)
+    }
+    let expired = await rig.model.captureControl(request("expired"), connectionID: connection, receivedAt: .now - .seconds(3))
+    #expect(expired.outcome == .expired); #expect(rig.capture.starts == 0)
+    let started = await rig.model.captureControl(request("start"), connectionID: connection)
+    #expect(started.outcome == .applied); #expect(started.request_id == "start"); #expect(rig.model.isRecording)
+    rig.model.stop()
+    let replay = await rig.model.captureControl(request("start"), connectionID: connection)
+    #expect(replay.outcome == .cancelled); #expect(rig.capture.starts == 1)
+    rig.model.setMode(.ai_control)
+    let denied = await rig.model.captureControl(request("ai"), connectionID: connection)
+    #expect(denied.outcome == .unavailable); #expect(!rig.model.isRecording)
+}
+
+@Test @MainActor func captureControlReportsUnavailableAndCancellationDuringPreparation() async throws {
+    let failed = try Rig(); failed.capture.failStart = true
+    let request = CaptureControl(account_id: "fixture", request_id: "failure", target_device_id: "phone", capture_state: .continuous, ttl_ms: 2000)
+    let refused = await failed.model.captureControl(request, connectionID: UUID())
+    #expect(refused.outcome == .unavailable); #expect(!failed.model.isRecording)
+    let slow = try Rig(captureFactory: { try await Task.sleep(for: .seconds(1)); return Capture() })
+    let task = Task { await slow.model.captureControl(request, connectionID: UUID()) }
+    try await Task.sleep(for: .milliseconds(20)); slow.model.stop()
+    let result = await task.value
+    #expect(result.outcome == .cancelled); #expect(!slow.model.isRecording)
+}

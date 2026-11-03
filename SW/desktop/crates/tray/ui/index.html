@@ -8,9 +8,9 @@
 <label>Computer name <input id="device" required maxlength="128" value="desktop" autocomplete="off"></label>
 <label>Role <select id="role"><option value="text_receiver">Text receiver</option><option value="agent">Agent</option><option value="both">Both</option></select></label>
 <p class="hint">Agent role is recorded for the phone. Agent execution requires separate headless configuration.</p>
-<details><summary>Remote network</summary><label>Relay origin (optional)<input id="relay" type="url" placeholder="https://relay.example.com" autocomplete="off"></label><p class="hint">Leave blank for local Wi-Fi discovery.</p></details>
+<details><summary>Remote network</summary><label>Relay origin (optional)<input id="relay" type="url" placeholder="https://relay.example.com" autocomplete="off"></label><p class="hint">LAN is preferred automatically; this relay is the fallback. Leave blank for LAN only.</p><label>Provisioning secret (if required)<input id="provisioning-secret" type="password" autocomplete="off"></label><p class="hint">Used once to create this pairing room; never saved.</p></details>
 <button id="pair" type="submit">Show pairing QR</button><button id="cancel" type="button" hidden>Cancel pairing</button></form>
-<div id="qr-panel" hidden><div id="qr"></div><p>Display reference: <strong id="short-code"></strong></p><p class="hint">Match this reference on this display. Camera-free code redemption is not available yet.</p><p id="expiry"></p></div>
+<div id="qr-panel" hidden><div id="qr"></div><label>Camera-free pairing invitation<textarea id="invitation" readonly rows="4"></textarea></label><p class="hint">Copy the complete invitation into the phone’s pairing field. It expires in two minutes and works once.</p><p id="expiry"></p></div>
 <form id="confirm-form" hidden><p>Compare these four words on both displays:</p><strong id="phrase" class="phrase"></strong><label>Enter all four words<input id="confirmation" required autocomplete="off" spellcheck="false"></label><button type="submit">Confirm this computer</button><p class="hint">Also confirm on your phone. Enrollment waits for both.</p></form>
 <p id="message" role="status" aria-live="polite"></p></section>
 <section><h2>Paired devices</h2><ul id="devices"></ul></section>

@@ -5,7 +5,7 @@ use crate::worker::{BoundedWorker, Cancellation};
 use std::{
     sync::{OnceLock, mpsc},
     thread,
-    time::Duration,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use voiceremote_core::{Result, TextInjector, anyhow};
 
@@ -100,9 +100,16 @@ pub fn focus_snapshot() -> FocusSnapshot {
         let (send, receive) = mpsc::sync_channel::<mpsc::Sender<FocusSnapshot>>(1);
         thread::spawn(move || {
             while let Ok(reply) = receive.recv() {
+                let focused = focus::Target::capture().is_ok();
+                let age = focus::activity_age();
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as u64;
                 let snapshot = FocusSnapshot {
-                    text_field_focused: focus::Target::capture().is_ok(),
-                    last_activity_at: focus::activity_timestamp(),
+                    text_field_focused: focused,
+                    last_activity_at: age.map(|age| now.saturating_sub(age)).unwrap_or(0),
+                    activity_age_ms: age,
                 };
                 let _ = reply.send(snapshot);
             }

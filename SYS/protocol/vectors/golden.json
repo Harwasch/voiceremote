@@ -251,7 +251,8 @@
         "account_id": "fixture-account",
         "device_id": "fixture-desktop",
         "text_field_focused": true,
-        "last_activity_at": 1793664000000
+        "last_activity_at": 1793664000000,
+        "activity_age_ms": 0
       }
     },
     {
@@ -262,7 +263,8 @@
         "account_id": "fixture-account",
         "device_id": "fixture-desktop",
         "text_field_focused": false,
-        "last_activity_at": 0
+        "last_activity_at": 0,
+        "activity_age_ms": 0
       }
     },
     {
@@ -1015,7 +1017,8 @@
         "account_id": "fixture-account",
         "device_id": "fixture-desktop",
         "text_field_focused": true,
-        "last_activity_at": 1793664000000
+        "last_activity_at": 1793664000000,
+        "activity_age_ms": 0
       }
     },
     {
@@ -1253,6 +1256,221 @@
         "text": "SYNTHETIC café 🛰️ é \"quoted\" \\"
       },
       "json": "{\"kind\": \"dictation_text\", \"account_id\": \"fixture-account\", \"segment_id\": \"fixture-segment\", \"revision\": -0, \"state\": \"committed\", \"target_device_id\": \"fixture-desktop\", \"text\": \"SYNTHETIC caf\\u00e9 \\ud83d\\udef0\\ufe0f e\\u0301 \\\"quoted\\\" \\\\\"}"
+    },
+    {
+      "schema": "TargetPrepare",
+      "name": "TargetPrepare round trip TargetPrepare",
+      "value": {
+        "kind": "target_prepare",
+        "account_id": "fixture-account",
+        "request_id": "fixture-request",
+        "target_device_id": "fixture-desktop"
+      }
+    },
+    {
+      "schema": "InnerMessage",
+      "name": "TargetPrepare round trip InnerMessage",
+      "value": {
+        "kind": "target_prepare",
+        "account_id": "fixture-account",
+        "request_id": "fixture-request",
+        "target_device_id": "fixture-desktop"
+      }
+    },
+    {
+      "schema": "TargetReady",
+      "name": "TargetReady round trip TargetReady",
+      "value": {
+        "kind": "target_ready",
+        "account_id": "fixture-account",
+        "request_id": "fixture-request",
+        "target_device_id": "fixture-desktop",
+        "ready": true
+      }
+    },
+    {
+      "schema": "InnerMessage",
+      "name": "TargetReady round trip InnerMessage",
+      "value": {
+        "kind": "target_ready",
+        "account_id": "fixture-account",
+        "request_id": "fixture-request",
+        "target_device_id": "fixture-desktop",
+        "ready": true
+      }
+    },
+    {
+      "schema": "DictationOutcome",
+      "name": "DictationOutcome round trip DictationOutcome",
+      "value": {
+        "kind": "dictation_outcome",
+        "account_id": "fixture-account",
+        "segment_id": "fixture-segment",
+        "target_device_id": "fixture-desktop",
+        "outcome": "inserted"
+      }
+    },
+    {
+      "schema": "InnerMessage",
+      "name": "DictationOutcome round trip InnerMessage",
+      "value": {
+        "kind": "dictation_outcome",
+        "account_id": "fixture-account",
+        "segment_id": "fixture-segment",
+        "target_device_id": "fixture-desktop",
+        "outcome": "inserted"
+      }
+    },
+    {
+      "schema": "DictationQuery",
+      "name": "DictationQuery round trip DictationQuery",
+      "value": {
+        "kind": "dictation_query",
+        "account_id": "fixture-account",
+        "segment_id": "fixture-segment",
+        "target_device_id": "fixture-desktop"
+      }
+    },
+    {
+      "schema": "InnerMessage",
+      "name": "DictationQuery round trip InnerMessage",
+      "value": {
+        "kind": "dictation_query",
+        "account_id": "fixture-account",
+        "segment_id": "fixture-segment",
+        "target_device_id": "fixture-desktop"
+      }
+    },
+    {
+      "schema": "CaptureControl",
+      "name": "CaptureControl round trip CaptureControl",
+      "value": {
+        "kind": "capture_control",
+        "account_id": "fixture-account",
+        "request_id": "fixture-request",
+        "target_device_id": "fixture-phone",
+        "capture_state": "off",
+        "ttl_ms": 2000
+      }
+    },
+    {
+      "schema": "InnerMessage",
+      "name": "CaptureControl round trip InnerMessage",
+      "value": {
+        "kind": "capture_control",
+        "account_id": "fixture-account",
+        "request_id": "fixture-request",
+        "target_device_id": "fixture-phone",
+        "capture_state": "off",
+        "ttl_ms": 2000
+      }
+    },
+    {
+      "schema": "CaptureControlResult",
+      "name": "CaptureControlResult round trip CaptureControlResult",
+      "value": {
+        "kind": "capture_control_result",
+        "account_id": "fixture-account",
+        "request_id": "fixture-request",
+        "device_id": "fixture-phone",
+        "capture_state": "off",
+        "outcome": "applied"
+      }
+    },
+    {
+      "schema": "InnerMessage",
+      "name": "CaptureControlResult round trip InnerMessage",
+      "value": {
+        "kind": "capture_control_result",
+        "account_id": "fixture-account",
+        "request_id": "fixture-request",
+        "device_id": "fixture-phone",
+        "capture_state": "off",
+        "outcome": "applied"
+      }
+    },
+    {
+      "schema": "DictationOutcome",
+      "name": "dictation unavailable",
+      "value": {
+        "kind": "dictation_outcome",
+        "account_id": "fixture-account",
+        "segment_id": "fixture-segment",
+        "target_device_id": "fixture-desktop",
+        "outcome": "unavailable"
+      }
+    },
+    {
+      "schema": "DictationOutcome",
+      "name": "dictation unconfirmed",
+      "value": {
+        "kind": "dictation_outcome",
+        "account_id": "fixture-account",
+        "segment_id": "fixture-segment",
+        "target_device_id": "fixture-desktop",
+        "outcome": "unconfirmed"
+      }
+    },
+    {
+      "schema": "DictationText",
+      "name": "prepared dictation segment",
+      "value": {
+        "kind": "dictation_text",
+        "account_id": "fixture-account",
+        "segment_id": "fixture-segment",
+        "revision": 0,
+        "state": "committed",
+        "target_device_id": "fixture-desktop",
+        "text": "Synthetic.",
+        "preparation_id": "fixture-prepare"
+      }
+    },
+    {
+      "schema": "CaptureControlResult",
+      "name": "capture result unavailable",
+      "value": {
+        "kind": "capture_control_result",
+        "account_id": "fixture-account",
+        "request_id": "fixture-request",
+        "device_id": "fixture-phone",
+        "capture_state": "off",
+        "outcome": "unavailable"
+      }
+    },
+    {
+      "schema": "CaptureControlResult",
+      "name": "capture result expired",
+      "value": {
+        "kind": "capture_control_result",
+        "account_id": "fixture-account",
+        "request_id": "fixture-request",
+        "device_id": "fixture-phone",
+        "capture_state": "off",
+        "outcome": "expired"
+      }
+    },
+    {
+      "schema": "CaptureControlResult",
+      "name": "capture result cancelled",
+      "value": {
+        "kind": "capture_control_result",
+        "account_id": "fixture-account",
+        "request_id": "fixture-request",
+        "device_id": "fixture-phone",
+        "capture_state": "off",
+        "outcome": "cancelled"
+      }
+    },
+    {
+      "schema": "CaptureStateReport",
+      "name": "actual mic state distinct from selected capture",
+      "value": {
+        "kind": "capture_state",
+        "account_id": "fixture-account",
+        "device_id": "fixture-phone",
+        "capture_state": "continuous",
+        "listening": false
+      }
     }
   ],
   "invalid": [
@@ -3740,6 +3958,126 @@
         "provider_session_id": "fixture-session",
         "instruction": "SYNTHETIC TASK",
         "recording_consent_state": "forbidden"
+      }
+    },
+    {
+      "schema": "TargetPrepare",
+      "name": "TargetPrepare rejects extras",
+      "value": {
+        "kind": "target_prepare",
+        "account_id": "fixture-account",
+        "request_id": "fixture-request",
+        "target_device_id": "fixture-desktop",
+        "unexpected": true
+      }
+    },
+    {
+      "schema": "TargetReady",
+      "name": "TargetReady rejects extras",
+      "value": {
+        "kind": "target_ready",
+        "account_id": "fixture-account",
+        "request_id": "fixture-request",
+        "target_device_id": "fixture-desktop",
+        "ready": true,
+        "unexpected": true
+      }
+    },
+    {
+      "schema": "DictationOutcome",
+      "name": "DictationOutcome rejects extras",
+      "value": {
+        "kind": "dictation_outcome",
+        "account_id": "fixture-account",
+        "segment_id": "fixture-segment",
+        "target_device_id": "fixture-desktop",
+        "outcome": "inserted",
+        "unexpected": true
+      }
+    },
+    {
+      "schema": "DictationQuery",
+      "name": "DictationQuery rejects extras",
+      "value": {
+        "kind": "dictation_query",
+        "account_id": "fixture-account",
+        "segment_id": "fixture-segment",
+        "target_device_id": "fixture-desktop",
+        "unexpected": true
+      }
+    },
+    {
+      "schema": "CaptureControl",
+      "name": "CaptureControl rejects extras",
+      "value": {
+        "kind": "capture_control",
+        "account_id": "fixture-account",
+        "request_id": "fixture-request",
+        "target_device_id": "fixture-phone",
+        "capture_state": "off",
+        "ttl_ms": 2000,
+        "unexpected": true
+      }
+    },
+    {
+      "schema": "CaptureControlResult",
+      "name": "CaptureControlResult rejects extras",
+      "value": {
+        "kind": "capture_control_result",
+        "account_id": "fixture-account",
+        "request_id": "fixture-request",
+        "device_id": "fixture-phone",
+        "capture_state": "off",
+        "outcome": "applied",
+        "unexpected": true
+      }
+    },
+    {
+      "schema": "CaptureControl",
+      "name": "invalid capture TTL 0",
+      "value": {
+        "kind": "capture_control",
+        "account_id": "fixture-account",
+        "request_id": "fixture-request",
+        "target_device_id": "fixture-phone",
+        "capture_state": "off",
+        "ttl_ms": 0
+      }
+    },
+    {
+      "schema": "CaptureControl",
+      "name": "invalid capture TTL 2001",
+      "value": {
+        "kind": "capture_control",
+        "account_id": "fixture-account",
+        "request_id": "fixture-request",
+        "target_device_id": "fixture-phone",
+        "capture_state": "off",
+        "ttl_ms": 2001
+      }
+    },
+    {
+      "schema": "FocusReport",
+      "name": "invalid age -1",
+      "value": {
+        "kind": "focus_report",
+        "account_id": "fixture-account",
+        "device_id": "fixture-desktop",
+        "last_activity_at": 0,
+        "text_field_focused": true,
+        "activity_age_ms": -1
+      }
+    },
+    {
+      "schema": "FocusReport",
+      "name": "invalid age 9007199254740992",
+      "value": {
+        "kind": "focus_report",
+        "account_id": "fixture-account",
+        "device_id": "fixture-desktop",
+        "last_activity_at": 0,
+        "text_field_focused": true,
+        "activity_age_ms": 9007199254740992
       }
     }
   ],

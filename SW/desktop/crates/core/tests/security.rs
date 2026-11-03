@@ -58,6 +58,7 @@ fn info(device: &str) -> DeviceInfo {
 }
 fn dictation(text: &str) -> InnerMessage {
     InnerMessage::DictationText(DictationText {
+        preparation_id: None,
         kind: DictationTextKind::DictationText,
         account_id: "synthetic-account".into(),
         segment_id: "synthetic-segment".into(),
@@ -184,6 +185,32 @@ async fn full_xx_lan_qr_pair_under_one_minute_and_literal_delivery() -> Result<(
         Delivery::Inserted
     );
     assert_eq!(injector.0, ["Synthetic sample"]);
+    assert!(matches!(
+        ps.receive(p.as_mut()).await?,
+        InnerMessage::DictationOutcome(DictationOutcome {
+            outcome: DictationOutcomeOutcome::Inserted,
+            ..
+        })
+    ));
+    ds.deliver(
+        d.as_mut(),
+        InnerMessage::DictationQuery(DictationQuery {
+            kind: DictationQueryKind::DictationQuery,
+            account_id: "synthetic-account".into(),
+            segment_id: "synthetic-segment".into(),
+            target_device_id: "desktop".into(),
+        }),
+        &mut injector,
+    )
+    .await?;
+    assert!(matches!(
+        ps.receive(p.as_mut()).await?,
+        InnerMessage::DictationOutcome(DictationOutcome {
+            outcome: DictationOutcomeOutcome::Inserted,
+            ..
+        })
+    ));
+    assert_eq!(injector.0.len(), 1);
     assert!(start.elapsed() < Duration::from_secs(60));
     eprintln!(
         "synthetic LAN QR pair + delivery compute: {:?}; human time unverified",
@@ -213,11 +240,11 @@ async fn pre_input_failure_reports_to_phone_and_same_segment_can_retry_without_r
         ds.deliver(d.as_mut(), text.clone(), &mut injector).await?,
         Delivery::InsertionNotStarted
     );
-    let InnerMessage::TaskStatus(status) = ps.receive(p.as_mut()).await? else {
+    let InnerMessage::DictationOutcome(status) = ps.receive(p.as_mut()).await? else {
         panic!("missing failure status")
     };
-    assert_eq!(status.command_id, "synthetic-segment");
-    assert_eq!(status.outcome, Some(TaskStatusOutcome::Unavailable));
+    assert_eq!(status.segment_id, "synthetic-segment");
+    assert_eq!(status.outcome, DictationOutcomeOutcome::Unavailable);
     assert_eq!(
         ds.deliver(d.as_mut(), text.clone(), &mut injector).await?,
         Delivery::Inserted
@@ -249,10 +276,10 @@ async fn unknown_or_partial_insertion_reports_uncertainty_and_deduplicates_after
         ds.deliver(d.as_mut(), text.clone(), &mut injector).await?,
         Delivery::InsertionUnconfirmed
     );
-    let InnerMessage::TaskStatus(status) = ps.receive(p.as_mut()).await? else {
+    let InnerMessage::DictationOutcome(status) = ps.receive(p.as_mut()).await? else {
         panic!("missing uncertainty status")
     };
-    assert_eq!(status.outcome, Some(TaskStatusOutcome::Error));
+    assert_eq!(status.outcome, DictationOutcomeOutcome::Unconfirmed);
     let (mut p, mut d) = lan().await?;
     let pp = pr.devices()?.remove(0);
     let dp = dr.devices()?.remove(0);
@@ -265,10 +292,10 @@ async fn unknown_or_partial_insertion_reports_uncertainty_and_deduplicates_after
         ds.deliver(d.as_mut(), text, &mut injector).await?,
         Delivery::Duplicate
     );
-    let InnerMessage::TaskStatus(status) = ps.receive(p.as_mut()).await? else {
+    let InnerMessage::DictationOutcome(status) = ps.receive(p.as_mut()).await? else {
         panic!("missing duplicate uncertainty status")
     };
-    assert_eq!(status.outcome, Some(TaskStatusOutcome::Error));
+    assert_eq!(status.outcome, DictationOutcomeOutcome::Unconfirmed);
     assert_eq!(injector.0, 1);
     Ok(())
 }

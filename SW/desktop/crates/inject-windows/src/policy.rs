@@ -86,6 +86,7 @@ pub fn editable_focus(e: FocusEvidence) -> bool {
 pub struct FocusSnapshot {
     pub text_field_focused: bool,
     pub last_activity_at: u64,
+    pub activity_age_ms: Option<u64>,
 }
 pub fn last_activity_at(now_ms: u64, tick_ms: u32, last_input_ms: u32) -> u64 {
     now_ms.saturating_sub(u64::from(tick_ms.wrapping_sub(last_input_ms)))

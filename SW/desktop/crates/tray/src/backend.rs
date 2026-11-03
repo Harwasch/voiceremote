@@ -1,7 +1,7 @@
 //! Trusted UI adapter around core pairing/registry and the shared desktop driver.
 use crate::{
     control, desktop_receiver as receiver,
-    desktop_transport::{LanListener, RelayTransport},
+    desktop_transport::LanListener,
     model::{QrView, RotatingOffer},
 };
 use anyhow::{Result, ensure};
@@ -66,6 +66,25 @@ impl Drop for Worker {
     fn drop(&mut self) {
         let _ = self.stop.send(true);
         self.task.abort();
+    }
+}
+/// Cleanup also runs when the pairing worker is cancelled/aborted. The client
+/// contains only the room's signing identity; no provisioning secret is retained.
+struct PairingRoomCleanup {
+    client: Option<RelayClient>,
+    peer: Arc<Mutex<Option<String>>>,
+}
+impl Drop for PairingRoomCleanup {
+    fn drop(&mut self) {
+        if let Some(client) = self.client.take() {
+            let peer = self.peer.lock().unwrap().clone();
+            tokio::spawn(async move {
+                if let Some(peer) = peer {
+                    let _ = client.revoke(&peer).await;
+                }
+                let _ = client.revoke(&client.route.sender).await;
+            });
+        }
     }
 }
 pub struct Backend {
@@ -145,6 +164,7 @@ impl Backend {
         self.view.lock().unwrap().message = message.into();
     }
     pub fn start(self: &Arc<Self>) {
+        control::hub().lock().unwrap().presentation_required = true;
         let backend = self.clone();
         tokio::spawn(async move {
             if control::serve(&backend.root, control::hub().clone())
@@ -176,32 +196,32 @@ impl Backend {
             let (send, stop) = watch::channel(false);
             let task = tokio::spawn(async move {
                 let result: Result<()> = async {
-                    if settings.relay.is_some() {
-                        receiver::run_relay(
-                            backend.client(&settings, peer.room.clone())?,
-                            backend.identity.clone(),
-                            backend.registry.clone(),
-                            peer,
-                            settings.device,
-                            backend.injectors.clone(),
-                            stop,
-                        )
-                        .await
+                    let listener = match LanListener::bind_auto().await {
+                        Ok(mut listener) => {
+                            listener.advertise(&peer.room)?;
+                            Some(listener)
+                        }
+                        Err(error) if settings.relay.is_none() => return Err(error),
+                        Err(_) => None,
+                    };
+                    let client = if settings.relay.is_some() {
+                        Some(backend.client(&settings, peer.room.clone())?)
                     } else {
-                        let mut listener = LanListener::bind_auto().await?;
-                        listener.advertise(&peer.room)?;
-                        receiver::run_lan(
-                            listener,
-                            backend.identity.clone(),
-                            backend.registry.clone(),
-                            peer,
-                            settings.device,
-                            backend.injectors.clone(),
-                            stop,
-                            None,
-                        )
-                        .await
-                    }
+                        None
+                    };
+                    receiver::run_paths(
+                        listener,
+                        client,
+                        backend.identity.clone(),
+                        backend.registry.clone(),
+                        peer,
+                        settings.device,
+                        backend.injectors.clone(),
+                        stop,
+                        None,
+                        false,
+                    )
+                    .await
                 }
                 .await;
                 if result.is_err() {
@@ -215,7 +235,11 @@ impl Backend {
                 .push(Worker { stop: send, task });
         }
     }
-    pub fn pair(self: &Arc<Self>, mut settings: Settings) -> Result<()> {
+    pub fn pair(
+        self: &Arc<Self>,
+        mut settings: Settings,
+        provisioning_secret: Option<String>,
+    ) -> Result<()> {
         settings.relay = settings.relay.filter(|s| !s.trim().is_empty());
         settings.info()?;
         if let Some(local) = self.registry.local_info()? {
@@ -236,8 +260,9 @@ impl Backend {
         self.workers.lock().unwrap().clear();
         let backend = self.clone();
         let (send, stop) = watch::channel(false);
+        let secret = provisioning_secret.map(zeroize::Zeroizing::new);
         let task = tokio::spawn(async move {
-            let result = backend.pair_loop(settings, stop).await;
+            let result = backend.pair_loop(settings, stop, secret).await;
             backend.confirmation.lock().unwrap().take();
             *backend.view.lock().unwrap() = View {
                 message: if result.is_ok() {
@@ -262,24 +287,33 @@ impl Backend {
         self: &Arc<Self>,
         settings: Settings,
         stop: watch::Receiver<bool>,
+        provisioning_secret: Option<zeroize::Zeroizing<String>>,
     ) -> Result<()> {
         let client = if settings.relay.is_some() {
             let client = self.client(&settings, voiceremote_core::relay::new_room_id())?;
-            client.create(None).await?;
+            client
+                .create(provisioning_secret.as_ref().map(|s| s.as_str()))
+                .await?;
             Some(client)
         } else {
             None
+        };
+        let mut cleanup = PairingRoomCleanup {
+            client: client.clone(),
+            peer: Arc::new(Mutex::new(None)),
         };
         let room = client
             .as_ref()
             .map(|c| c.route.room.clone())
             .unwrap_or_else(voiceremote_core::relay::new_room_id);
-        let listener = if client.is_none() {
-            let mut listener = LanListener::bind_auto().await?;
-            listener.advertise(&room)?;
-            Some(listener)
-        } else {
-            None
+        drop(provisioning_secret); // Never persisted or returned in snapshots/logs.
+        let listener = match LanListener::bind_auto().await {
+            Ok(mut listener) => {
+                listener.advertise(&room)?;
+                Some(listener)
+            }
+            Err(error) if client.is_none() => return Err(error),
+            Err(_) => None,
         };
         loop {
             let mut qr = if let Some(client) = &client {
@@ -312,15 +346,15 @@ impl Backend {
                     .expires_at
                     .saturating_sub(SystemClock.now_ms()?),
             );
-            let accepted: Result<(pairing::PendingPair, Box<dyn Transport>)> = tokio::select! {
+            let accepted: Result<(pairing::PendingPair, Box<dyn Transport>, bool)> = tokio::select! {
                 _=receiver::stopped(stop.clone())=>anyhow::bail!("pairing cancelled"),
                 result=tokio::time::timeout(deadline, async {
-                    let mut transport: Box<dyn Transport> = if let Some(client) = &client { Box::new(RelayTransport::connect(client).await?) } else { Box::new(listener.as_ref().unwrap().accept().await?) };
+                    let (mut transport, via_relay) = crate::desktop_transport::accept_pairing(listener.as_ref(), client.as_ref()).await?;
                     let pending = pairing::accept(transport.as_mut(), &self.identity, &mut qr.offer, &SystemClock).await?;
-                    Ok((pending, transport))
+                    Ok((pending, transport, via_relay))
                 })=>match result { Ok(result)=>result, Err(_)=>continue },
             };
-            let Ok((mut pending, mut transport)) = accepted else {
+            let Ok((mut pending, mut transport, via_relay)) = accepted else {
                 continue;
             };
             // Token is consumed. Remove QR immediately; never reuse it after abort.
@@ -339,13 +373,19 @@ impl Backend {
                     let entered = receive.await?;
                     pending.confirm_local(transport.as_mut(), &entered, settings.info()?).await?;
                     pending.receive_confirmation(transport.as_mut()).await?;
+                    *cleanup.peer.lock().unwrap() = pending.remote_info().map(|info| info.device_id.clone());
                     let session = pending.finish(self.registry.clone())?;
-                    self.keys.put("tray-settings", &serde_json::to_vec(&settings)?)?;
+                    if self.keys.put("tray-settings", &serde_json::to_vec(&settings)?).is_err() {
+                        self.registry.revoke(&session.peer().id)?;
+                        let _ = transport.close().await;
+                        anyhow::bail!("settings could not be persisted");
+                    }
                     *self.settings.lock().unwrap() = Some(settings.clone());
                     Ok(session)
                 })=>result?,
             };
             let session = completion?;
+            cleanup.client = None; // Completed enrollment now owns room lifecycle.
             *self.view.lock().unwrap() = View {
                 message: "Phone paired; waiting for phone state".into(),
                 ..View::default()
@@ -356,37 +396,19 @@ impl Backend {
             let peer = session.peer().clone();
             let paired_id = peer.id.clone();
             let task = tokio::spawn(async move {
-                if let Some(listener) = listener {
-                    let _ = receiver::run_lan(
-                        listener,
-                        backend.identity.clone(),
-                        backend.registry.clone(),
-                        peer,
-                        settings.device,
-                        backend.injectors.clone(),
-                        session_stop,
-                        Some((session, transport)),
-                    )
-                    .await;
-                } else {
-                    let _ = receiver::serve(
-                        session,
-                        transport.as_mut(),
-                        (backend.injectors)().as_mut(),
-                        session_stop.clone(),
-                    )
-                    .await;
-                    let _ = receiver::run_relay(
-                        client.unwrap(),
-                        backend.identity.clone(),
-                        backend.registry.clone(),
-                        peer,
-                        settings.device,
-                        backend.injectors.clone(),
-                        session_stop,
-                    )
-                    .await;
-                }
+                let _ = receiver::run_paths(
+                    listener,
+                    client,
+                    backend.identity.clone(),
+                    backend.registry.clone(),
+                    peer,
+                    settings.device,
+                    backend.injectors.clone(),
+                    session_stop,
+                    Some((session, transport)),
+                    via_relay,
+                )
+                .await;
             });
             self.workers
                 .lock()
@@ -421,15 +443,14 @@ impl Backend {
     }
     pub async fn revoke(&self, id: &str) -> Result<()> {
         let peer = self.registry.resolve(id)?;
+        let _ = control::notify_revocation(control::hub(), &peer.info.device_id).await;
         self.registry.revoke(&peer.id)?;
         let settings = self.settings.lock().unwrap().clone();
         if let Some(settings) = settings.filter(|s| s.relay.is_some()) {
-            if self
-                .client(&settings, peer.room)?
-                .revoke(&peer.info.device_id)
-                .await
-                .is_err()
-            {
+            let client = self.client(&settings, peer.room)?;
+            let peer_removed = client.revoke(&peer.info.device_id).await;
+            let self_removed = client.revoke(&settings.device).await;
+            if peer_removed.is_err() || self_removed.is_err() {
                 self.message("Revoked locally; relay room cleanup failed");
                 anyhow::bail!("revoked locally; relay cleanup failed");
             }
@@ -445,7 +466,11 @@ fn injectors(root: &Path) -> receiver::InjectorFactory {
         let sampler = injector.clone();
         receiver::set_focus_sampler(Arc::new(move || {
             let focus = sampler.focus_snapshot();
-            (focus.text_field_focused, focus.last_activity_at)
+            (
+                focus.text_field_focused,
+                focus.last_activity_at,
+                focus.activity_age_ms,
+            )
         }));
         Arc::new(move || Box::new(injector.clone()))
     }
@@ -454,7 +479,11 @@ fn injectors(root: &Path) -> receiver::InjectorFactory {
         let _ = root;
         receiver::set_focus_sampler(Arc::new(|| {
             let focus = voiceremote_inject_windows::focus_snapshot();
-            (focus.text_field_focused, focus.last_activity_at)
+            (
+                focus.text_field_focused,
+                focus.last_activity_at,
+                focus.activity_age_ms,
+            )
         }));
         Arc::new(|| {
             Box::new(voiceremote_inject_windows::WindowsInjector)

@@ -250,3 +250,61 @@ use tokio_tungstenite::tungstenite::Message;
 pub use voiceremote_core::transport::RelayTransport;
 #[cfg(test)]
 use voiceremote_core::{protocol::*, transport::RelayRoute};
+
+/// Select by the peer's first Noise packet, not by which listener opens first.
+/// One Offer is then consumed on exactly one path by the pairing state machine.
+pub async fn accept_pairing(
+    listener: Option<&LanListener>,
+    client: Option<&voiceremote_core::relay::RelayClient>,
+) -> Result<(Box<dyn Transport>, bool)> {
+    struct Staged {
+        packet: Option<Vec<u8>>,
+        inner: Box<dyn Transport>,
+    }
+    #[async_trait::async_trait]
+    impl Transport for Staged {
+        async fn send(&mut self, packet: &[u8]) -> Result<()> {
+            self.inner.send(packet).await
+        }
+        async fn recv(&mut self) -> Result<Vec<u8>> {
+            if let Some(packet) = self.packet.take() {
+                Ok(packet)
+            } else {
+                self.inner.recv().await
+            }
+        }
+        async fn close(&mut self) -> Result<()> {
+            self.inner.close().await
+        }
+    }
+    async fn stage(
+        mut inner: Box<dyn Transport>,
+        relay: bool,
+    ) -> Result<(Box<dyn Transport>, bool)> {
+        let packet = inner.recv().await?;
+        Ok((
+            Box::new(Staged {
+                packet: Some(packet),
+                inner,
+            }),
+            relay,
+        ))
+    }
+    let lan = async {
+        let Some(listener) = listener else {
+            return std::future::pending().await;
+        };
+        stage(Box::new(listener.accept().await?), false).await
+    };
+    let relay = async {
+        let Some(client) = client else {
+            return std::future::pending().await;
+        };
+        stage(Box::new(RelayTransport::connect(client).await?), true).await
+    };
+    tokio::pin!(lan, relay);
+    tokio::select! {
+        result = &mut lan => match result { Ok(value) => Ok(value), Err(error) if client.is_none() => Err(error), Err(_) => relay.await },
+        result = &mut relay => match result { Ok(value) => Ok(value), Err(error) if listener.is_none() => Err(error), Err(_) => lan.await },
+    }
+}

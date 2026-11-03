@@ -21,3 +21,5 @@ Trace: product §4/§7; [REQ-59](../../../../SYS/requirements.md#extensibility),
 integration are **unverified** future work.
 
 Strict parsing rejects duplicate keys and invalid Unicode; lexical integer paths feed the private Ajv integer check.
+
+Generated Records now include delivery/readiness/control variants and activity-age/listening metadata. Shared-vector tests validate against the original schemas; relay execution and room APIs are unchanged.

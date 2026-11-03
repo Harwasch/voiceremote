@@ -19,3 +19,5 @@ flowchart LR
 
 Start at `lib.rs::insert`; see [crate README](../README.md) for limits and
 REQ-16/18–20/57 traceability. No field contents or native/helper errors are logged.
+
+Focus snapshots now retain native idle age separately from wall-clock metadata. Missing Mutter idle evidence is unknown/inactive for Auto; heartbeats cannot invent input. GNOME/device acceptance **unverified**.

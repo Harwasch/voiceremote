@@ -107,12 +107,14 @@ import VoiceRemoteProtocol
         model.onStateChange = { [weak self] in
             guard let self else { return }
             remote.synchronize(model: model)
+            link.synchronizeState()
         }
         model.stateDidChange = { [weak self] listening, destination in
             guard let self else { return }
             do { try keyboard.maintain(listening: listening) } catch { self.error = "Keyboard status could not be updated." }
             activity.setListening(listening, destination: destination)
             remote.synchronize(model: model)
+            link.synchronizeState()
         }
     }
     func prepare() async throws {
@@ -120,6 +122,7 @@ import VoiceRemoteProtocol
         let task = Task { [self] in
             try await link.restore(registry: registry)
             await model.refresh()
+            await reconcileKeyboard()
             link.reconnectAtLaunch()
         }
         preparation = task
@@ -127,6 +130,7 @@ import VoiceRemoteProtocol
         maintenance = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.model.refresh()
+                await self?.reconcileKeyboard()
                 if let self { try? keyboard.maintain(listening: model.isRecording) }
                 try? await Task.sleep(for: .seconds(60))
             }
@@ -185,6 +189,16 @@ import VoiceRemoteProtocol
         model.stop(); remote.cancelOfflineSync(); model.settingsChanged()
         do { try settingsStore.save(settings); savedSettings = settings }
         catch { self.error = "Settings could not be saved. Cloud processing has stopped; check storage before restarting." }
+    }
+    func keyboardInsertionConfirmed(_ segmentID: String) throws -> Bool {
+        guard let id = UUID(uuidString: segmentID) else { return false }
+        return try keyboard.insertionConfirmed(id: id)
+    }
+    private func reconcileKeyboard() async {
+        await model.reconcileDictation(on: model.phoneID) { [self] segment in
+            DictationOutcome(account_id: model.accountID, segment_id: segment, target_device_id: model.phoneID,
+                outcome: try keyboardInsertionConfirmed(segment) ? .inserted : .unconfirmed)
+        }
     }
     func publish(_ text: DictationText) throws {
         guard let id = UUID(uuidString: text.segment_id) else { throw BridgeError.invalidText }

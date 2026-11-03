@@ -35,3 +35,5 @@ Local tests: `cargo test -p voiceremote-tray -j4`. GUI builds only in desktop CI
 Linux. Tauri's [tray](https://v2.tauri.app/learn/system-tray/) and
 [autostart](https://v2.tauri.app/plugin/autostart/) APIs are used from Rust.
 No Hex/Handy/VoiceInk code was copied.
+
+Pairing now offers QR plus a complete copyable invitation; the dead display hash is removed. Optional room-provisioning input is transient. Private LAN stays available with relay fallback; GUI readiness gates insertion (native GUI **unverified**).

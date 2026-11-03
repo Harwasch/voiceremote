@@ -12,7 +12,7 @@ fn help_exposes_required_commands() {
     }
 }
 #[test]
-fn pair_requires_explicit_mode_and_rejects_conflicting_transports() {
+fn pair_requires_explicit_mode_and_rejects_conflicting_qr_code() {
     assert!(
         !cli()
             .args([
@@ -22,23 +22,6 @@ fn pair_requires_explicit_mode_and_rejects_conflicting_transports() {
                 "--listen",
                 "127.0.0.1:0"
             ])
-            .status()
-            .unwrap()
-            .success()
-    );
-    assert!(
-        !cli()
-            .args([
-                "pair",
-                "--qr",
-                "--account",
-                "synthetic-account",
-                "--listen",
-                "127.0.0.1:0",
-                "--relay",
-                "wss://example.invalid"
-            ])
-            .env_remove("VOICEREMOTE_RELAY_URL")
             .status()
             .unwrap()
             .success()
@@ -93,7 +76,7 @@ async fn dictate_toggle_cli_sends_fixed_request_to_user_socket() -> anyhow::Resu
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(String::from_utf8_lossy(&output.stdout).contains("phone confirmation pending"));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("Phone confirmed capture request"));
     server.await??;
     Ok(())
 }

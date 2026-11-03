@@ -13,14 +13,16 @@ async function operation(fn) {
 }
 $('pair-form').addEventListener('submit', event => {
   event.preventDefault();
-  operation(() => invoke('pair', { settings: { account: $('account').value.trim(), device: $('device').value.trim(), role: $('role').value, relay: $('relay').value.trim() || null } }));
+  const provisioningSecret = $('provisioning-secret').value || null;
+  $('provisioning-secret').value = '';
+  operation(() => invoke('pair', { provisioningSecret, settings: { account: $('account').value.trim(), device: $('device').value.trim(), role: $('role').value, relay: $('relay').value.trim() || null } }));
 });
 $('confirm-form').addEventListener('submit', event => {
   event.preventDefault();
   operation(async () => { await invoke('confirm', { phrase: $('confirmation').value.trim() }); $('confirmation').value = ''; $('confirm-form').hidden = true; });
 });
 $('cancel').addEventListener('click', () => operation(() => invoke('cancel')));
-$('toggle').addEventListener('click', () => operation(async () => { await invoke('toggle'); $('message').textContent = 'Capture request sent; waiting for phone confirmation'; }));
+$('toggle').addEventListener('click', () => operation(async () => { await invoke('toggle'); $('message').textContent = 'Phone confirmed the capture request'; }));
 $('autostart').addEventListener('change', () => operation(async () => {
   try { $('autostart').checked = await invoke('autostart', { enabled: $('autostart').checked }); }
   catch (error) { $('autostart').checked = !$('autostart').checked; throw error; }
@@ -37,7 +39,7 @@ async function refresh() {
       initialized = true;
     }
     $('mode').textContent = status.mode === 'ai_control' ? 'AI Control' : status.mode === 'dictation' ? 'Dictation' : 'Mode unknown';
-    $('capture').textContent = !status.connected ? 'Phone disconnected' : status.capture === 'off' ? 'Not listening' : status.capture ? 'Listening' : 'Capture unknown';
+    $('capture').textContent = !status.connected ? 'Phone disconnected' : status.listening === false ? 'Not listening' : status.listening === true ? 'Listening' : 'Capture unknown';
     $('destination').textContent = status.destination || 'Waiting for phone';
     $('toggle').disabled = !status.connected || !status.capture;
     $('pair').disabled = view.pairing;
@@ -45,12 +47,12 @@ async function refresh() {
     $('qr-panel').hidden = !view.qr;
     if (view.qr) {
       if (qr !== view.qr.svg) { $('qr').innerHTML = view.qr.svg; qr = view.qr.svg; }
-      $('short-code').textContent = view.qr.short_code;
+      $('invitation').value = view.qr.invitation;
       expiresAt = view.qr.expires_at;
       $('expiry').textContent = `Rotates in ${Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000))} seconds`;
       // Never show an expired QR even if the backend is offline or stalled.
       if (Date.now() >= expiresAt) $('qr-panel').hidden = true;
-    } else { $('qr').replaceChildren(); qr = ''; }
+    } else { $('qr').replaceChildren(); $('invitation').value = ''; qr = ''; }
     $('confirm-form').hidden = !view.phrase;
     $('phrase').textContent = view.phrase || '';
     if (!pending) $('message').textContent = view.message;

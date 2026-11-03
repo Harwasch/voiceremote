@@ -17,6 +17,7 @@ flowchart LR
 | [NoiseXX.swift](NoiseXX.swift) | XX; noncopyable nonce streams, low-order DH rejection; authentication failure permanently closes | ✅ Cacophony + SYS vectors |
 | [PairingInvitation.swift](PairingInvitation.swift) | Strict QR/complete code, account/key/time checks, pair prologue and phrase | ✅ Linux |
 | [PairingConnection.swift](PairingConnection.swift) | QR pin, deadline, mandatory local/remote confirmation; registry finish | ✅ Linux + real Rust peer |
+| [PhoneConnection.swift](PhoneConnection.swift) | Production serialized connection, readiness/outcome correlation, query, actual-state heartbeat and LAN preference policy | ✅ Portable + socket e2e checks |
 | [ApplicationSession.swift](ApplicationSession.swift) | `03` fragments; strict reassembly/accounts; generation checks; resume `02` ready | ✅ Negative + bidirectional Rust tests |
 | [KeyStore.swift](KeyStore.swift) | KeyStore protocol, memory fake, persisted separate identities/enrollment; conditional Keychain | ✅ Memory; Keychain unverified |
 | [Transport.swift](Transport.swift) | Common frame boundary and cancellable in-memory pair | ✅ Linux |

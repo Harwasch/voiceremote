@@ -26,3 +26,4 @@ Remote BLE remains a draft contract in
 [synthetic tests](../SW/ios/Packages/AppModel/Tests/RemoteContractTests.swift),
 not an authoritative SYS wire schema or proven accessory implementation (REQ-45–55).
 No separate remote draft document exists in this checkout.
+Transport wording remains an owner decision: [Q-12](requirements.md) precisely records the private-network listener used while pairing/paired and asks whether REQ-24/D-1 mean no public inbound ports or port forwarding.
