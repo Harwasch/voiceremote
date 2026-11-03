@@ -26,3 +26,5 @@ Inventory, retained-preview dispatch and durable status queries enter only throu
 | [windows_security.rs](windows_security.rs) | Same concrete token-user SID boundary as the tray pipe; owner/DACL/reparse checks and bounded read on one locked handle | 🟡 Windows tests cross-compiled; runtime unverified |
 
 Clean CLI turns and resource requests return dispatched plus bounded app reply, never verified success. Reply text is excluded from desktop durable receipts; legacy CLI success receipts cannot revive success authority.
+
+Windows ACL fixtures explicitly set/read back owner SID and inheritance protection; DACL-only edits preserve an administrator-group owner. Negative probes require the precise owner/world-write/null-DACL failure, and a real inherited Everyone-write ACE is rejected until protection removes it. Production ACL acceptance is unchanged; updated Windows runtime tests remain unverified locally.
