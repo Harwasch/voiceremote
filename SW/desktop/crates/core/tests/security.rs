@@ -9,12 +9,14 @@ use std::{
 };
 use tokio::{net::TcpListener, task::JoinHandle};
 use tokio_tungstenite::{accept_async, tungstenite::Message};
+#[cfg(unix)]
+use voiceremote_core::storage::FileKeyStore;
 use voiceremote_core::{
     Result, TextInjector,
     pairing::{self, Clock, Offer, PendingPair, SystemClock},
     protocol::*,
     session::{Delivery, Session},
-    storage::{FileKeyStore, Identity, KeyStore, Registry},
+    storage::{Identity, KeyStore, Registry},
     transport::{LanListener, LanTransport, RelayRoute, RelayTransport, Transport},
 };
 use zeroize::Zeroizing;
@@ -1280,10 +1282,42 @@ async fn relay_keepalive_detects_half_open_websocket() -> Result<()> {
 }
 
 #[tokio::test]
+async fn never_claimed_query_allows_same_identity_once_across_registry_handles() -> Result<()> {
+    let keys = Arc::new(MemoryStore::default());
+    exercise_never_claimed_query(|| Ok(keys.clone())).await?;
+    assert!(
+        keys.0
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(name, value)| name.starts_with("never-claimed-") && value == b"never_claimed")
+    );
+    Ok(())
+}
+
+// FileKeyStore deliberately requires Unix private file modes. Windows uses
+// OsKeyStore; retain the shared protocol checks above on every platform.
+#[cfg(unix)]
+#[tokio::test]
 async fn never_claimed_query_allows_same_identity_once_and_survives_reopen() -> Result<()> {
     let directory = tempfile::tempdir()?;
-    let keys = Arc::new(FileKeyStore::new(directory.path().join("state"))?);
-    let dr = Registry::new(keys.clone());
+    exercise_never_claimed_query(|| {
+        Ok(Arc::new(FileKeyStore::new(directory.path().join("state"))?))
+    })
+    .await?;
+    assert!(
+        std::fs::read_dir(directory.path().join("state"))?
+            .filter_map(|e| e.ok())
+            .any(|e| e
+                .file_name()
+                .to_string_lossy()
+                .starts_with("never-claimed-"))
+    );
+    Ok(())
+}
+
+async fn exercise_never_claimed_query(open: impl Fn() -> Result<Arc<dyn KeyStore>>) -> Result<()> {
+    let dr = Registry::new(open()?);
     let (mut p, mut d) = lan().await?;
     let (mut ps, mut ds, ..) = enroll(p.as_mut(), d.as_mut(), registry(), dr).await?;
     let query = InnerMessage::DictationQuery(DictationQuery {
@@ -1301,18 +1335,10 @@ async fn never_claimed_query_allows_same_identity_once_and_survives_reopen() -> 
             ..
         })
     ));
-    let reopened_before_send = Registry::new(keys.clone());
+    let reopened_before_send = Registry::new(open()?);
     assert_eq!(
         reopened_before_send.segment_disposition(ds.peer(), "synthetic-segment")?,
         None
-    );
-    assert!(
-        std::fs::read_dir(directory.path().join("state"))?
-            .filter_map(|e| e.ok())
-            .any(|e| e
-                .file_name()
-                .to_string_lossy()
-                .starts_with("never-claimed-"))
     );
     assert_eq!(
         ds.deliver(d.as_mut(), dictation("Synthetic."), &mut injector)
@@ -1337,7 +1363,7 @@ async fn never_claimed_query_allows_same_identity_once_and_survives_reopen() -> 
     assert_eq!(injector.0.len(), 1);
     // A crash after reservation is never negative evidence.
     assert!(reopened_before_send.claim_segment(ds.peer(), "crashed-segment")?);
-    let reopened = Registry::new(keys);
+    let reopened = Registry::new(open()?);
     assert_eq!(
         reopened.segment_disposition(ds.peer(), "crashed-segment")?,
         Some(false)
