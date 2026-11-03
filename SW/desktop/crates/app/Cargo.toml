@@ -22,6 +22,7 @@ qrcode = { version = "0.14", default-features = false }
 serde_json = "1.0"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "process", "io-util"] }
 voiceremote-core = { path = "../core" }
+voiceremote-agents = { path = "../agents" }
 voiceremote-protocol = { path = "../protocol" }
 
 [target.'cfg(windows)'.dependencies]

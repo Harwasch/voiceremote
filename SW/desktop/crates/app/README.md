@@ -6,6 +6,7 @@ flowchart LR
     CLI --> Relay[relay-key / privileged relay-bootstrap]
     Pair & Run --> Core[../core]
     Run --> Windows[Windows injector + encrypted focus polling]
+    Run --> Agents[../agents: opt-in exact-session CLI dispatch + concurrent controls]
 ```
 
 | Path | What it is | Status |
@@ -20,3 +21,5 @@ REQ-16/18–21/22–25/27/57. Windows selects `inject-windows`; focus reports tr
 inside the authenticated Noise session. Native checks are [unverified](../inject-windows/manual-test.md).
 Linux retains its unavailable adapter pending the parallel platform task.
 `dictate toggle` reports a stub, and no provider command executes.
+REQ-22–25/27. Dictation injector is unavailable until platform crates arrive;
+`dictate toggle` reports a stub, provider execution is opt-in with headless `--agents-config` ([adapters](../agents/README.md), REQ-41/44).

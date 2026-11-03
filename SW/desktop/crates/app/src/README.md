@@ -3,6 +3,7 @@ flowchart LR
     main[main.rs] --> Core[voiceremote-core]
     main --> QR[terminal QR / full code]
     main --> Headless[core receiver supervisors]
+    main --> Agents[agents: duplex headless controls + durable receipts]
     main --> Relay[signed relay API / explicit privileged bootstrap]
     main -->|Windows| Win[windows_receiver.rs: focus over Noise]
     Win --> Wire[windows_transport.rs: persistent framing / keepalive]
@@ -20,3 +21,4 @@ Start at `Cli` and `main`. Configuration/limitations are in
 The Windows adapters mirror the core supervisors and wire checks because the
 current core API has no metadata hook and its LAN receive cannot be cancelled.
 Keep protocol/security behavior aligned if those core implementations change.
+[desktop README](../../../README.md). REQ-22–25/27/41/44; agent execution is opt-in via owner allowlist. No Tauri or injection backend.
