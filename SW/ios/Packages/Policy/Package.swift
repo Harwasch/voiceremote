@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "Policy",
-    platforms: [.iOS(.v16), .macOS(.v13)],
+    platforms: [.iOS("26.0"), .macOS("26.0")],
     products: [
         .library(name: "Policy", targets: ["Policy"]),
         .library(name: "TrustedInput", targets: ["TrustedInput"])
