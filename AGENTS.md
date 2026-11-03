@@ -126,6 +126,7 @@ the folder, not an essay:
 | Component | Where it runs | Test command (planned) |
 |---|---|---|
 | `SYS/` schemas + codegen | hwgeekom | `make -C SYS check` |
+| Local end-to-end: real relay + desktop + Swift phone | hwgeekom (Linux) | `bash SYS/tests/e2e/run.sh` |
 | `SW/desktop` | hwgeekom (Linux); Windows via CI | `cargo test --workspace` |
 | `SW/relay` | hwgeekom | `npm test` |
 | `SW/ios` | **GitHub Actions macOS runner only** (no Mac) | `xcodebuild test` in CI |

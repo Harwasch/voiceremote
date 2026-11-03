@@ -76,7 +76,8 @@ public actor NoiseSession {
     public func decrypt(_ encrypted: Data) throws -> Data {
         guard !closed else { throw PairingError.invalidState }
         guard encrypted.count <= 65_535 else { throw PairingError.messageTooLarge }
-        return try receiving.decrypt(encrypted, ad: Data())
+        do { return try receiving.decrypt(encrypted, ad: Data()) }
+        catch { close(); throw error }
     }
     public func close() { closed = true; sending = CipherState(); receiving = CipherState() }
 }

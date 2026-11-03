@@ -3,9 +3,15 @@ import Foundation
 /// One complete Noise message per frame; LAN and relay adapters implement this.
 /// send and receive must honor task cancellation. close must unblock pending I/O.
 public protocol PairingTransport: Sendable {
+    /// Existing authenticated Noise state only; never pairing/resume XX.
+    func retainedSession() async
     func send(_ frame: Data) async throws
     func receive() async throws -> Data
     func close() async
+}
+
+public extension PairingTransport {
+    func retainedSession() async {}
 }
 
 private actor FrameQueue {

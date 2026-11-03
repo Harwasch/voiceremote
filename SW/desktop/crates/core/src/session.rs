@@ -60,6 +60,7 @@ impl Session {
         message: &InnerMessage,
     ) -> Result<()> {
         self.check_active()?;
+        transport.retained_session();
         let plain = encode(message).map_err(anyhow::Error::msg)?;
         check_accounts(&serde_json::to_value(message)?, &self.peer.info.account_id)?;
         ensure!(
@@ -100,6 +101,7 @@ impl Session {
                 tokio::time::timeout(std::time::Duration::from_secs(1), transport.close()).await;
             return Err(error);
         }
+        transport.retained_session();
         self.failed = true;
         let mut assembled = zeroize::Zeroizing::new(Vec::new());
         let mut expected_total = None;

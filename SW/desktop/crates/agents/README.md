@@ -50,3 +50,6 @@ Real CLIs are **unverified**: the opt-in `process::tests::live_cli_smoke_opt_in`
 returns immediately unless `VOICEREMOTE_LIVE_AGENT_SMOKE=1`; it then requires
 `VOICEREMOTE_LIVE_AGENT_CONFIG` pointing to an owner allowlist with existing
 Claude **and** Codex sessions. It is never enabled by normal CI/test commands.
+
+Relay pumps use the core VRR1 socket-generation codec, including stale-frame
+filtering, while retaining independent bounded reader/writer tasks for controls.

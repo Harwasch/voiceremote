@@ -35,12 +35,8 @@ const SECRET: &str = "synthetic-bootstrap-secret-at-least-32";
 #[derive(Clone)]
 struct Member {
     key: String,
-    controller: bool,
 }
 struct Invite {
-    device: String,
-    key: String,
-    controller: bool,
     expires: u64,
 }
 struct Challenge {
@@ -65,6 +61,7 @@ struct Data {
     frames: usize,
     max_frame: usize,
     bad_context: bool,
+    clock_offset: u64,
     challenge_lifetime: i64,
 }
 type Shared = Arc<Mutex<Data>>;
@@ -110,13 +107,13 @@ async fn handle(
 ) -> Response {
     let mut data = shared.lock().unwrap();
     let room_key = (account.clone(), room_id.clone());
-    let now = SystemClock.now_ms().unwrap();
+    let now = SystemClock.now_ms().unwrap() + data.clock_offset;
     if raw.len() > 4096 {
         return StatusCode::PAYLOAD_TOO_LARGE.into_response();
     }
     let value: Value = serde_json::from_slice(&raw).unwrap_or(Value::Null);
     let device = value["device_id"].as_str().unwrap_or("").to_owned();
-    if operation == "bootstrap" {
+    if operation == "create" {
         if header(&headers, "authorization") != format!("Bearer {SECRET}") {
             return forbidden();
         }
@@ -126,16 +123,28 @@ async fn handle(
         if !valid_fields(&value, &["device_id", "public_key"]) {
             return forbidden();
         }
+        let proof =
+            json!(["voiceremote-relay-create-v1", account, room_id, hash(&raw)]).to_string();
+        if !verify(
+            value["public_key"].as_str().unwrap_or(""),
+            header(&headers, "x-relay-signature"),
+            &proof,
+        ) {
+            return forbidden();
+        }
         let mut room = Room::default();
         room.members.insert(
             device,
             Member {
                 key: value["public_key"].as_str().unwrap().into(),
-                controller: true,
             },
         );
         data.rooms.insert(room_key, room);
-        return (StatusCode::CREATED, axum::Json(json!({"created":true}))).into_response();
+        return (
+            StatusCode::CREATED,
+            axum::Json(json!({"created":true,"server_time":now,"expires_at":now+120_000})),
+        )
+            .into_response();
     }
     data.serial += 1;
     let serial = data.serial;
@@ -197,18 +206,26 @@ async fn handle(
         } else {
             message
         };
-        return axum::Json(json!({"challenge":nonce,"message":message,"expires_at":expires}))
-            .into_response();
+        return axum::Json(
+            json!({"challenge":nonce,"message":message,"expires_at":expires,"server_time":now}),
+        )
+        .into_response();
     }
     if operation == "join" {
         if !valid_fields(
             &value,
-            &["device_id", "public_key", "one_use_token", "signature"],
+            &[
+                "device_id",
+                "public_key",
+                "one_use_token",
+                "expires_at",
+                "signature",
+            ],
         ) {
             return forbidden();
         }
         let token = value["one_use_token"].as_str().unwrap_or("");
-        let Some(invite) = room.invites.get(token) else {
+        let Some(invite) = room.invites.get(&hash(token.as_bytes())) else {
             return forbidden();
         };
         let message = json!([
@@ -216,31 +233,29 @@ async fn handle(
             account,
             room_id,
             device,
-            invite.key,
+            value["public_key"],
             token,
             invite.expires
         ])
         .to_string();
-        if invite.device != device
-            || value["public_key"] != invite.key
+        if value["expires_at"] != invite.expires
             || invite.expires <= now
             || !verify(
-                &invite.key,
+                value["public_key"].as_str().unwrap_or(""),
                 value["signature"].as_str().unwrap_or(""),
                 &message,
             )
         {
             return forbidden();
         }
-        let invite = room.invites.remove(token).unwrap();
+        room.invites.remove(&hash(token.as_bytes()));
         if room.members.contains_key(&device) {
             return StatusCode::CONFLICT.into_response();
         }
         room.members.insert(
             device,
             Member {
-                key: invite.key,
-                controller: invite.controller,
+                key: value["public_key"].as_str().unwrap().into(),
             },
         );
         return (StatusCode::CREATED, axum::Json(json!({"joined":true}))).into_response();
@@ -267,27 +282,25 @@ async fn handle(
         return forbidden();
     }
     if operation == "invite" {
-        if !member.controller || !valid_fields(&value, &["device_id", "public_key", "controller"]) {
+        if !valid_fields(&value, &["token_sha256", "expires_at"]) {
             return forbidden();
         }
-        let token = B64.encode(Sha256::digest(serial.to_le_bytes()));
-        let expires = now + 120_000;
+        let expires = value["expires_at"].as_u64().unwrap_or(0);
+        if expires <= now || expires - now > 120_000 {
+            return forbidden();
+        }
         room.invites.insert(
-            token.clone(),
-            Invite {
-                device,
-                key: value["public_key"].as_str().unwrap().into(),
-                controller: value["controller"].as_bool().unwrap(),
-                expires,
-            },
+            value["token_sha256"].as_str().unwrap_or("").into(),
+            Invite { expires },
         );
-        return axum::Json(json!({"one_use_token":token,"expires_at":expires})).into_response();
+        return (
+            StatusCode::CREATED,
+            axum::Json(json!({"registered":true,"expires_at":expires})),
+        )
+            .into_response();
     }
     if operation == "revoke" {
-        if !valid_fields(&value, &["device_id"])
-            || (!member.controller && device != challenge.device)
-            || room.members.remove(&device).is_none()
-        {
+        if !valid_fields(&value, &["device_id"]) || room.members.remove(&device).is_none() {
             return forbidden();
         }
         if let Some(socket) = data.sockets.remove(&(account, room_id, device)) {
@@ -388,7 +401,7 @@ impl Fake {
             &self.origin,
             RelayRoute {
                 account: "synthetic-account".into(),
-                room: "synthetic-room".into(),
+                room: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
                 sender: id.into(),
             },
             key,
@@ -455,15 +468,13 @@ async fn signed_first_room_invite_join_full_xx_maximum_dictation_and_revoke() ->
     );
     desktop.bootstrap(SECRET).await?;
     assert!(desktop.bootstrap(SECRET).await.is_err());
-    let invitation = desktop
-        .invite("phone", &phone_key.public_key(), true)
-        .await?;
+    let invitation = desktop.invite().await?;
     let di = Identity::generate()?;
     let pi = Identity::generate()?;
     let mut offer = Offer::from_relay_invite(
         &di,
         "synthetic-account".into(),
-        "synthetic-room".into(),
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
         invitation.one_use_token.clone(),
         invitation.expires_at,
         &SystemClock,
@@ -546,7 +557,7 @@ async fn relay_receiver_reconnects_after_disconnect_and_stops_during_wait() -> R
     let registry = registry();
     let peer = registry.enroll(
         Identity::generate()?.public,
-        "synthetic-room".into(),
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
         info("phone"),
     )?;
     let (stop, watch) = tokio::sync::watch::channel(false);
@@ -581,5 +592,15 @@ async fn relay_receiver_reconnects_after_disconnect_and_stops_during_wait() -> R
     .await?;
     stop.send(true)?;
     tokio::time::timeout(Duration::from_secs(1), runner).await???;
+    Ok(())
+}
+
+#[tokio::test]
+async fn member_challenge_uses_server_clock_when_desktop_is_behind() -> Result<()> {
+    let fake = Fake::start().await?;
+    let desktop = fake.client("desktop", RelayIdentity::generate())?;
+    desktop.bootstrap(SECRET).await?;
+    fake.state.lock().unwrap().clock_offset = 3_600_000;
+    assert!(desktop.connect_request().await.is_ok());
     Ok(())
 }

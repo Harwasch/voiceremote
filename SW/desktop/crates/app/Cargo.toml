@@ -10,6 +10,8 @@ path = "src/main.rs"
 
 [features]
 default = []
+# Local integration only: fixed synthetic TextInjector and loopback HTTP relay.
+e2e-test = []
 os-keychain = ["voiceremote-core/os-keychain"]
 # Reserved for the later tray implementation; no Tauri dependency.
 tray = []

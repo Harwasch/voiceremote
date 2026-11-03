@@ -53,6 +53,9 @@ struct Cli {
     state_dir: PathBuf,
     #[arg(long)]
     keychain: bool,
+    #[cfg(feature = "e2e-test")]
+    #[arg(long, hide = true)]
+    e2e_injector: bool,
     #[command(subcommand)]
     command: Command,
 }
@@ -69,16 +72,14 @@ enum Command {
         device: Option<String>,
         #[arg(long, conflicts_with = "relay")]
         listen: Option<SocketAddr>,
-        /// Relay origin, e.g. https://relay.example. Requires provisioned room.
+        /// Relay origin. Creates a fresh room unless --room names an existing membership.
         #[arg(long, env = "VOICEREMOTE_RELAY_URL")]
         relay: Option<String>,
         #[arg(long)]
         room: Option<String>,
-        /// Prospective phone ID and Ed25519 key from a trusted exchange.
+        /// Optional assertion of the trusted phone DeviceInfo ID.
         #[arg(long)]
         phone_device: Option<String>,
-        #[arg(long)]
-        phone_relay_key: Option<String>,
     },
     Devices,
     Revoke {
@@ -111,7 +112,7 @@ enum Command {
         #[arg(long, env = "VOICEREMOTE_ACCOUNT")]
         account: String,
     },
-    /// Privileged operator command; never runs implicitly during ordinary pairing.
+    /// Explicit signed create with a configured provisioner secret.
     RelayBootstrap {
         #[arg(long)]
         device: Option<String>,
@@ -171,6 +172,16 @@ impl voiceremote_core::TextInjector for WindowsAppInjector {
         })
     }
 }
+#[cfg(feature = "e2e-test")]
+struct SyntheticInjector;
+#[cfg(feature = "e2e-test")]
+impl voiceremote_core::TextInjector for SyntheticInjector {
+    fn insert_text(&mut self, text: &str) -> Result<()> {
+        ensure!(text == "Synthetic e2e 🦀", "unexpected e2e input");
+        println!("E2E_INSERTED");
+        Ok(())
+    }
+}
 fn store(cli: &Cli) -> Result<Arc<dyn KeyStore>> {
     if cli.keychain {
         #[cfg(feature = "os-keychain")]
@@ -210,6 +221,18 @@ fn relay_client(
     device: String,
     keys: &dyn KeyStore,
 ) -> Result<RelayClient> {
+    #[cfg(feature = "e2e-test")]
+    if origin.starts_with("http://") {
+        return RelayClient::loopback(
+            origin,
+            RelayRoute {
+                account,
+                room,
+                sender: device,
+            },
+            RelayIdentity::load_or_create(keys)?,
+        );
+    }
     RelayClient::new(
         origin,
         RelayRoute {
@@ -256,6 +279,12 @@ async fn main() -> Result<()> {
     let injectors: InjectorFactory = Arc::new(|| Box::new(UnavailableInjector));
     #[cfg(windows)]
     let injectors: InjectorFactory = Arc::new(|| Box::new(WindowsAppInjector));
+    #[cfg(feature = "e2e-test")]
+    let injectors: InjectorFactory = if cli.e2e_injector {
+        Arc::new(|| Box::new(SyntheticInjector))
+    } else {
+        injectors
+    };
     match cli.command {
         Command::Devices => {
             for peer in registry.devices()? {
@@ -309,7 +338,7 @@ async fn main() -> Result<()> {
             relay_client(&relay, account, room, device, keys.as_ref())?
                 .bootstrap(&secret)
                 .await?;
-            println!("Controller room provisioned");
+            println!("Relay room created");
         }
         Command::Pair {
             qr,
@@ -320,31 +349,33 @@ async fn main() -> Result<()> {
             relay,
             room,
             phone_device,
-            phone_relay_key,
         } => {
             let device = pairing_id(&registry, device)?;
             let identity = Arc::new(Identity::load_or_create(keys.as_ref())?);
             let relay = if let Some(origin) = relay {
-                Some(relay_client(
+                let fresh = room.is_none();
+                let client = relay_client(
                     &origin,
                     account.clone(),
-                    room.ok_or_else(|| {
-                        anyhow::anyhow!("--room must name a provisioned controller room")
-                    })?,
+                    room.unwrap_or_else(voiceremote_core::relay::new_room_id),
                     device.clone(),
                     keys.as_ref(),
-                )?)
+                )?;
+                if fresh {
+                    client
+                        .create(
+                            std::env::var("VOICEREMOTE_RELAY_BOOTSTRAP_SECRET")
+                                .ok()
+                                .as_deref(),
+                        )
+                        .await?;
+                }
+                Some(client)
             } else {
                 None
             };
             let mut offer = if let Some(client) = &relay {
-                let phone = phone_device.as_deref().ok_or_else(|| {
-                    anyhow::anyhow!("--phone-device required from trusted signing-key exchange")
-                })?;
-                let key = phone_relay_key.as_deref().ok_or_else(|| {
-                    anyhow::anyhow!("--phone-relay-key required from trusted signing-key exchange")
-                })?;
-                let invitation = client.invite(phone, key, true).await?;
+                let invitation = client.invite().await?;
                 Offer::from_relay_invite(
                     &identity,
                     account.clone(),
@@ -414,7 +445,7 @@ async fn main() -> Result<()> {
                     pending
                         .remote_info()
                         .is_some_and(|i| i.device_id == expected),
-                    "Noise peer ID differs from relay invitation"
+                    "Noise peer ID differs from trusted assertion"
                 );
             }
             let session = pending.finish(registry.clone())?;
