@@ -197,9 +197,18 @@ import VoiceRemoteProtocol
         return try await factory()
     }
     func pinnedCapture(choice: CaptureChoice? = nil, forBenchmark: Bool = false) throws -> CaptureFactory {
-        let selected = try CaptureMetrics.select(choice: choice ?? captureChoice, remoteReady: remote.isEnrolled,
-            phone: CaptureMetrics.current(phoneMetrics.quality(id: "phone"), recordedIdentity: phoneMetricRoute, currentIdentity: phoneRoute),
-            remote: CaptureMetrics.current(remoteMetrics.quality(id: "remote"), recordedIdentity: remoteMetricIdentity, currentIdentity: remote.sourceIdentity))
+        if (choice ?? captureChoice) == .automatic {
+            let phone = try pinnedCapture(choice: .phone, forBenchmark: forBenchmark)
+            let peer = remote.sourceIdentity, epoch = sourceSelectionEpoch, name = remote.sourceName
+            let remoteFactory = remote.isEnrolled ? try pinnedCapture(choice: .remote, forBenchmark: forBenchmark) : nil
+            return UtteranceCaptureSession.factory(phone: phone, remote: remoteFactory, remoteName: name,
+                phoneName: { AVAudioSession.sharedInstance().currentRoute.inputs.first?.portName ?? "iPhone microphone" },
+                phoneIdentity: { AVAudioSession.sharedInstance().currentRoute.inputs.first?.uid },
+                valid: { [weak self] in self?.sourceSelectionEpoch == epoch },
+                remoteValid: { [weak self] in self?.remote.sourceIdentity == peer },
+                didSelect: { [weak self] in self?.activeCaptureSource = $0 })
+        }
+        let selected = try CaptureMetrics.select(choice: choice ?? captureChoice, remoteReady: remote.isEnrolled, phone: nil, remote: nil)
         let epoch = sourceSelectionEpoch, identity = remote.sourceIdentity, name = remote.sourceName
         let remoteFactory = selected == .remote ? remote.pinnedCapture(model: model, forBenchmark: forBenchmark) : nil
         activeCaptureSource = selected == .remote ? name : "Phone / connected headset"

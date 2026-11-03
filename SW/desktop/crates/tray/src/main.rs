@@ -51,7 +51,15 @@ async fn revoke(id: String, backend: State<'_, Arc<Backend>>) -> Result<(), Stri
 }
 #[tauri::command]
 async fn toggle() -> Result<(), String> {
-    control::toggle(control::hub()).await.map_err(failure)
+    control::toggle(control::hub())
+        .await
+        .map_err(|error| error.to_string())
+}
+#[tauri::command]
+async fn gesture(event: String, milliseconds: u64) -> Result<String, String> {
+    control::gesture(control::hub(), &event, milliseconds)
+        .await
+        .map_err(|error| error.to_string())
 }
 #[tauri::command]
 fn autostart(
@@ -79,7 +87,7 @@ fn main() {
                 .build(),
         )
         .invoke_handler(tauri::generate_handler![
-            snapshot, pair, confirm, cancel, revoke, toggle, autostart
+            snapshot, pair, confirm, cancel, revoke, toggle, gesture, autostart
         ])
         .setup(|app| {
             let backend = Backend::open(control::default_state_dir())?;
@@ -90,7 +98,7 @@ fn main() {
             let toggle = MenuItem::with_id(
                 app,
                 "toggle",
-                "Request dictation toggle",
+                "Stop dictation / tap phone to start",
                 true,
                 None::<&str>,
             )?;
