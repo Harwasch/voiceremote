@@ -1,4 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
+option(REMOTE_TIMING "Log UI/input/audio scheduling aggregates every five seconds" ON)
 set(REMOTE_BOARD m5stopwatch CACHE STRING "m5stopwatch or waveshare_c6_169")
 if(NOT REMOTE_BOARD MATCHES "^(m5stopwatch|waveshare_c6_169)$")
     message(FATAL_ERROR "Unknown REMOTE_BOARD")

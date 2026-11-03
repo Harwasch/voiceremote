@@ -5,7 +5,11 @@
 extern vr_state_t remote_state;
 extern SemaphoreHandle_t remote_mutex;
 uint32_t remote_now(void);
-/* All UI, state and board operations run under remote_mutex. */
+/* State, UI mailbox and board I2C/mic operations use remote_mutex. LVGL and
+ * panel SPI belong to the renderer and never hold it. ui_phone is the sole
+ * exception: entered at depth one, it releases/reacquires the lock while waiting. */
+void remote_lock(void);
+void remote_unlock(void);
 void remote_event(uint8_t event, uint8_t value, uint32_t sampled);
 void ble_start(void);
 void ble_emit(uint8_t event, uint32_t sampled);
@@ -20,6 +24,7 @@ void ui_pair_number(uint32_t number);
 void ui_pair_hide(void);
 void ui_link(const char *text);
 void ui_tick(void);
+void ui_poll(void);
 
 void audio_init(void);
 void audio_sync(void);

@@ -8,7 +8,8 @@
 #include "esp_heap_caps.h"
 #endif
 #include "board.h"
-#include "layout.h"
+#include "ui_input.h"
+#include "timing.h"
 #include "lvgl.h"
 #include <stdio.h>
 #include <string.h>
@@ -22,21 +23,38 @@ static lv_display_t *display;
 static lv_obj_t *screen, *orb_obj;
 static vr_layout_t layout;
 static lv_layer_t *layer;
-static vr_phone_t shown;
-static bool shown_valid, flush_ok=true, error_visible;
-static uint32_t error_since, pulse_at, pressed_at, pair_number;
-static uint8_t overlay; /* 0: normal, 1: numeric comparison, 2: forget confirmation */
+/* current is the app mailbox (remote_mutex); view belongs only to LVGL's task.
+ * No state/board-I2C mutex is held during drawing or synchronous panel DMA. */
+typedef struct {
+    vr_phone_t phone;
+    bool valid, secure, streaming, error;
+    uint8_t capture, mode, overlay;
+    uint32_t number, touch_id, touch_at;
+} ui_view_t;
+static ui_view_t current, view, drawn;
+static bool drawn_valid, flush_ok=true, frame_flushed, error_visible;
+static uint32_t error_since, pulse_at, frame_at;
+static vr_ui_press_t press;
+static vr_phone_t barrier_phone;
+static uint32_t barrier_id, barrier_done;
+static bool barrier_active, barrier_ok;
+#ifndef UI_PREVIEW
+static SemaphoreHandle_t barrier_signal;
+#endif
+static void lock(void) { remote_lock(); }
+static void unlock(void) { remote_unlock(); }
+static void cancel_barrier(void) { barrier_active=false; }
+/* 0: normal, 1: numeric comparison, 2: forget confirmation. */
 static uint32_t forget_since;
-static vr_hit_t pressed;
 static bool long_recognised;
 static vr_debounce_t control_filters[2];
 static uint8_t control_values[2];
 static const uint32_t mode_colors[]={0x6fe3ff,0xff6ad5};
 static uint32_t ticks(void) { return remote_now(); }
-static bool linked(void) { return remote_state.secure && shown_valid; }
+static bool linked(void) { return view.secure && view.valid; }
 static bool listening(void)
 {
-    return vr_ui_listening(remote_state.input.streaming);
+    return vr_ui_listening(view.streaming);
 }
 static int sx(float x) { return (int)lroundf(layout.ox+x*layout.scale); }
 static int sy(float y) { return (int)lroundf(layout.oy+y*layout.scale); }
@@ -116,12 +134,12 @@ static void target_label(void)
     float cx=layout.cx,y=layout.baseline;
     /* Crossed out only when nothing is connected; plain blue means connected, waiting for the phone's state. */
     if(!linked()) {
-        bool up=remote_state.secure;
+        bool up=view.secure;
         icon(up?IC_BT:IC_BT_OFF,cx,y-(layout.ring?42:30)*.32f,(layout.ring?42:30)/26.f,up?0x2f8bff:0x8a9099); return;
     }
-    bool error=error_visible && shown.error[0];
-    char name[96]; vr_ui_ascii(name,sizeof name,error?shown.error:shown.resolved);
-    bool automatic=!error && shown.active==0;
+    bool error=view.error && view.phone.error[0];
+    char name[96]; vr_ui_ascii(name,sizeof name,error?view.phone.error:view.phone.resolved);
+    bool automatic=!error && view.phone.active==0;
     const lv_font_t *fonts[]={&lexend_42,&lexend_30,&lexend_24};
     int first=layout.ring && layout.scale>.85f?0:1;
     const int sizes[]={42,30,24};
@@ -164,15 +182,15 @@ static void target_label(void)
 static void draw_base(lv_event_t *e)
 {
     layer=lv_event_get_layer(e);
-    if(overlay) {
+    if(view.overlay) {
         float cx=layout.cx, top=layout.ring?300:180, bottom=layout.ring?466:280;
         rect(0,top,cx,bottom,0x2a2d32); rect(cx,top,layout.ring?466:240,bottom,0x30d158);
         float iy=layout.ring?364:222, gap=layout.ring?81:55;
         icon(IC_X,cx-gap,iy,layout.ring?2:1.5f,0xffffff);
         icon(IC_CHECK,cx+gap,iy,layout.ring?2:1.5f,0);
-        if(overlay==1) {
+        if(view.overlay==1) {
             icon(IC_BT,cx,layout.ring?74:32,1.5f,0x2f8bff);
-            char digits[8]; snprintf(digits,sizeof digits,"%06lu",(unsigned long)(pair_number%1000000));
+            char digits[8]; snprintf(digits,sizeof digits,"%06lu",(unsigned long)(view.number%1000000));
             const lv_font_t *font=layout.ring?&lexend_84:&lexend_42;
             int spacing=sz(layout.ring?6:3);
             for(int i=0;i<2;i++) {
@@ -186,76 +204,80 @@ static void draw_base(lv_event_t *e)
         const float starts[]={-116,-29,50},ends[]={-50,29,116};
         const uint32_t cols[]={0x8a9099,0xffd60a,0xff453a},dim[]={0x8a9099,0xa8922e,0xa8524d};
         for(int i=0;i<3;i++) {
-            bool selected=remote_state.input.capture==i;
+            bool selected=view.capture==i;
             arc(233,233,193,starts[i],ends[i],60,selected?cols[i]:0x1d2024);
             float a=(starts[i]+ends[i])/2*3.14159265358979323846f/180;
             icon(i,233+193*sinf(a),233-193*cosf(a),1.8f,selected?0:dim[i]);
         }
     }
-    if(linked()) for(int i=0;i<shown.count;i++)
-        circle(layout.cx+(i-(shown.count-1)/2.f)*(layout.ring?20:16),layout.pips_y,layout.ring?5:4,
-            i==shown.active?0xffffff:0x3a3f45,0,255);
+    if(linked()) for(int i=0;i<view.phone.count;i++)
+        circle(layout.cx+(i-(view.phone.count-1)/2.f)*(layout.ring?20:16),layout.pips_y,layout.ring?5:4,
+            i==view.phone.active?0xffffff:0x3a3f45,0,255);
     target_label();
 }
 static void draw_orb(lv_event_t *e)
 {
     layer=lv_event_get_layer(e);
     float cx=layout.cx,cy=layout.cy,r=layout.radius;
-    bool off=!linked() || remote_state.input.capture==VR_OFF, live=listening();
-    uint32_t color=mode_colors[remote_state.input.mode==1];
+    bool off=!linked() || view.capture==VR_OFF, live=listening();
+    uint32_t color=mode_colors[view.mode==1];
     if(off) circle(cx,cy,r,0x3a3f45,6,255);
     else if(live) {
-        float phase=(remote_now()%1800)/1800.f;
+        float phase=(frame_at%1800)/1800.f;
         circle(cx,cy,r+3+phase*17,color,3,(uint8_t)(100*(1-phase)));
         circle(cx,cy,r,color,0,255);
     } else circle(cx,cy,r,color,8,255);
-    icon(remote_state.input.mode?IC_AI:IC_TYPE,cx,cy,r/34,off?0x5b616a:live?0:color);
+    icon(view.mode?IC_AI:IC_TYPE,cx,cy,r/34,off?0x5b616a:live?0:color);
 }
-static void invalidate(void)
+/* Clip custom drawing to the changed regions; LVGL clears the old pixels too.
+ * Bounds include rounded caps and antialiasing. Only overlay transitions are full screen. */
+static void region(float x1,float y1,float x2,float y2)
 {
-    if(overlay) lv_obj_add_flag(orb_obj,LV_OBJ_FLAG_HIDDEN);
-    else lv_obj_remove_flag(orb_obj,LV_OBJ_FLAG_HIDDEN);
-    lv_obj_invalidate(screen);
+    lv_area_t a={sx(x1),sy(y1),sx(x2),sy(y2)}; lv_obj_invalidate_area(screen,&a);
+}
+static void sector(unsigned i)
+{
+    static const float bounds[3][4]={{7,76,118,350},{107,7,359,97},{348,76,459,350}};
+    if(layout.ring && i<3) region(bounds[i][0],bounds[i][1],bounds[i][2],bounds[i][3]);
+}
+static void target(void) { region(0,layout.ring?356:212,layout.ring?466:240,layout.ring?450:279); }
+static void invalidate_changes(bool force_target)
+{
+    if(!drawn_valid || view.overlay!=drawn.overlay || (view.overlay && view.number!=drawn.number)) {
+        if(view.overlay) lv_obj_add_flag(orb_obj,LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_remove_flag(orb_obj,LV_OBJ_FLAG_HIDDEN);
+        lv_obj_invalidate(screen);
+    } else if(!view.overlay) {
+        if(view.capture!=drawn.capture) { sector(drawn.capture); sector(view.capture); }
+        if((view.capture==VR_OFF)!=(drawn.capture==VR_OFF) || view.mode!=drawn.mode || view.secure!=drawn.secure ||
+           view.valid!=drawn.valid || view.streaming!=drawn.streaming) lv_obj_invalidate(orb_obj);
+        if(force_target || view.valid!=drawn.valid || view.secure!=drawn.secure || view.error!=drawn.error ||
+           view.phone.count!=drawn.phone.count || view.phone.active!=drawn.phone.active ||
+           strcmp(view.phone.resolved,drawn.phone.resolved) || strcmp(view.phone.error,drawn.phone.error)) target();
+    }
 }
 static void act(vr_hit_t hit)
 {
     if(hit==VR_HIT_NONE) return;
     board_haptic(remote_now());
-    if(overlay) {
-        uint8_t previous=overlay; overlay=0; invalidate();
+    if(current.overlay) {
+        uint8_t previous=current.overlay; current.overlay=0; cancel_barrier();
         if(previous==1) ble_pair_answer(hit==VR_HIT_CONFIRM);
         else if(hit==VR_HIT_CONFIRM) ble_revoke();
     } else if(hit>=VR_HIT_OFF && hit<=VR_HIT_REC) control_values[0]=hit-VR_HIT_OFF;
     else if(hit==VR_HIT_ORB) control_values[1]=!control_values[1];
     else if(hit==VR_HIT_TARGET) {
-        /* Target changes come from the physical button, so a stray touch can't reroute text. */
-        if(!linked()) ble_pair_start();
+        /* Linked target taps remain inert: only the physical button reroutes. */
+        if(!(current.secure && current.valid)) ble_pair_start();
     }
-}
-static void touch_event(lv_event_t *e)
-{
-    lv_indev_t *indev=lv_indev_active(); if(!indev) return;
-    lv_point_t p; lv_indev_get_point(indev,&p);
-    vr_hit_t hit=vr_ui_hit(&layout,p.x,p.y,overlay!=0);
-    lv_event_code_t code=lv_event_get_code(e);
-    if(code==LV_EVENT_PRESSED) { pressed=hit; pressed_at=remote_now(); long_recognised=false; }
-    else if(code==LV_EVENT_PRESSING && hit!=pressed) pressed=VR_HIT_NONE;
-    else if(code==LV_EVENT_RELEASED) {
-        if(!long_recognised && hit==pressed) act(hit);
-        pressed=VR_HIT_NONE;
-    } else if(code==LV_EVENT_PRESS_LOST) pressed=VR_HIT_NONE;
 }
 static void flush(lv_display_t *d,const lv_area_t *a,uint8_t *pixels)
 {
+    uint64_t start=timing_now_us(); frame_flushed=true;
     lv_draw_sw_rgb565_swap(pixels,(a->x2-a->x1+1)*(a->y2-a->y1+1));
     if(board_flush(a->x1,a->y1,a->x2,a->y2,pixels)!=ESP_OK) flush_ok=false;
+    timing_flush(start);
     lv_display_flush_ready(d);
-}
-static void touch_read(lv_indev_t *dev,lv_indev_data_t *data)
-{
-    (void)dev; uint16_t x,y;
-    data->state=board_touch(&x,&y)?LV_INDEV_STATE_PRESSED:LV_INDEV_STATE_RELEASED;
-    if(data->state==LV_INDEV_STATE_PRESSED) data->point=(lv_point_t){x,y};
 }
 void ui_init(void)
 {
@@ -274,12 +296,10 @@ void ui_init(void)
     lv_display_set_color_format(display,LV_COLOR_FORMAT_RGB565);
     lv_display_set_buffers(display,buffer,NULL,bytes,LV_DISPLAY_RENDER_MODE_PARTIAL);
     lv_display_set_flush_cb(display,flush);
-    lv_indev_t *indev=lv_indev_create(); lv_indev_set_type(indev,LV_INDEV_TYPE_POINTER); lv_indev_set_read_cb(indev,touch_read);
     screen=lv_screen_active(); lv_obj_remove_style_all(screen);
     lv_obj_set_style_bg_color(screen,lv_color_black(),0); lv_obj_set_style_bg_opa(screen,255,0);
     lv_obj_remove_flag(screen,LV_OBJ_FLAG_SCROLLABLE); lv_obj_add_flag(screen,LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(screen,draw_base,LV_EVENT_DRAW_MAIN,NULL);
-    lv_obj_add_event_cb(screen,touch_event,LV_EVENT_ALL,NULL);
     /* Only this bounded orb area is invalidated at 5 Hz while listening.
      * No full-screen animation, blocking delay or extra framebuffer. */
     orb_obj=lv_obj_create(screen); lv_obj_remove_style_all(orb_obj);
@@ -291,46 +311,121 @@ void ui_init(void)
         control_values[i]=i?remote_state.input.mode:remote_state.input.capture;
         control_filters[i]=(vr_debounce_t){control_values[i],control_values[i],remote_now()};
     }
-    ui_refresh(); lv_refr_now(display);
+#ifndef UI_PREVIEW
+    barrier_signal=xSemaphoreCreateBinary(); configASSERT(barrier_signal);
+#endif
+    current.capture=control_values[0]; current.mode=control_values[1];
+    ui_refresh(); ui_tick();
 }
 bool ui_phone(const vr_phone_t *p)
 {
-    if(!display || overlay) return false;
-    /* REQ-18: candidate destination is really rendered, including every synchronous
-     * DMA flush, before BLE commits it and sends the final write response. Any
-     * modal overlay rejects application; BLE restores the old view on failure. */
-    shown=*p; shown_valid=true; error_visible=p->error[0]!=0; error_since=remote_now();
-    flush_ok=true; invalidate(); lv_refr_now(display); return flush_ok;
+    if(!display || current.overlay || barrier_active) return false;
+    /* Called with remote_mutex taken exactly once by the ATT access callback.
+     * Release it while LVGL works. Never wait on the renderer with the app lock.
+     * Budget the semaphore wait below the 80 ms audio queue horizon; on timeout
+     * reject the write and let the renderer restore the authoritative mailbox. */
+    uint32_t started=remote_now();
+    barrier_phone=*p; barrier_active=true; barrier_ok=false;
+    if(!++barrier_id) barrier_id++;
+    uint32_t id=barrier_id;
+#ifndef UI_PREVIEW
+    xSemaphoreTake(barrier_signal,0); /* discard a late completion */
+#endif
+    unlock();
+#ifdef UI_PREVIEW
+    bool signalled=preview_render_wait();
+#else
+    bool signalled=xSemaphoreTake(barrier_signal,pdMS_TO_TICKS(40))==pdTRUE;
+#endif
+    lock();
+    bool ok=signalled && (uint32_t)(remote_now()-started)<40 &&
+        barrier_done==id && barrier_ok && barrier_active && !current.overlay;
+    cancel_barrier();
+    if(ok) {
+        current.phone=*p; current.valid=true;
+        error_visible=p->error[0]!=0; error_since=remote_now(); current.error=error_visible;
+    }
+    timing_barrier(started,ok);
+    return ok;
 }
 void ui_refresh(void)
 {
     if(!display) return;
-    shown_valid=remote_state.has_phone;
-    if(shown_valid) shown=remote_state.phone;
-    invalidate();
+    current.valid=remote_state.has_phone; current.secure=remote_state.secure;
+    current.streaming=remote_state.input.streaming;
+    if(current.valid) current.phone=remote_state.phone;
 }
 void ui_pair_number(uint32_t number)
 {
     if(!display) return;
-    pair_number=number; overlay=1; pressed=VR_HIT_NONE; invalidate(); lv_refr_now(display);
+    current.number=number; current.overlay=1; vr_ui_press_cancel(&press); cancel_barrier();
 }
-void ui_pair_hide(void) { if(display) { overlay=0; pressed=VR_HIT_NONE; invalidate(); } }
+void ui_pair_hide(void)
+{
+    if(display) { current.overlay=0; vr_ui_press_cancel(&press); cancel_barrier(); }
+}
 void ui_link(const char *status) { (void)status; ui_refresh(); }
-void ui_tick(void)
+/* Sample/hit-test in the input task, independently of LVGL and its redraw rate. */
+void ui_poll(void)
 {
     if(!display) return;
-    lv_timer_handler();
-    uint32_t now=remote_now();
-    if(!overlay && pressed==VR_HIT_TARGET && !long_recognised && now-pressed_at>=3000) {
-        long_recognised=true; overlay=2; forget_since=now; board_haptic(now); invalidate();
+    uint32_t now=remote_now(); uint16_t x=0,y=0;
+    uint64_t poll_start=timing_now_us();
+    bool down=board_touch(&x,&y);
+    timing_touch_poll(poll_start);
+    vr_hit_t hit=down?vr_ui_hit(&layout,x,y,current.overlay!=0):press.hit;
+    vr_hit_t previous=press.hit;
+    vr_hit_t released=vr_ui_press_sample(&press,down,hit,now);
+    if(down && previous==VR_HIT_NONE &&
+       ((press.hit>=VR_HIT_OFF && press.hit<=VR_HIT_REC) || press.hit==VR_HIT_ORB)) {
+        current.touch_id++; if(!current.touch_id) current.touch_id++;
+        current.touch_at=now;
     }
-    /* The confirm screen blocks phone writes, so it must not stay up unattended. */
-    if(overlay==2 && now-forget_since>=10000) { overlay=0; pressed=VR_HIT_NONE; invalidate(); }
-    if(error_visible && now-error_since>=5000) { error_visible=false; invalidate(); }
-    if(!overlay && listening() && now-pulse_at>=200) { pulse_at=now; lv_obj_invalidate(orb_obj); }
+    if(!down && !long_recognised) act(released);
+    if(!press.down) long_recognised=false;
+    if(!current.overlay && press.hit==VR_HIT_TARGET && !long_recognised && now-press.since>=3000) {
+        long_recognised=true; current.overlay=2; forget_since=now;
+        vr_ui_press_cancel(&press); cancel_barrier(); board_haptic(now);
+    }
+    if(current.overlay==2 && now-forget_since>=10000) {
+        current.overlay=0; vr_ui_press_cancel(&press); cancel_barrier();
+    }
+    if(error_visible && now-error_since>=5000) error_visible=false;
+    current.error=error_visible;
+    current.capture=vr_ui_preview_capture(control_values[0],press.hit);
+    current.mode=vr_ui_preview_mode(control_values[1],press.hit);
     for(unsigned i=0;i<2;i++) {
         uint32_t sampled;
         if(vr_debounce(&control_filters[i],control_values[i],now,&sampled))
             remote_event(i?VR_MODE:VR_CAPTURE,control_values[i],sampled);
     }
+}
+/* Only the renderer task calls LVGL after initialization. */
+void ui_tick(void)
+{
+    if(!display) return;
+    lock();
+    view=current;
+    uint32_t job=barrier_active?barrier_id:0;
+    if(job) { view.phone=barrier_phone; view.valid=true; view.error=barrier_phone.error[0]!=0; }
+    unlock();
+    frame_at=remote_now();
+    uint64_t start=timing_now_us();
+    bool touch_changed=!view.overlay && (view.capture!=drawn.capture || view.mode!=drawn.mode);
+    flush_ok=true; frame_flushed=false;
+    invalidate_changes(job!=0);
+    uint32_t now=remote_now();
+    if(!view.overlay && listening() && now-pulse_at>=200) { pulse_at=now; lv_obj_invalidate(orb_obj); }
+    /* Explicit refresh: no LVGL input/timer can call state or I2C while drawing. */
+    lv_refr_now(display);
+    if(flush_ok) { drawn=view; drawn_valid=true; } else drawn_valid=false;
+    timing_redraw(start,frame_flushed,flush_ok,touch_changed?view.touch_id:0,view.touch_at);
+    lock();
+    if(job && barrier_active && barrier_id==job && !current.overlay) {
+        barrier_done=job; barrier_ok=flush_ok;
+#ifndef UI_PREVIEW
+        xSemaphoreGive(barrier_signal);
+#endif
+    }
+    unlock();
 }

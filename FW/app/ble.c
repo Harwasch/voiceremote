@@ -82,8 +82,8 @@ static int access_value(uint16_t h,uint16_t attr,struct ble_gatt_access_ctxt *ct
         if(result<0) rc=BLE_ATT_ERR_VALUE_NOT_ALLOWED;
         else if(result==1) {
             /* Render candidate before publishing control state or sending final ATT response. */
-            if(!ui_phone(&phone)) {
-                if(remote_state.has_phone) ui_phone(&remote_state.phone);
+            if(!ui_phone(&phone) || !secure(h)) {
+                ui_refresh();
                 remote_state.armed=false; rc=BLE_ATT_ERR_UNLIKELY;
             } else {
                 vr_apply_phone(&remote_state,&phone);

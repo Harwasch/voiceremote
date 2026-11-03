@@ -27,7 +27,8 @@ AU_EN (IOE pin 3) stays high as in vendor `hal_ioe`; amp IOE pin 10 and GPIO 14
 are held low before enabling the audio rail. The prototype OFF exception applies;
 this is a DMA/encoder stop, with no independent hardware mic cut. No expander reset.
 I2C runs at 100 kHz, serially under the app mutex; touch is polled (G13 configured
-as input), QSPI uses the Espressif driver macro’s 40 MHz default (vendor uses 80 MHz), TE G38 is an input, not used to synchronize scanout. Driver checks all
+as input), QSPI uses 80 MHz, matching UserDemo `hal_display.cpp:83` (previously the
+Espressif macro’s 40 MHz default), TE G38 is an input, not used to synchronize scanout. Driver checks all
 initialization writes and stops boot on failure. LCD DMA waits up to 1 s/strip.
 
 Source inputs (prefetched read-only references; none executed):
@@ -44,6 +45,12 @@ were supplied default-branch clones, so exact tag equivalence is **unverified**.
 Vendor uses 468 logical columns with x gap 6; this adapter exposes the requested
 466 with the same gap. Alignment, RGB order, touch orientation and scanout are
 **unverified** until flashed. Haptic is 20% PWM for 25 ms; perceived strength TBC.
+CPU stays at 160 MHz although UserDemo `sdkconfig.defaults:10` selects 240 MHz.
+No CPU power increase was introduced. QSPI switching power / shorter bus duty and
+net battery impact **need hardware to tell**; no current estimate is claimed.
+The shared renderer keeps one 16-row internal DMA strip and runs outside the app
+mutex; the I2C reset-retry sequence is preserved. [Timing fields](../../handoff.md)
+separate panel DMA from touch polling and overall redraw wall time.
 See [licences](../../licences/) for retained MIT and Apache notices.
 
 Reports `virtual_sliders=true`: the shared UI draws the Orb capture ring.

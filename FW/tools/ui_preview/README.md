@@ -40,11 +40,14 @@ Everything generated goes into ignored `FW/build-preview/`.
 
 ![Orb preview](../../build-preview/ptt-armed.png)
 
-`run.sh` first executes `ui_preview --check`: actual pointer input, direct capture
+`run.sh` first executes `ui_preview --check`: production touch sampling, immediate preview before release/debounce, preview rollback, direct capture
 selection, mode/target events, cancelled/recognised 3-second holds, haptics,
-pair accept/reject, both modal display guards, failed/successful flush barriers,
+pair accept/reject, both modal display guards, failed/successful flush barriers, deadline/late-draw rollback, modal cancellation
+during DMA, lock-free flushes with interleaved input sampling, partial redraws
+matching forced full redraws, destination-only flush bounds,
 error expiry and pulse invalidation bounds. A held PTT with streaming=0 never
 pulses; streaming=1 pulses independently of the held level, and clearing the bit
-stops it. Fixtures inject the producer bit; this is not a microphone measurement. Pure geometry/listening checks live in
+stops it. All twelve baseline fixture PNGs were byte-identical after the task split; the
+script still renders the same states. Fixtures inject the producer bit; this is not a microphone measurement. Pure geometry/listening checks live in
 [tests](../../tests/). These support [REQ-8]/[REQ-18]; physical scanout, frame rate,
 BLE/input latency, motor feel and panel colour remain **unverified**.

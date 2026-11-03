@@ -4,7 +4,8 @@
 flowchart LR
     M5[StopWatch: ES8311 + display + controls] --> Board[board.h]
     C6[C6: build-only stub] --> Board
-    Board --> UI[LVGL + debounced controls]
+    Board --> UI[Input task: immediate preview + debounced controls]
+    UI --> Render[Lower-priority LVGL / DMA task]
     UI --> State[Pure protocol + state]
     Board --> Encoder[16 kHz mono / 20 ms Opus]
     Encoder --> Queue[4 packets / MTU fragmentation]
@@ -15,7 +16,7 @@ flowchart LR
 
 | Path | What it is | Status |
 |---|---|---|
-| [app/](app/) | Shared controls + bounded Opus capture/transport | 🟡 Audio hardware unverified |
+| [app/](app/) | Independent input/render tasks, partial redraws, timing log + bounded Opus transport | 🟡 Audio hardware unverified |
 | [boards/](boards/) | StopWatch ES8311/display driver and compiling C6 mic stub | 🟡 Audio hardware unverified |
 | [tests/](tests/) | Pure C logic and Python wire tests; no board/adapter | ✅ Host verified |
 | [tools/ui_preview/](tools/ui_preview/) | Real UI, native LVGL renderer, twelve masked PNG fixtures | ✅ Host verified |
@@ -45,7 +46,8 @@ heavy bash FW/tools/ui_preview/run.sh
 
 ![Orb UI](build-preview/ptt-armed.png)
 
-The preview includes synthetic touch/display-barrier checks. See
+The preview includes immediate-feedback, rollback, partial/full pixel equality and
+touch/display-barrier checks. All twelve baseline PNGs retain their visual design. See
 [app](app/README.md) for producer-driven listening and font fallback.
 
 Build from the repository root, using ESP-IDF **5.5.6**:
@@ -54,13 +56,21 @@ Build from the repository root, using ESP-IDF **5.5.6**:
 export PATH=$HOME/.local/share/uv/python/cpython-3.12.14-linux-x86_64-gnu/bin:$PATH
 export IDF_TOOLS_PATH=$HOME/hw-tools/espressif
 . ~/hw-tools/esp-idf/export.sh
-heavy idf.py -C FW -B FW/build-m5 -DIDF_TARGET=esp32s3 reconfigure
+heavy idf.py -C FW -B FW/build-m5 -DIDF_TARGET=esp32s3 -DREMOTE_TIMING=ON reconfigure
 heavy cmake --build FW/build-m5 -j 4
 heavy idf.py -C FW -B FW/build-m5 build
-heavy idf.py -C FW -B FW/build-c6 -DREMOTE_BOARD=waveshare_c6_169 -DIDF_TARGET=esp32c6 reconfigure
+heavy idf.py -C FW -B FW/build-c6 -DREMOTE_BOARD=waveshare_c6_169 -DIDF_TARGET=esp32c6 -DREMOTE_TIMING=ON reconfigure
 heavy cmake --build FW/build-c6 -j 4
 heavy idf.py -C FW -B FW/build-c6 -DREMOTE_BOARD=waveshare_c6_169 build
 ```
+
+`REMOTE_TIMING` defaults **ON**. The commands above explicitly retain it for the
+coordinator's flash. To compile out the five-second scheduling log, reconfigure
+with `-DREMOTE_TIMING=OFF`, then rebuild with the same three-step sequence.
+Both modes were built on S3; final S3/C6 builds use ON. Runtime timing, queue
+headroom and the power effect of vendor-supported 80 MHz QSPI need hardware to tell.
+CPU remains 160 MHz; I2C remains 100 kHz. See [handoff](handoff.md) for evidence,
+size/RAM deltas, log field meanings and the 40 ms phone-render deadline.
 
 Build directories must be **inside FW/**. `-B` is relative to the shell's working
 directory, including with `-C`. Each build has its own generated sdkconfig.

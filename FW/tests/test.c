@@ -1,5 +1,6 @@
 #include "state.h"
 #include "layout.h"
+#include "ui_input.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -188,6 +189,12 @@ static void arming(void)
     vr_control(&s,VR_MODE,0,6); v=vr_prepare_input(&s,VR_MODE,6); vr_input_sent(&s,&v,true);
     memmove(b+6,b+20,n-14); vr_put16(b+4,14);
     CHECK(vr_state_fragment(&s,b,n-14+6,&candidate)==1); vr_apply_phone(&s,&candidate); CHECK(!s.armed);
+    /* Controls can also change after the final fragment while display DMA runs. */
+    s=ready(); p.ack=s.latest_seq; n=vr_phone_encode(&p,b+6);
+    vr_put16(b,2); vr_put16(b+2,n); vr_put16(b+4,0);
+    CHECK(vr_state_fragment(&s,b,n+6,&candidate)==1);
+    vr_control(&s,VR_MODE,1,7); vr_apply_phone(&s,&candidate);
+    CHECK(!s.armed); /* Display completion must not override a newer control epoch. */
     for(unsigned i=0;i<5;i++) {
         s=ready(); p.ack=s.latest_seq;
         if(i==0) s.secure=false;
@@ -268,8 +275,32 @@ static void layout(void)
     char ascii[32]; vr_ui_ascii(ascii,sizeof ascii,"Caf\xc3\xa9 \xf0\x9f\x92\xbb"); CHECK(!strcmp(ascii,"Caf? ?"));
     vr_ui_ascii(ascii,4,"Desktop"); CHECK(!strcmp(ascii,"Des"));
 }
+static void immediate_feedback(void)
+{
+    vr_ui_press_t p={0};
+    vr_ui_press_sample(&p,true,VR_HIT_REC,100);
+    CHECK(p.hit==VR_HIT_REC && vr_ui_preview_capture(VR_OFF,p.hit)==VR_REC);
+    CHECK(vr_ui_press_sample(&p,false,VR_HIT_REC,105)==VR_HIT_REC);
+    CHECK(p.hit==VR_HIT_NONE); /* Protocol still changes only after release + debounce. */
+    vr_ui_press_sample(&p,true,VR_HIT_REC,110);
+    vr_ui_press_sample(&p,true,VR_HIT_OFF,115);
+    CHECK(p.hit==VR_HIT_NONE && vr_ui_preview_capture(VR_OFF,p.hit)==VR_OFF);
+    CHECK(vr_ui_press_sample(&p,false,VR_HIT_OFF,120)==VR_HIT_NONE);
+    vr_ui_press_sample(&p,true,VR_HIT_OFF,130);
+    CHECK(vr_ui_preview_capture(VR_PTT,p.hit)==VR_OFF); /* Never via REC. */
+    vr_ui_press_sample(&p,false,VR_HIT_OFF,135);
+    vr_ui_press_sample(&p,true,VR_HIT_ORB,140);
+    CHECK(vr_ui_preview_mode(0,p.hit)==1 && vr_ui_preview_mode(1,p.hit)==0);
+    vr_ui_press_sample(&p,true,VR_HIT_NONE,145);
+    CHECK(vr_ui_preview_mode(0,p.hit)==0);
+    CHECK(vr_ui_press_sample(&p,false,VR_HIT_ORB,150)==VR_HIT_NONE);
+    vr_ui_press_sample(&p,true,VR_HIT_TARGET,UINT32_MAX-10);
+    CHECK(p.since==UINT32_MAX-10);
+    vr_ui_press_cancel(&p);
+    CHECK(vr_ui_press_sample(&p,false,VR_HIT_TARGET,20)==VR_HIT_NONE);
+}
 int main(void)
 {
-    examples(); invalid_fixed(); invalid_phone(); fragments(); arming(); debounce(); layout();
+    examples(); invalid_fixed(); invalid_phone(); fragments(); arming(); debounce(); layout(); immediate_feedback();
     printf("%u checks passed: contract examples, validation, fragments, wrap, arm/OFF, debounce\n",checks);
 }

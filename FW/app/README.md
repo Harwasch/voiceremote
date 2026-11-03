@@ -3,14 +3,15 @@
 ```mermaid
 flowchart LR
     Board[board.h] --> Main[main.c sampling]
-    Touch[LVGL touch] --> UI[ui.c: Orb]
+    Touch[5 ms task: touch hit test + preview] --> UI[ui.c mailbox]
+    UI --> Render[Priority 1: LVGL + panel DMA]
     Main & UI --> State[state.c]
     State <--> BLE[ble.c: NimBLE]
     Board --> Worker[audio_runtime.c: bounded encoder task]
     Worker --> Transport[audio.c: four-packet queue]
     Transport --> BLE
     BLE --> Wire[protocol.c]
-    BLE -->|synchronous render barrier| UI
+    BLE -->|bounded render barrier / app lock released| Render
     Geometry[layout.h] & Assets[fonts / icons] --> UI
 ```
 
@@ -22,9 +23,10 @@ flowchart LR
 | `audio.[ch]` | Bounded packet queue, segment/frame IDs, MTU fragmentation, START/END/LAST | ✅ Host tested |
 | `audio_runtime.c` | Dedicated encoder task, generation cancellation, gating, stop/backpressure and serial metrics | 🟡 Built; hardware unverified |
 | `board.h` | Synchronous board interface and virtual/physical slider layout flag | 🟡 Hardware unverified |
-| `main.c`, `runtime.h` | Serialized runtime; recursive mutex supports synchronous NimBLE events | 🟡 Hardware unverified |
+| `main.c`, `runtime.h` | Priority 5 input/transport, priority 4 encoder, priority 1 renderer; short mailbox lock | 🟡 Hardware unverified |
 | `ble.c` | Secure Connections, explicit Numeric Comparison, bonding/revoke | 🟡 Hardware unverified |
-| `ui.c` | Orb capture/mode, destination/pips, pairing and forget modals | ✅ Native rendered; hardware unverified |
+| `ui.c`, `ui_input.h` | Snapshot renderer, partial invalidation, immediate selection preview + gesture rollback; same Orb/modals | ✅ Native rendered; hardware unverified |
+| `timing.[ch]` | Compile-time scheduling aggregates every five seconds, default ON | 🟡 Hardware timing unverified |
 | [fonts/](fonts/), [icons/](icons/) | Lexend subsets and A8 sparkle; other icons are LVGL primitives | ✅ Native/IDF built |
 
 ![Orb UI](../build-preview/ptt-armed.png)
@@ -36,7 +38,7 @@ and `state.h`; [REQ-8], [REQ-18], [REQ-49–53] traceability only.
 |---|---|---|
 | Capture sectors | Direct OFF/PTT/REC selection outside orb up to screen edge; angular gaps do nothing | ✅ Geometry + pointer tested |
 | Orb | Whole disc swaps mode; grey OFF/no link, outlined armed, filled/pulsed listening | ✅ Native rendered |
-| Destination | Resolved name, Auto badge at index 0, list pips; tap cycles via `VR_CYCLE` | ✅ Native tested |
+| Destination | Resolved name, Auto badge at index 0, list pips; physical cycle button emits `VR_CYCLE` | ✅ Native tested |
 | No phone state/link | Bluetooth-off target tap opens enrollment | ✅ Pointer tested |
 | Target long press | 3 seconds without leaving slot opens bin confirmation; recognition haptic | ✅ Pointer tested |
 | Pair/forget | X/check lower zones, dead centre seam; both block phone display acknowledgments | ✅ Pointer tested |
@@ -45,7 +47,9 @@ and `state.h`; [REQ-8], [REQ-18], [REQ-49–53] traceability only.
 
 `virtual_sliders` comes from `board.h`: M5 shows the ring; C6 metadata omits it.
 Layout scales and centres from board resolution. Pips and unassigned pixels do
-nothing. Touch selections give a light haptic; physical buttons keep their flow.
+nothing. Touch selections give a light haptic on accepted release; physical buttons keep their flow.
+Capture and Orb previews use their existing selected styles on touch-down; leaving
+the original hit zone restores the prior view. Linked target taps stay inert.
 
 `vr_ui_listening` reads `remote_state.input.streaming`: the producer sets it on
 the first accepted Audio notification and clears it synchronously on stop. PTT
@@ -72,7 +76,29 @@ native flush bounds, static sizes, timing choices and hardware-only checks.
 
 REQ-18 waits for actual rendering and synchronous DMA before acknowledging a
 phone update; either modal blocks it. Scanout visibility remains **unverified**.
-Touch controls retain 25 ms debounce and `remote_event`; security and display-barrier behavior are retained.
+Touch controls retain release acceptance, 25 ms debounce and `remote_event`.
+Previews never change capture/arm/streaming state; PTT→OFF still goes directly to OFF.
+
+`ui_poll` owns touch/I2C and gesture/debounce state in the input task. `ui_tick`
+reads a mailbox snapshot under the recursive app mutex, then owns all LVGL and
+panel SPI/DMA work outside it. No core affinity or shared PSRAM dependency.
+Capture invalidates the old/new sectors; mode/streaming invalidate the Orb;
+destination/error/pips invalidate the target strip. Overlay transitions and
+recovery after a failed flush redraw the whole screen.
+
+`ui_phone` is called with the app mutex at depth one and releases it for a
+maximum 40 ms semaphore wait. Success requires matching completed DMA, no modal,
+and completion observed before the deadline; failure restores the authoritative mailbox
+asynchronously. BLE rechecks security, then applies the existing ack/control-epoch
+arm checks. Notifications still run once per main-loop pass; see
+[handoff](../handoff.md) for NimBLE callback source evidence and hardware limits.
+
+`REMOTE_TIMING=ON` logs mean/max microseconds for redraws, sampled touch→DMA
+estimate, loop work/period, I2C touch polling, DMA strips and phone barriers, plus
+queue high-water and failures, every five seconds from the renderer. Idle ticks
+are excluded from redraw means. No audio contents, names or transcripts are logged.
+`-DREMOTE_TIMING=OFF` compiles these probes out. Physical latency/power and sustained
+audio under UI load **need hardware to tell**.
 
 UTF-8 rendering maps each unsupported code point to one ASCII `?`. Target names
 shrink 42/30/24 px, then use ellipsis inside the full font-box chord. Pairing uses

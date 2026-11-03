@@ -17,25 +17,50 @@ static uint32_t now=450;
 static bool touched, fail_flush;
 static uint16_t touch_x,touch_y;
 static unsigned haptics,pairs,answers,revokes,events,flushes;
-static bool accepted;
+static bool accepted, skip_render, interrupt_render, modal_during_render;
+static unsigned mutex_depth, input_during_render;
+static uint32_t flush_delay;
 static unsigned sent_pixels;
 static int min_x=466,min_y=466,max_x,max_y;
 uint32_t remote_now(void) { return now; }
+void remote_lock(void) { mutex_depth++; }
+void remote_unlock(void) { assert(mutex_depth); mutex_depth--; }
+bool preview_render_wait(void)
+{
+    assert(!mutex_depth);
+    if(skip_render) return false;
+    ui_tick(); return true;
+}
+static bool phone(const vr_phone_t *p)
+{
+    remote_lock(); bool ok=ui_phone(p); remote_unlock(); return ok;
+}
 const board_info_t *board_info(void) { return &info; }
 esp_err_t board_init(void) { return ESP_OK; }
 bool board_button(unsigned button) { (void)button; return false; }
 void board_poll(uint32_t ms) { (void)ms; }
-bool board_touch(uint16_t *x,uint16_t *y) { *x=touch_x; *y=touch_y; return touched; }
+bool board_touch(uint16_t *x,uint16_t *y) { assert(mutex_depth); *x=touch_x; *y=touch_y; return touched; }
 void board_haptic(uint32_t ms) { (void)ms; haptics++; }
 void ble_pair_start(void) { pairs++; }
 void ble_pair_answer(bool accept) { answers++; accepted=accept; }
 void ble_revoke(void) { revokes++; }
 void remote_event(uint8_t event,uint8_t value,uint32_t sampled)
 {
+    assert(mutex_depth);
     events++; vr_control(&remote_state,event,value,sampled); ui_refresh();
 }
 esp_err_t board_flush(int x1,int y1,int x2,int y2,const void *data)
 {
+    assert(!mutex_depth); /* Panel DMA never owns the input/audio mutex. */
+    now+=flush_delay; flush_delay=0;
+    if(interrupt_render) {
+        interrupt_render=false;
+        remote_lock(); ui_poll(); input_during_render++; remote_unlock();
+    }
+    if(modal_during_render) {
+        modal_during_render=false;
+        remote_lock(); ui_pair_number(123456); remote_unlock();
+    }
     flushes++; sent_pixels+=(x2-x1+1)*(y2-y1+1);
     if(x1<min_x) min_x=x1;
     if(y1<min_y) min_y=y1;
@@ -53,7 +78,7 @@ esp_err_t board_flush(int x1,int y1,int x2,int y2,const void *data)
 }
 static void advance(unsigned ms)
 {
-    for(unsigned i=0;i<ms;i+=5) { now+=5; ui_tick(); }
+    for(unsigned i=0;i<ms;i+=5) { now+=5; remote_lock(); ui_poll(); remote_unlock(); ui_tick(); }
 }
 static void tap(int x,int y)
 {
@@ -85,12 +110,56 @@ static unsigned error_pixels(void)
     }
     return count;
 }
+static void partial_matches_full(void)
+{
+    static uint8_t partial[sizeof pixels]; memcpy(partial,pixels,sizeof pixels);
+    lv_obj_invalidate(lv_screen_active()); ui_tick();
+    assert(!memcmp(partial,pixels,sizeof pixels));
+}
 static void check(void)
 {
     fixture(); ui_init();
+    /* Touch-down must draw the selection before release or protocol debounce. */
+    uint8_t old_pixels[sizeof pixels]; memcpy(old_pixels,pixels,sizeof pixels);
+    unsigned old_events=events;
+    touched=true; touch_x=424; touch_y=210; advance(5);
+    assert(events==old_events && remote_state.input.capture==VR_PTT);
+    assert(memcmp(old_pixels,pixels,sizeof pixels)!=0);
+    partial_matches_full();
+    touch_x=320; touch_y=140; advance(40); touched=false; advance(100);
+    assert(events==old_events && !memcmp(old_pixels,pixels,sizeof pixels));
+    /* Orb also previews immediately, then rolls back after leaving its disc. */
+    touched=true; touch_x=233; touch_y=233; advance(5);
+    assert(remote_state.input.mode==0 && events==old_events);
+    assert(memcmp(old_pixels,pixels,sizeof pixels));
+    touch_x=320; touch_y=140; advance(5); touched=false; advance(30);
+    assert(!memcmp(old_pixels,pixels,sizeof pixels) && events==old_events);
+    /* Accepted selection keeps its preview through the unchanged 25 ms filter. */
+    touched=true; touch_x=424; touch_y=210; advance(5);
+    touched=false; advance(5); assert(events==old_events);
+    advance(20); assert(events==old_events && remote_state.input.capture==VR_PTT);
+    advance(5); assert(events==old_events+1 && remote_state.input.capture==VR_REC);
+    tap(233,40); old_events=events;
+    assert(remote_state.input.capture==VR_PTT && !memcmp(old_pixels,pixels,sizeof pixels));
     unsigned initial=flushes; uint32_t before=target_hash();
     vr_phone_t candidate=remote_state.phone; strcpy(candidate.resolved,"Laptop");
-    assert(ui_phone(&candidate) && flushes>initial && target_hash()!=before);
+    sent_pixels=0; min_x=min_y=466; max_x=max_y=0;
+    assert(phone(&candidate) && flushes>initial && target_hash()!=before);
+    assert(min_y>=356 && max_y<=450 && sent_pixels<=466*95);
+    printf("Destination update: %u pixels, y=%d..%d.\n",sent_pixels,min_y,max_y);
+    skip_render=true; assert(!phone(&remote_state.phone)); skip_render=false;
+    ui_tick(); /* A timed-out request cannot acknowledge on a later frame. */
+    before=target_hash();
+    flush_delay=50; assert(!phone(&remote_state.phone));
+    ui_tick(); assert(target_hash()==before); /* Failed request rolls back. */
+    touched=true; touch_x=233; touch_y=233;
+    interrupt_render=true; assert(phone(&candidate));
+    assert(input_during_render==1 && events==old_events); /* Input sampled mid-DMA. */
+    touched=false; advance(100); /* Mode debounce remains after release. */
+    assert(remote_state.input.mode==1); tap(233,233); assert(remote_state.input.mode==0);
+    modal_during_render=true; assert(!phone(&candidate));
+    ui_pair_hide(); ui_tick();
+    assert(phone(&candidate));
     /* Verify the destination slot was actually drawn, not only invalidated. */
     unsigned lit=0;
     for(int y=390;y<432;y++) for(int x=80;x<386;x++) {
@@ -98,12 +167,12 @@ static void check(void)
         if(pixels[at]>200 && pixels[at+1]>200 && pixels[at+2]>200) lit++;
     }
     assert(lit>100);
-    ui_pair_number(90417); assert(!ui_phone(&candidate));
+    ui_pair_number(90417); assert(!phone(&candidate));
     tap(233,280); assert(answers==0);
     tap(314,364); assert(answers==1 && accepted);
     ui_pair_number(90417); tap(152,364); assert(answers==2 && !accepted);
-    fail_flush=true; assert(!ui_phone(&candidate)); fail_flush=false;
-    assert(ui_phone(&remote_state.phone));
+    fail_flush=true; assert(!phone(&candidate)); fail_flush=false;
+    assert(phone(&remote_state.phone));
     remote_state.input.ptt=1; ui_refresh(); advance(100);
     sent_pixels=0; advance(1000); assert(sent_pixels==0); /* Held, but producer stopped. */
     remote_state.input.streaming=1; ui_refresh(); advance(100);
@@ -115,31 +184,31 @@ static void check(void)
     sent_pixels=0; advance(1000); assert(sent_pixels>0); /* Producer is the sole source. */
     remote_state.input.streaming=0; ui_refresh(); advance(100);
     sent_pixels=0; advance(1000); assert(sent_pixels==0);
-    strcpy(candidate.error,"Destination unavailable"); assert(ui_phone(&candidate));
+    strcpy(candidate.error,"Destination unavailable"); assert(phone(&candidate));
     assert(error_pixels()>100); advance(5100); assert(error_pixels()==0);
-    candidate.error[0]=0; assert(ui_phone(&candidate));
-    tap(233,233); assert(remote_state.input.mode==1);
+    candidate.error[0]=0; assert(phone(&candidate));
+    tap(233,233); assert(remote_state.input.mode==1); partial_matches_full();
     unsigned e=events;
     tap(320,140); assert(events==e); /* angular gap outside orb */
-    tap(42,210); assert(remote_state.input.capture==VR_OFF);
+    tap(42,210); assert(remote_state.input.capture==VR_OFF); partial_matches_full();
     assert(events==e+1); /* Direct PTT -> OFF: never passes through REC. */
-    tap(233,40); assert(remote_state.input.capture==VR_PTT);
-    tap(424,210); assert(remote_state.input.capture==VR_REC);
+    tap(233,40); assert(remote_state.input.capture==VR_PTT); partial_matches_full();
+    tap(424,210); assert(remote_state.input.capture==VR_REC); partial_matches_full();
     e=events; tap(233,407); assert(events==e); /* Linked: only the physical button changes target. */
     unsigned before_hold=haptics; e=events;
     touched=true; touch_x=233;touch_y=407;advance(1000);
     touch_y=233;advance(2200);touched=false;advance(50);
-    assert(ui_phone(&candidate) && haptics==before_hold && events==e);
+    assert(phone(&candidate) && haptics==before_hold && events==e);
     touched=true; touch_x=233;touch_y=407; advance(3100);
     assert(haptics==before_hold+1 && events==e);
-    assert(!ui_phone(&candidate)); touched=false; advance(50);
-    assert(revokes==0); tap(152,364); assert(revokes==0); assert(ui_phone(&candidate));
+    assert(!phone(&candidate)); touched=false; advance(50);
+    assert(revokes==0); tap(152,364); assert(revokes==0); assert(phone(&candidate));
     touched=true; touch_x=233;touch_y=407; advance(3100);
     touched=false; advance(50);
     tap(314,364); assert(revokes==1);
     /* An unanswered forget screen closes itself and stops blocking phone writes. */
     touched=true; touch_x=233;touch_y=407; advance(3100); touched=false; advance(50);
-    assert(!ui_phone(&candidate)); advance(10100); assert(ui_phone(&candidate) && revokes==1);
+    assert(!phone(&candidate)); advance(10100); assert(phone(&candidate) && revokes==1);
     remote_state.secure=false; remote_state.has_phone=false; ui_refresh();
     tap(233,407); assert(pairs==1);
     assert(haptics>=12);
@@ -163,12 +232,12 @@ int main(int argc,char **argv)
     else if(!strcmp(state,"rectangular")) { info=(board_info_t){2,240,280,0,false,true,false};remote_state.phone.active=0; }
     else { fprintf(stderr,"Unknown state: %s\n",state);return 2; }
     ui_init();
-    if(remote_state.has_phone) assert(ui_phone(&remote_state.phone));
+    if(remote_state.has_phone) assert(phone(&remote_state.phone));
     if(!strcmp(state,"pairing-number")) ui_pair_number(90417);
     if(!strcmp(state,"forget-confirm")) {
         touched=true; touch_x=233;touch_y=407;advance(3100);touched=false;advance(50);
     }
-    lv_refr_now(NULL);
+    ui_tick(); lv_refr_now(NULL);
     /* Apply physical screen shape only to exported pixels; real panel clips naturally. */
     if(info.round) for(int y=0;y<info.height;y++) for(int x=0;x<info.width;x++) {
         float dx=x+.5f-info.width/2.f,dy=y+.5f-info.height/2.f,r=info.width/2.f;

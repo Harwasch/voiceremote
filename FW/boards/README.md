@@ -17,3 +17,7 @@ Start with `app/board.h`, then the selected board's README.
 The shared app calls only `board_mic_start/stop/read` and `board_audio_alloc`.
 StopWatch permits encoder-state PSRAM with an internal fallback; C6 never requests
 PSRAM. Both keep the Opus task stack internal. No codec pins leak into shared code.
+
+Panel SPI/DMA belongs to the lower-priority renderer, outside the app mutex.
+Touch/IOE/codec I2C remains serialized by the input/audio path. StopWatch QSPI now
+matches the vendor’s 80 MHz; CPU/I2C clocks and the C6 stub are unchanged.

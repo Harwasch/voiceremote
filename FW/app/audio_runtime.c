@@ -1,4 +1,5 @@
 #include "audio.h"
+#include "timing.h"
 #include "runtime.h"
 #include "board.h"
 #include "opus.h"
@@ -110,6 +111,7 @@ static void encode_task(void *arg)
                     /* push already discarded the queue; stop still owns board/task. */
                     stream.running=true; audio_fault();
                 }
+                timing_queue(stream.count);
             }
         }
         unlock();
@@ -134,6 +136,7 @@ void audio_sync(void)
 void audio_poll(void)
 {
     audio_sync();
+    timing_queue(stream.count);
     if(closing) {
         if(stream.ending && ble_audio_ready()) try_end();
         if(!stream.ending && ble_audio_ready()) stopped_snapshot();

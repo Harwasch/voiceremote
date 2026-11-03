@@ -112,6 +112,8 @@ esp_err_t board_init(void)
     spi_bus_config_t sc=CO5300_PANEL_BUS_QSPI_CONFIG(40,41,42,46,45,466*16*2);
     ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST,&sc,SPI_DMA_CH_AUTO));
     esp_lcd_panel_io_spi_config_t ic=CO5300_PANEL_IO_QSPI_CONFIG(39,transfer_done,dma_done);
+    /* Same panel/pins as vendor UserDemo main/hal/hal_display.cpp:83. */
+    ic.pclk_hz=80000000;
     esp_lcd_panel_io_handle_t io;
     ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)SPI2_HOST,&ic,&io));
     co5300_vendor_config_t vc={.init_cmds=init_commands,.init_cmds_size=sizeof init_commands/sizeof init_commands[0],
