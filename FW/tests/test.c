@@ -179,6 +179,12 @@ static void arming(void)
     p.ack--; strcpy(p.resolved,"iPhone"); apply(&s,&p);
     CHECK(!s.armed && !strcmp(s.phone.resolved,"iPhone"));
     p.ack=s.latest_seq; apply(&s,&p); CHECK(s.armed);
+    /* A status snapshot during an in-flight write must not disarm; a control edge must. */
+    uint32_t in_flight=s.latest_seq; vr_input_t status=vr_prepare_input(&s,VR_SNAPSHOT,3); vr_input_sent(&s,&status,true);
+    p.ack=in_flight; apply(&s,&p); CHECK(s.armed);
+    status=vr_prepare_input(&s,VR_DOWN,3); vr_input_sent(&s,&status,true);
+    apply(&s,&p); CHECK(!s.armed);
+    p.ack=s.latest_seq; apply(&s,&p); CHECK(s.armed);
     vr_control(&s,VR_MODE,1,3); CHECK(!s.armed);
     vr_input_t v=vr_prepare_input(&s,VR_MODE,3); vr_input_sent(&s,&v,true);
     apply(&s,&p); CHECK(!s.armed); p.ack=s.latest_seq; apply(&s,&p); CHECK(s.armed);

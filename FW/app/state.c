@@ -36,17 +36,24 @@ void vr_input_sent(vr_state_t *s, const vr_input_t *v, bool success)
     if(!success) { s->armed=false; s->snapshot_sent=false; return; }
     s->latest_seq=v->seq; s->next_seq=v->seq+1;
     if(v->event==VR_SNAPSHOT) s->snapshot_sent=true;
+    else s->control_seq=v->seq;
 }
 int vr_state_fragment(vr_state_t *s, const uint8_t *p, size_t n, vr_phone_t *candidate)
 {
     if(n>=6 && !vr_get16(p+4)) s->fragment_epoch=s->controls_epoch;
     return vr_fragment(&s->fragments,p,n,candidate);
 }
+/* The remote's own status snapshots don't need acknowledging: otherwise starting audio
+ * makes an in-flight phone write stale, disarms, and cuts the audio it just started. */
+static bool vr_ack_current(const vr_state_t *s, uint32_t ack)
+{
+    return (int32_t)(ack-s->control_seq)>=0 && (int32_t)(s->latest_seq-ack)>=0;
+}
 void vr_apply_phone(vr_state_t *s, const vr_phone_t *p)
 {
     s->phone=*p; s->has_phone=true;
     s->armed=!s->audio_fault && (p->flags&2) && s->secure && s->input_sub && s->audio_sub && s->info_read &&
-        s->snapshot_sent && p->ack==s->latest_seq && s->input.capture!=VR_OFF &&
+        s->snapshot_sent && vr_ack_current(s,p->ack) && s->input.capture!=VR_OFF &&
         s->fragment_epoch==s->controls_epoch;
     if(!s->armed) s->phone.flags &= (uint8_t)~2u;
 }
