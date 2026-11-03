@@ -31,7 +31,11 @@ final class OversizedMessagesServer: URLProtocol {
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
         let path = request.url!.lastPathComponent
-        let header = path.contains("header") ? ["content-length": path == "header-overflow" ? "18446744073709551616" : "1048577"] : [:]
+        var header = ["Content-Type": "application/octet-stream"]
+        if path.contains("header") {
+            header["content-length"] = path == "header-overflow" ? "18446744073709551616" : "1048577"
+        }
+        if path.hasSuffix("untyped") { header.removeValue(forKey: "Content-Type") }
         let response: HTTPURLResponse
         if path == "unknown-header" || path == "header-overflow" {
             response = UnknownLengthHTTPResponse(url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: header)!
@@ -39,7 +43,10 @@ final class OversizedMessagesServer: URLProtocol {
             response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: header)!
         }
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        if header.isEmpty {
+        if path == "header-untyped" {
+            // Let Foundation finish MIME sniffing without sending the full body.
+            client?.urlProtocol(self, didLoad: Data(repeating: 32, count: 1024))
+        } else if !path.contains("header") {
             client?.urlProtocol(self, didLoad: Data(repeating: 32, count: 1_048_576))
             if path == "exact" {
                 client?.urlProtocolDidFinishLoading(self)
@@ -58,19 +65,36 @@ actor InspectingProxy: BrainHTTPTransport {
     func send(_ request: URLRequest) async throws -> BrainHTTPResponse { lastRequest = request; return response }
 }
 
+private struct StreamingTestDeadline: Error, CustomStringConvertible {
+    var description: String { "test watchdog expired before transport returned (3 seconds)" }
+}
+
 final class ClaudeBrainTests: XCTestCase, @unchecked Sendable {
     let proxyURL = URL(string: "https://relay.example.invalid/brain/messages")!
 
     private func sendBeforeDeadline(_ http: URLRequest, through transport: URLSessionBrainTransport) async throws -> BrainHTTPResponse {
+        try await beforeDeadline { try await transport.send(http) }
+    }
+
+    private func beforeDeadline(_ operation: @escaping @Sendable () async throws -> BrainHTTPResponse) async throws -> BrainHTTPResponse {
         try await withThrowingTaskGroup(of: BrainHTTPResponse.self) { group in
             defer { group.cancelAll() }
-            group.addTask { try await transport.send(http) }
+            group.addTask { try await operation() }
             group.addTask {
                 try await Task.sleep(for: .seconds(3))
-                throw URLError(.timedOut)
+                throw StreamingTestDeadline()
             }
             return try await group.next()!
         }
+    }
+
+    private func assertCapError(_ error: any Error, path: String, started: ContinuousClock.Instant,
+                                file: StaticString = #filePath, line: UInt = #line) {
+        let nsError = error as NSError
+        XCTAssertEqual(error as? BrainError, .responseTooLarge,
+            "path=\(path), elapsed=\(started.duration(to: .now)), error=\(String(reflecting: error)), " +
+            "type=\(String(reflecting: type(of: error))), domain=\(nsError.domain), code=\(nsError.code), " +
+            "platform=\(ProcessInfo.processInfo.operatingSystemVersionString)", file: file, line: line)
     }
 
     func testFakeServerThroughURLSession() async throws {
@@ -81,13 +105,14 @@ final class ClaudeBrainTests: XCTestCase, @unchecked Sendable {
     }
 
     func testStreamingCapRejectsHeadersAndChunksWithoutWaitingForEOF() async throws {
-        for path in ["header", "unknown-header", "header-overflow", "chunks"] {
+        for path in ["header", "unknown-header", "header-overflow", "header-untyped", "chunks", "chunks-untyped"] {
             let transport = URLSessionBrainTransport(protocolClasses: [OversizedMessagesServer.self])
             let http = URLRequest(url: proxyURL.appendingPathComponent(path))
+            let started = ContinuousClock.now
             do {
                 _ = try await sendBeforeDeadline(http, through: transport)
                 XCTFail("Oversized response accepted: \(path)")
-            } catch { XCTAssertEqual(error as? BrainError, .responseTooLarge, path) }
+            } catch { assertCapError(error, path: path, started: started) }
         }
     }
 
@@ -98,32 +123,76 @@ final class ClaudeBrainTests: XCTestCase, @unchecked Sendable {
         XCTAssertEqual(response.data, Data(repeating: 32, count: 1_048_576))
     }
 
+    func testCapDecisionSurvivesLateCancellationAndCompletion() async throws {
+        // Drive the actual delegate synchronously, without network timing. Delay
+        // installing the continuation to verify that the terminal result is stored.
+        for path in ["header", "chunks"] {
+            let reader = BoundedBrainReader()
+            let session = URLSession(configuration: .ephemeral)
+            defer { session.invalidateAndCancel() }
+            let http = URLRequest(url: proxyURL)
+            let task = session.dataTask(with: http) // Never resumed.
+            let response = HTTPURLResponse(url: proxyURL, statusCode: 200, httpVersion: "HTTP/1.1",
+                headerFields: path == "header" ? ["Content-Length": "1048577"] : [:])!
+            reader.urlSession(session, dataTask: task, didReceive: response) { disposition in
+                XCTAssertEqual(disposition, path == "header" ? .cancel : .allow)
+            }
+            if path == "chunks" {
+                reader.urlSession(session, dataTask: task, didReceive: Data(repeating: 32, count: 1_048_576))
+                reader.urlSession(session, dataTask: task, didReceive: Data([32]))
+            }
+            reader.cancel()
+            reader.urlSession(session, task: task, didCompleteWithError: URLError(.cancelled))
+            reader.urlSession(session, task: task, didCompleteWithError: nil)
+            reader.urlSession(session, dataTask: task, didReceive: Data([32]))
+            let started = ContinuousClock.now
+            do {
+                _ = try await beforeDeadline {
+                    try await withTaskCancellationHandler {
+                        try await withCheckedThrowingContinuation {
+                            reader.start(session: session, request: http, continuation: $0)
+                        }
+                    } onCancel: { reader.cancel() }
+                }
+                XCTFail("Cap decision was replaced: \(path)")
+            } catch { assertCapError(error, path: path, started: started) }
+        }
+    }
+
     #if os(Linux) || os(macOS)
     func testNativeStreamingCapRejectsBeforeServerFinishes() async throws {
         // Exercise Foundation's native HTTP implementation, with no URLProtocol.
         let server = Process(), pipe = Pipe()
         server.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         server.arguments = ["python3", "-u", "-c", #"""
-import http.server, signal, threading
+import http.server, signal
 signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGTERM})
 class Handler(http.server.BaseHTTPRequestHandler):
     protocol_version = 'HTTP/1.1'
     def log_message(self, *args): pass
     def do_GET(self):
         self.send_response(200)
-        if self.path == '/header':
+        # URLSession may sniff a response with no MIME type before delivering it.
+        # A header-only fixture must opt out of sniffing to exercise that callback.
+        if not self.path.endswith('untyped'):
+            self.send_header('Content-Type', 'application/octet-stream')
+        if self.path.startswith('/header'):
             self.send_header('Content-Length', '1048577')
         else:
             self.send_header('Transfer-Encoding', 'chunked')
         self.end_headers()
         self.wfile.flush()
         try:
-            if self.path == '/chunks':
+            if self.path == '/header-untyped':
+                self.wfile.write(b' ' * 1024)
+                self.wfile.flush()
+            if self.path.startswith('/chunks'):
                 for chunk in (b' ' * 1048576, b' '):
                     self.wfile.write(('%x\r\n' % len(chunk)).encode() + chunk + b'\r\n')
                     self.wfile.flush()
-            # No body for /header; no terminating chunk for /chunks.
-            threading.Event().wait(10)
+            # Never finish the response or close it on a timer. Only the client's
+            # cancellation closes this socket; a server EOF cannot satisfy the test.
+            self.connection.recv(1)
         except (BrokenPipeError, ConnectionResetError): pass
 server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
 print(server.server_port, flush=True)
@@ -138,13 +207,14 @@ server.serve_forever()
         var portBytes = Data()
         while let byte = try pipe.fileHandleForReading.read(upToCount: 1), byte.first != 10 { portBytes += byte }
         let port = try XCTUnwrap(Int(String(decoding: portBytes, as: UTF8.self)))
-        for path in ["header", "chunks"] {
+        for path in ["header", "header-untyped", "chunks", "chunks-untyped"] {
             let http = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/\(path)")!)
-            // A missing cap fails with a timeout, before the server can finish.
+            // The watchdog has its own error, distinct from URLSession errors.
+            let started = ContinuousClock.now
             do {
                 _ = try await sendBeforeDeadline(http, through: URLSessionBrainTransport())
                 XCTFail("Oversized native response accepted: \(path)")
-            } catch { XCTAssertEqual(error as? BrainError, .responseTooLarge, path) }
+            } catch { assertCapError(error, path: path, started: started) }
         }
     }
     #endif
