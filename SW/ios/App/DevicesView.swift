@@ -21,9 +21,8 @@ struct DevicesView: View {
                 if let notice = host.link.notice { Text(notice).foregroundStyle(.secondary) }
                 ForEach(host.model.devices, id: \.device_id) { device in
                     VStack(alignment: .leading) {
-                        Text(device.display_name); Text(device.role.rawValue).font(.caption)
-                        Text(host.link.suspendedIDs.contains(device.device_id) ? "Relay suspended — credentials retained" :
-                            (host.link.connectedIDs.contains(device.device_id) ? "Connected" : "Unreachable — dictation held")).font(.caption)
+                        Text(device.display_name).accessibilityIdentifier("device-" + device.device_id); Text(device.role.rawValue).font(.caption)
+                        Text(connectionStatus(device.device_id)).font(.caption)
                         if host.link.suspendedIDs.contains(device.device_id) {
                             Button("Retry connection") { host.link.retrySuspended(device.device_id) }
                         }
@@ -42,13 +41,13 @@ struct DevicesView: View {
                 Text("Agent access is separate from the role label. Only explicitly enabled capabilities confirmed by this computer are enrolled.").font(.footnote)
                 Button("Scan QR code", systemImage: "qrcode.viewfinder") { scan = true }
                 TextField("Pairing code or QR payload", text: $pairing.code, axis: .vertical)
-                    .textInputAutocapitalization(.never).autocorrectionDisabled().privacySensitive()
+                    .textInputAutocapitalization(.never).autocorrectionDisabled().privacySensitive().accessibilityIdentifier("pairing-invitation")
                 Text("Paste the complete code printed by the computer or scan its QR. Configure the relay in Settings for pairing across networks.").font(.footnote)
                 Button("Connect") { Task { await host.pairing.begin() } }.disabled(host.pairing.busy)
                 if host.pairing.busy { ProgressView("Waiting for computer…") }
                 if let phrase = host.pairing.phrase {
                     Text("Compare these four words on both screens").font(.headline)
-                    Text(phrase).font(.title2).textSelection(.enabled)
+                    Text(phrase).accessibilityIdentifier("pairing-phrase").font(.title2).textSelection(.enabled)
                     Button("The words match on both screens") {
                         Task { _ = await host.pairing.confirm(); await host.model.refresh() }
                     }.disabled(host.pairing.busy)
@@ -59,7 +58,7 @@ struct DevicesView: View {
                 if let error = host.pairing.error { Text(error).foregroundStyle(.red) }
             }
             Section("Voice remote") {
-                Text(host.remote.status)
+                Text(host.remote.status).accessibilityIdentifier("remote-status")
                 if !host.remote.offlineStatus.isEmpty { Text(host.remote.offlineStatus) }
                 if host.remote.enrollmentReady {
                     Text("Enter local pairing mode on the remote. Compare the fresh six-digit number in the iPhone system pairing prompt with the remote and approve on both. Reject mismatch, no-number, Legacy or Just Works pairing.").font(.footnote)
@@ -104,10 +103,24 @@ struct DevicesView: View {
             Button("Cancel", role: .cancel) { discardID = nil }
         }
         .sheet(isPresented: $scan) {
-            QRScanner { result in
-                scan = false
-                if let result { Task { await host.pairing.begin(result) } }
-            }.ignoresSafeArea()
+            scanner
         }
+    }
+    private func connectionStatus(_ id: String) -> String {
+        #if DEBUG
+        if host.demo != nil { return id == UIDemo.offline.device_id ? "Offline — dictation held" : "Connected (synthetic)" }
+        #endif
+        return host.link.suspendedIDs.contains(id) ? "Relay suspended — credentials retained" :
+            (host.link.connectedIDs.contains(id) ? "Connected" : "Unreachable — dictation held")
+    }
+    private var scanner: some View {
+        var scanner = QRScanner { result in
+            scan = false
+            if let result { Task { await host.pairing.begin(result) } }
+        }
+        #if DEBUG
+        scanner.demoDenied = host.demo != nil
+        #endif
+        return scanner.ignoresSafeArea()
     }
 }

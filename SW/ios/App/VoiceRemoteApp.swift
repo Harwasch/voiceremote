@@ -33,12 +33,19 @@ import VoiceRemoteProtocol
                         Text("Missing keys, missing checkpoints or an unreplicated suffix cannot be silently reset. No old execution authority is renewed.").font(.footnote)
                     }.padding()
                 } else { ContentUnavailableView("Voice Remote", systemImage: "mic.slash", description: Text("Starting…")) }
-            }.task {
+            }
+            #if DEBUG
+            .modifier(UIDemoPresentation())
+            #endif
+            .task {
                 guard runtime == nil else { return }
                 await openRuntime()
             }.onChange(of: scenePhase) { _, phase in
                 guard let runtime else { return }
                 runtime.acceptingRemoteControl = phase == .active
+                #if DEBUG
+                if runtime.demo != nil { return }
+                #endif
                 let resumed = lifecycle.transition(to: phase == .background ? .background : phase == .active ? .active : .inactive)
                 if resumed {
                     Task {
@@ -58,6 +65,9 @@ import VoiceRemoteProtocol
     @MainActor private func openRuntime() async {
         do {
             let host = try AppRuntime.getOrCreate(); try await host.prepare(); runtime = host
+            #if DEBUG
+            if host.demo != nil { return }
+            #endif
             PhoneWakeDelegate.scheduleVerification()
         } catch {
             startupError = "Private storage could not be opened. Recording and approvals are unavailable."
@@ -97,24 +107,36 @@ private struct HomeView: View {
     private var tick: Int64 { Int64(ProcessInfo.processInfo.systemUptime * 1000) }
     var body: some View {
         Form {
+            #if DEBUG
+            if let demo = host.demo {
+                Section("Synthetic simulator data") {
+                    VStack(alignment: .leading) {
+                        Text(model.listening.rawValue + " / " + model.controls.capture.rawValue).accessibilityIdentifier("demo-state")
+                        Text("Destination before capture: " + String(demo.destinationBeforeCapture)).accessibilityIdentifier("demo-order")
+                        Text("Tasks: " + String(model.tasks.count)).accessibilityIdentifier("demo-tasks")
+                    }.font(.caption2).dynamicTypeSize(.small)
+                }
+            }
+            #endif
             if !host.permissionGranted {
                 Section("Before recording") {
                     Text("Voice Remote uses your microphone to turn speech into text. Words go to the destination shown below. Dictation never sends a message. Audio is not saved unless you use the benchmark recorder. Cloud processing is off until you allow it.")
-                    Button("Continue") { Task { await host.continuePermissions() } }
+                    Button("Continue") { Task { await host.continuePermissions() } }.accessibilityIdentifier("permission-continue")
                 }
             }
             Section {
                 HStack(alignment: .top) {
                     Picker("Capture", selection: Binding(get: { model.controls.capture }, set: { model.setCapture($0) })) {
                         Text("OFF").tag(CaptureState.off); Text("HOLD").tag(CaptureState.hold); Text("CONTINUOUS").tag(CaptureState.continuous)
-                    }.pickerStyle(.menu)
+                    }.pickerStyle(.menu).accessibilityIdentifier("capture-picker")
                     Picker("Mode", selection: Binding(get: { model.controls.mode }, set: { model.setMode($0) })) {
                         Text("Dictation").tag(Mode.dictation); Text("AI Control").tag(Mode.ai_control)
-                    }.pickerStyle(.menu)
+                    }.pickerStyle(.menu).accessibilityIdentifier("mode-picker")
                 }.disabled(!host.permissionGranted || host.recorder.recording)
                 NavigationLink { TargetPickerView(model: model) } label: {
                     LabeledContent("Destination", value: model.destination?.display_name ?? (model.controls.target == .auto ? "Auto → iPhone" : "Destination unavailable"))
                 }
+                .accessibilityIdentifier("destination-link")
                 Label(model.isRecording ? "Recording" : model.listening.rawValue.capitalized,
                     systemImage: model.isRecording ? "record.circle.fill" : "mic.slash")
                     .foregroundStyle(model.isRecording ? Color.red : Color.secondary)
@@ -135,14 +157,15 @@ private struct HomeView: View {
                 }.onEnded { _ in
                     held = false; triggerTimer?.cancel(); model.release(at: tick)
                 })
+                .accessibilityIdentifier("hold-to-talk")
                 .accessibilityLabel("Hold to talk. Select HOLD or CONTINUOUS first.")
                 .accessibilityAction(named: "Start recording") { model.setCapture(.continuous) }
                 .accessibilityAction(named: "Finish utterance") { model.finishUtterance() }
-                Button("Finish utterance", systemImage: "checkmark") { model.finishUtterance() }.disabled(!model.isRecording)
+                Button("Finish utterance", systemImage: "checkmark") { model.finishUtterance() }.disabled(!model.isRecording).accessibilityIdentifier("finish-utterance")
                 Button("Stop immediately", systemImage: "stop.fill", role: .destructive) {
                     held = false; triggerTimer?.cancel(); model.stop(); host.recorder.cancel()
-                }.accessibilityHint("Stops the microphone and discards unfinished text.")
-                if !model.partial.isEmpty { Text(model.partial).textSelection(.enabled) }
+                }.accessibilityIdentifier("stop-immediately").accessibilityHint("Stops the microphone and discards unfinished text.")
+                if !model.partial.isEmpty { Text(model.partial).textSelection(.enabled).accessibilityIdentifier("partial-text") }
                 if let message = model.message { Text(message).foregroundStyle(.secondary) }
             }
             Section { Text("Holds start after 300 ms. Two short taps lock recording. Continuous listening never authorizes an action.").font(.footnote) }
@@ -166,10 +189,10 @@ struct TargetPickerView: View {
     let model: VoiceAppModel
     var body: some View {
         List {
-            Button { model.setTarget(.auto) } label: { row("Auto", selected: model.controls.target == .auto) }
-            Button { model.setTarget(.device(model.phoneID)) } label: { row("iPhone", selected: model.controls.target == .device(model.phoneID)) }
+            Button { model.setTarget(.auto) } label: { row("Auto", selected: model.controls.target == .auto) }.accessibilityIdentifier("target-auto")
+            Button { model.setTarget(.device(model.phoneID)) } label: { row("iPhone", selected: model.controls.target == .device(model.phoneID)) }.accessibilityIdentifier("target-phone")
             ForEach(model.devices.filter { $0.capabilities.contains(.receive_text) }, id: \.device_id) { device in
-                Button { model.setTarget(.device(device.device_id)) } label: { row(device.display_name, selected: model.controls.target == .device(device.device_id)) }
+                Button { model.setTarget(.device(device.device_id)) } label: { row(device.display_name, selected: model.controls.target == .device(device.device_id)) }.accessibilityIdentifier("target-" + device.device_id)
             }
             Text("Auto uses the most recent focused text field, otherwise iPhone. Changing destination stops the current utterance.").font(.footnote)
         }.navigationTitle("Destination")
@@ -185,7 +208,7 @@ private struct HistoryView: View {
             Text("Text only. Held and unconfirmed text stays until you delete it. Other text expires after seven days.").font(.footnote)
             ForEach(model.history.reversed(), id: \.segmentID) { entry in
                 VStack(alignment: .leading) {
-                    Text(entry.text).textSelection(.enabled)
+                    Text(entry.text).textSelection(.enabled).accessibilityIdentifier("history-" + entry.segmentID)
                     Text(entry.targetID).font(.caption).foregroundStyle(.secondary)
                     if let origin = model.offlineOrigins[entry.segmentID] { Text(origin.label).font(.caption) }
                     if let state = model.deliveryStates[entry.segmentID] {
@@ -193,7 +216,7 @@ private struct HistoryView: View {
                         if [.held, .failed, .unconfirmed].contains(state) {
                             Button(state == .unconfirmed ? "Resend after checking computer" : "Send to computer") {
                                 Task { await model.sendHeld(entry.segmentID) }
-                            }.buttonStyle(.borderless)
+                            }.buttonStyle(.borderless).accessibilityIdentifier("send-" + entry.segmentID)
                         }
                     }
                     HStack {
@@ -220,7 +243,7 @@ private struct SuggestionsView: View {
                     Text(String(describing: card.proposal.tool)).textSelection(.enabled)
                     Text("Expires \(card.expiresAt, style: .relative)").font(.caption)
                     HStack {
-                        Button("Review") { Task { await model.review(card) } }
+                        Button("Review") { Task { await model.review(card) } }.accessibilityIdentifier("review-suggestion")
                         Button("Dismiss", role: .destructive) { Task { await model.dismiss(card) } }
                         Menu("Edit target") {
                             ForEach(model.devices, id: \.device_id) { device in
@@ -259,7 +282,7 @@ private struct SuggestionsView: View {
             }
             ForEach(model.tasks, id: \.command.command_id) { task in
                 VStack(alignment: .leading) {
-                    Text(task.visibleStatus)
+                    Text(task.visibleStatus).accessibilityIdentifier("task-status")
                     if model.agentControl?.completionEpoch(for: task) != nil {
                         Button("Confirm observed completion…") { model.reviewTaskCompletion(task) }
                     }
@@ -269,7 +292,7 @@ private struct SuggestionsView: View {
                     if task.state == .queued || task.state == .dispatched || task.state == .running {
                         Button(task.cancellationRequested ? "Retry cancellation" : "Cancel task", role: .destructive) {
                             Task { await model.cancelTask(task) }
-                        }
+                        }.accessibilityIdentifier("cancel-task")
                     }
                 }
             }
@@ -301,7 +324,7 @@ private struct ApprovalView: View {
         NavigationStack {
             Form {
                 if let card = model.approval {
-                    Section("Exact action") { Text(card.exactAction).font(.body.monospaced()).textSelection(.enabled) }
+                    Section("Exact action") { Text(card.exactAction).accessibilityIdentifier("approval-exact-action").font(.body.monospaced()).textSelection(.enabled) }
                     Section("Destination") {
                         Text(card.destination.display_name); Text(card.destination.device_id).font(.caption)
                         if let route = card.routeDescription { Text(route).font(.caption.monospaced()).textSelection(.enabled) }
@@ -312,7 +335,7 @@ private struct ApprovalView: View {
                         Button(model.canRetryQueue ? "Retry queue" : (card.preview.risk == .sensitive ? "Authenticate and approve" : "Approve exact action")) {
                             approving = true
                             Task { await model.approve(); approving = false }
-                        }.disabled(approving)
+                        }.disabled(approving).accessibilityIdentifier("approve-action")
                         Button("Deny", role: .destructive) { model.dismissApproval() }
                         if let message = model.message { Text(message) }
                     }
@@ -341,3 +364,15 @@ private struct TaskCompletionView: View {
         }
     }
 }
+
+#if DEBUG
+private struct UIDemoPresentation: ViewModifier {
+    private let arguments = ProcessInfo.processInfo.arguments
+    @Environment(\.dynamicTypeSize) private var typeSize
+    func body(content: Content) -> some View {
+        content
+            .preferredColorScheme(UIDemo.requested ? (arguments.contains("--ui-dark") ? .dark : .light) : nil)
+            .environment(\.dynamicTypeSize, UIDemo.requested && arguments.contains("--ui-largest") ? .accessibility5 : typeSize)
+    }
+}
+#endif

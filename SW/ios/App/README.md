@@ -14,6 +14,7 @@ flowchart LR
 | Path | What | Status |
 |---|---|---|
 | [VoiceRemoteApp.swift](VoiceRemoteApp.swift) | Controls, cloud indicator, history Send/Copy/Share, approval | 🟡 Apple/device **unverified** |
+| [UIDemo.swift](UIDemo.swift) | DEBUG-only synthetic capture/STT/Brain, pairing, transport and biometric adapters; real AppModel/Policy/router | ✅ Linux adapter probe; Apple UI **unverified** |
 | [AppRuntime.swift](AppRuntime.swift) | Protected storage, signed cloud transports, deferred STT | 🟡 Apple/device **unverified** |
 | [PhoneWakeDelegate.swift](PhoneWakeDelegate.swift), [Push.entitlements](Push.entitlements) | Signing-gated APNs registration, fixed-hint background handler, bounded/coalesced reconciliation and best-effort daily archive scheduler | 🟡 Apple/APNs **unverified** |
 | [AuditArchiveRuntime.swift](AuditArchiveRuntime.swift) | Atomic protected key/anchor/pending state; loss health, biometric recovery into pinned new slots, preserved originals | 🟡 Keychain/Apple **unverified**; portable crypto/recovery tests |
@@ -81,3 +82,10 @@ Evidence: [cross-review tests](../Packages/AppModel/Tests/CrossReviewTests.swift
 AI Control now exposes automatic session priorities/defaults, configured fallback orders and a one-action independence choice. Exact changed routes require new approval. The owner completion sheet shows instruction/task/full provider route and explains that linked steps wait for “This finished”. AppRuntime binds local history/offline/audit construction to the protected installation account. Argmax remains visibly unavailable without a licensed loaded adapter. Portable flows are tested in AppModel; SwiftUI/LA/device execution **unverified** on Linux.
 
 Provider-order editing keeps raw comma-separated drafts rather than rewriting text on every keystroke. Cloud approval previews explicitly say “Cloud fallback · new execution”. Portable draft/preview tests pass; Apple UI execution remains **unverified**.
+
+Debug UI review: `--ui-demo` selects fresh temporary state and synthetic identities;
+normal Debug launches use the existing runtime. Release ignores all `--ui-*`
+arguments. [UITests](../UITests/README.md) documents the screenshot matrix and
+permission/state fault flags; fakes do not grant authority or replace Policy.
+The recorder marks demo runs synthetic. OS prompts, actual audit restoration and hardware remain
+**unverified**. No synthetic data enters production identity/history storage.

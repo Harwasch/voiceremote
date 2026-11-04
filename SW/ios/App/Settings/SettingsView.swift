@@ -25,7 +25,7 @@ struct SettingsView: View {
                     Text("ElevenLabs Scribe").tag("elevenlabs-scribe"); Text("AssemblyAI").tag("assemblyai")
                 }
                 if ArgmaxBuild.engine == nil { Text("Argmax unavailable — requires a licence and a loaded host adapter.").font(.footnote) }
-                Toggle("Allow cloud processing", isOn: $model.settings.cloudConsent)
+                Toggle("Allow cloud processing", isOn: $model.settings.cloudConsent).accessibilityIdentifier("cloud-consent")
                 Text("Cloud speech sends live audio to your configured proxy. Cloud brain sends text for proposals. Provider retention depends on your service. No vendor key is stored here.").font(.footnote)
                 Toggle("Maximum accuracy", isOn: $model.settings.maxAccuracy)
                 Button("Download / prepare speech models") { Task { await host.prepareModels() } }
@@ -87,7 +87,7 @@ struct SettingsView: View {
                     Button("Delete text", role: .destructive) { resolveRetention(entry.segmentID, keep: false) }
                 }
             }
-            Section { NavigationLink("Benchmark recorder") { RecorderView(host: host) } }
+            Section { NavigationLink("Benchmark recorder") { RecorderView(host: host) }.accessibilityIdentifier("benchmark-recorder") }
         }.navigationTitle("Settings")
         .onAppear {
             localProviders = ProviderOrderDraft(text: model.settings.routing.localProviderOrder.joined(separator: ","))

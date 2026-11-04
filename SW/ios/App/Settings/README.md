@@ -33,3 +33,8 @@ Named BLE sources export `voiceremote-named-source-benchmark-v1` with the board 
 Active Settings shows Argmax unavailable until a licensed host adapter is loaded, and persists local/cloud provider fallback orders. Suggestions owns selected/default sessions, per-action cloud independence and exact-route reapproval. Apple UI execution remains **unverified**.
 
 Provider-order TextFields edit independent raw drafts, so typing a trailing comma does not normalize it away. Parsed settings update separately; Apple UI execution remains **unverified**.
+
+[UI gallery](../../UITests/README.md) exercises cloud consent withdrawal and the
+benchmark recorder with synthetic capture/engines; exported demo runs are marked
+synthetic. Consent/recorder Apple UI and accessibility findings remain **unverified**
+until the coordinator's `ios-ui-*` run.

@@ -50,6 +50,9 @@ import Policy
     var rooms: [String] = []
     var selectedRoom = ""
     func loadRooms() {
+        #if DEBUG
+        if UIDemo.requested { rooms = []; return }
+        #endif
         do {
             let root = try Self.rootURL(), account = try SecureStore.fixedAccount(defaults: .standard)
             let peers = try PeerStore(url: root.appendingPathComponent("peers-" + PayloadDigest.sha256(Data(account.utf8)) + ".json"), accountID: account)
@@ -90,6 +93,9 @@ import Policy
         return checkpoints
     }
     func recover() async -> Bool {
+        #if DEBUG
+        if UIDemo.requested { message = "Synthetic verified copy unavailable. Approvals remain unavailable; originals are preserved."; return false }
+        #endif
         guard !busy else { return false }; busy = true; defer { busy = false }
         do {
             let root = try Self.rootURL(), sourceSlot = try Self.activeSlot()

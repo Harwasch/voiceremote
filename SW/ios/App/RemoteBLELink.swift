@@ -93,7 +93,13 @@ import VoiceRemoteProtocol
     var isEnrolled: Bool { authenticatedEnrollment && enrolledRemoteIdentity != nil }
     private var provisionalComparison: QualifiedCaptureSession?
     override init() { super.init() }
+    #if DEBUG
+    func configureUIDemo() { status = "Synthetic remote · disconnected · Bluetooth permission denied" }
+    #endif
     func scan() {
+        #if DEBUG
+        if UIDemo.requested { configureUIDemo(); return }
+        #endif
         wantsScan = true
         if central == nil {
             status = "Waiting for Bluetooth permission"

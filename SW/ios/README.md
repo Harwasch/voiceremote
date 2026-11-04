@@ -29,6 +29,7 @@ flowchart LR
 | [Packages/SttApple/](Packages/SttApple/README.md) | SpeechAnalyzer, MIT WhisperKit small.en, optional licensed Argmax; debug picker ready for UI embedding | 🟡 Coordinator `ios-ci-*` build and device use **unverified** |
 | [Packages/Brain/](Packages/Brain/README.md) | Strict non-executable proposals, relay Claude client, router, incremental suggestion cards and benchmark hook | ✅ Synthetic Linux tests; live/UI/Policy integration **unverified** |
 | [Packages/BrainApple/](Packages/BrainApple/README.md) | Foundation Models + optional on-demand MLX adapters | 🟡 Apple CI/device behavior **unverified** |
+| [UITests/](UITests/README.md) | Scripted light/dark/large-type gallery, real Policy with synthetic adapters, accessibility findings | 🟡 Coordinator `ios-ui-*` run **unverified** |
 | [Tests/](Tests/README.md) | Hosted app unit test | 🟡 macOS test **unverified** |
 | [ci/](ci/README.md) | Tested release guard and simulator discovery | ✅ Linux helper tests |
 | [ios.yml](../../.github/workflows/ios.yml) | Unsigned simulator tests; optional TestFlight release | 🟡 GitHub run **unverified** |
@@ -44,13 +45,23 @@ for p in Protocol Core Pairing Stt Brain; do swift test -j 4 --package-path SW/i
 python3 -m unittest discover -s SW/ios/ci -p 'test_*.py'
 ```
 
-The coordinator pushes an `ios-ci-*` tag or dispatches the workflow. Only `ios-ci-*`,
+The coordinator pushes an `ios-ci-*` tag or dispatches the workflow. Only `ios-ci-*`, `ios-ui-*`,
 `ios-v*` tags and manual dispatch run it; no PR, branch, schedule or automatic macOS build.
 Each macOS job has a 30-minute timeout and uses at most four build jobs. XcodeGen is installed
 with Homebrew; generated projects, Info plists and placeholder icon catalog are ignored.
 `Configuration/generate_icon.py` supplies an opaque waveform icon for archive validation.
 The workflow discovers an available iPhone on iOS 26+ and runs `xcodebuild test ... CODE_SIGNING_ALLOWED=NO`.
 No Apple account is needed for that job. Test results are retained for seven days.
+
+UI review: the separate `ui-gallery` job runs only on `ios-ui-*` or manual dispatch,
+with `VoiceRemoteUI`, Debug and `CODE_SIGNING_ALLOWED=NO`. `ios-ui-*` skips the ordinary
+simulator job. Download **ios-screenshots** for named PNGs, `index.json` and all
+report-only accessibility findings; **ios-ui-results** preserves the xcresult even
+on test failure. [Coverage and limits](UITests/README.md). Demo arguments and fakes
+are compiled out without DEBUG (Linux source guard tested). Apple compilation,
+UI behavior, actual exports and accessibility acceptance remain **unverified**
+until the coordinator's run. No Apple account or provider credentials are needed.
+
 Only SwiftPM downloads are cached; no simulator state, signing data or DerivedData is cached.
 
 Runner choice checked 2026-11-02: [`macos-26`, Xcode 26.6 inventory](https://github.com/actions/runner-images/blob/main/images/macos/macos-26-Readme.md#xcode).

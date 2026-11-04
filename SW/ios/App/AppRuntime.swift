@@ -18,7 +18,58 @@ import VoiceRemoteProtocol
 @MainActor @Observable final class AppRuntime {
     private static let bootstrap = RuntimeBootstrap<AppRuntime>()
     static var shared: AppRuntime? { bootstrap.value }
-    static func getOrCreate() throws -> AppRuntime { try bootstrap.resolve { try AppRuntime() } }
+    static func getOrCreate() throws -> AppRuntime {
+        try bootstrap.resolve {
+            #if DEBUG
+            if UIDemo.requested {
+                let demo = UIDemo()
+                if demo.arguments.contains("--ui-storage-denied") { throw SttFailure.unavailable }
+                return try AppRuntime(demo: demo)
+            }
+            #endif
+            return try AppRuntime()
+        }
+    }
+    #if DEBUG
+    var demo: UIDemo?
+    /// Fresh temporary storage and adapter fakes; never opens production identity or audit data.
+    private init(demo: UIDemo) throws {
+        self.demo = demo
+        let account = UIDemo.account, phone = UIDemo.phone
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("VoiceRemote-UI-" + UUID().uuidString)
+        self.root = root
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        keyboard = QueueWriter(sharedDirectory: root.appendingPathComponent("keyboard"))
+        settingsStore = SettingsStore(url: root.appendingPathComponent("settings.json"))
+        offlineSync = try RemoteOfflineSync(url: root.appendingPathComponent("offline.json"), accountID: account)
+        link = ComputerLink(accountID: account, phoneID: phone,
+            store: try PeerStore(url: root.appendingPathComponent("peers.json"), accountID: account))
+        registry = DeviceRegistry(accountID: account, revocation: demo.target)
+        pairing = PairingFlow(backend: DemoPairing(registry: registry))
+        historyStore = try AppHistoryStore(now: Int64(Date().timeIntervalSince1970 * 1000), accountID: account)
+        auditLog = try AuditLog(journal: DemoJournal(), checkpoints: DemoCheckpoint(), retention: AuditRetention(), accountID: account)
+        let policy = try PolicyGate(audit: auditLog, biometric: demo.biometric)
+        taskStore = try RetainedTaskStore(url: root.appendingPathComponent("tasks.json"), accountID: account)
+        let router = try TaskRouter(store: taskStore, policy: policy)
+        self.router = router
+        agentControl = AgentControl(router: router, policy: policy, account: account, actor: phone)
+        recorder = try BenchmarkRecorder(prompts: [RecorderPrompt(id: "synthetic-1", category: "normal", expectedText: "Synthetic recorder prompt.")],
+            directory: root.appendingPathComponent("Recorder"))
+        model = VoiceAppModel(accountID: account, phoneID: phone, actorID: phone, registry: registry,
+            history: historyStore, target: demo.target, policy: policy, makeCapture: { try await demo.makeCapture() },
+            engines: { demo.engines }, brain: { _ in DemoBrain() }, agentControl: agentControl,
+            deliver: { permit in try RegisteredRouting.enqueue(permit, devices: [UIDemo.computer, UIDemo.offline], router: router); return router.snapshot() })
+        demo.model = model
+        remote.configureUIDemo()
+        model.pinCapture = { [weak self] in
+            guard let self else { throw SttFailure.unavailable }
+            return try self.pinnedCapture()
+        }
+        permissionExplained = !demo.firstRun
+        permissionGranted = !demo.firstRun && !demo.denied
+        agentControl.onChange = { [weak self] in Task { await self?.model.refreshTasks() } }
+    }
+    #endif
     let registry: DeviceRegistry
     let link: ComputerLink
     let pairing: PairingFlow
@@ -171,6 +222,9 @@ import VoiceRemoteProtocol
         }
     }
     func prepare() async throws {
+        #if DEBUG
+        if let demo { try await demo.seed(model, history: historyStore, registry: registry, agents: agentControl); return }
+        #endif
         if let preparation { return try await preparation.value }
         let task = Task { [self] in
             try await link.restore(registry: registry)
@@ -198,6 +252,9 @@ import VoiceRemoteProtocol
         return try await factory()
     }
     func pinnedCapture(choice: CaptureChoice? = nil, forBenchmark: Bool = false) throws -> CaptureFactory {
+        #if DEBUG
+        if let demo { activeCaptureSource = "Synthetic microphone"; return { try await demo.makeCapture() } }
+        #endif
         if (choice ?? captureChoice) == .automatic {
             let phone = try pinnedCapture(choice: .phone, forBenchmark: forBenchmark)
             let peer = remote.sourceIdentity, epoch = sourceSelectionEpoch, name = remote.sourceName
@@ -278,6 +335,9 @@ import VoiceRemoteProtocol
         catch { pushStatus = "Push registration unavailable. Foreground reconciliation remains available." }
     }
     func reconcileWake() async throws {
+        #if DEBUG
+        if demo != nil { return }
+        #endif
         if let wakeReconciliation { return try await wakeReconciliation.value }
         let task = Task { [self] in
             model.stop()
@@ -292,11 +352,21 @@ import VoiceRemoteProtocol
         wakeReconciliation?.cancel(); link.cancelPendingWake()
     }
     func continuePermissions() async {
+        #if DEBUG
+        if let demo {
+            permissionExplained = true; permissionGranted = !demo.denied
+            if demo.denied { error = "Microphone or speech access is off. You can change it in iPhone Settings." }
+            return
+        }
+        #endif
         permissionExplained = true; UserDefaults.standard.set(true, forKey: "permissionExplained")
         permissionGranted = await PhoneCapture.requestPermissions()
         if !permissionGranted { error = "Microphone or speech access is off. You can change it in iPhone Settings." }
     }
     func availableEngines() async -> [any SttEngine] {
+        #if DEBUG
+        if let demo { return demo.engines }
+        #endif
         var result: [any SttEngine] = []
         if await apple.modelAvailable() { result.append(apple) }
         if await whisper.modelAvailable { result.append(whisper) }
@@ -335,6 +405,9 @@ import VoiceRemoteProtocol
         return text // Empty successful output is a per-record silent disposition in sync.
     }
     func prepareModels() async {
+        #if DEBUG
+        if demo != nil { return }
+        #endif
         do { try await apple.prepare(allowDownload: true); try await whisper.prepare(allowDownload: true) }
         catch { self.error = "Unable to prepare speech models. Check network and available storage." }
     }
@@ -375,6 +448,14 @@ import VoiceRemoteProtocol
         let source: any CaptureSession
         do { source = try await factory() }
         catch { self.error = "Selected capture source unavailable. Reconnect and use a fresh remote trigger."; return }
+        #if DEBUG
+        if demo != nil {
+            recorder.start(source: source, first: first, second: second,
+                vocabulary: Vocabulary(userID: model.accountID, terms: []), device: "Synthetic simulator",
+                captureKind: .synthetic, cloudConsent: false, synthetic: true)
+            return
+        }
+        #endif
         let airpods = AVAudioSession.sharedInstance().currentRoute.inputs.contains { $0.portType == .bluetoothHFP }
         recorder.start(source: source, first: first, second: second,
             vocabulary: Vocabulary(userID: model.accountID, terms: model.settings.vocabulary),
