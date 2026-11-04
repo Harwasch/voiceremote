@@ -15,7 +15,7 @@ flowchart LR
 | File / folder | What it is | Status |
 |---|---|---|
 | [protocol.schema.json](protocol.schema.json) | Version 1 wire records, enums and discriminated unions | ✅ |
-| [remote-ble.md](remote-ble.md) | Binary remote ↔ iPhone BLE contract, UUIDs and hex examples; separate from JSON | 🟡 Draft; unimplemented / unverified |
+| [remote-ble.md](remote-ble.md) | Binary remote ↔ iPhone BLE contract, UUIDs and hex examples; separate from JSON | 🟡 Draft; StopWatch firmware built and tested, iPhone side unverified |
 | [audit-archive.md](audit-archive.md) | Encrypted audit append/read, protected recovery anchors, signed rollover/writer handoff, TTL, padded storage, fenced loss acceptance and content-free wake reconciliation | ✅ local synthetic tests; phone adapters unverified |
 | [relay-join.md](relay-join.md) | Room enrollment and exact cloud proxy challenge/header/query-normalization contract | ✅ synthetic relay tests; live client/vendor integration unverified |
 | [noise.md](noise.md) | Exact Noise suite, enrollment, relay auth, fragment framing and published ciphertext vectors | ✅ synthetic Rust tests; Swift/deployment unverified |

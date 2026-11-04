@@ -1,0 +1,37 @@
+-- Configuring done (0.1s)
+-- Generating done (0.0s)
+-- Build files have been written to: /home/harrison/Documents/Projects/voiceremote/.claude/worktrees/codex-feat-fw-stopwatch/FW/build-host
+[ 15%] Built target remote_tests
+[ 34%] Built target audio_tests
+[ 46%] Built target offline_capture_tests
+[ 69%] Built target offline_runtime_tests
+[ 80%] Built target offline_store_tests
+[ 84%] Building C object CMakeFiles/audio_runtime_tests.dir/test_audio_runtime.c.o
+[ 88%] Linking C executable audio_runtime_tests
+[100%] Built target audio_runtime_tests
+Internal ctest changing into directory: /home/harrison/Documents/Projects/voiceremote/.claude/worktrees/codex-feat-fw-stopwatch/FW/build-host
+Test project /home/harrison/Documents/Projects/voiceremote/.claude/worktrees/codex-feat-fw-stopwatch/FW/build-host
+      Start  1: remote_logic
+ 1/10 Test  #1: remote_logic .....................   Passed    0.00 sec
+      Start  2: ble_client_wire
+ 2/10 Test  #2: ble_client_wire ..................   Passed    0.03 sec
+      Start  3: audio_transport
+ 3/10 Test  #3: audio_transport ..................   Passed    0.00 sec
+      Start  4: audio_client
+ 4/10 Test  #4: audio_client .....................   Passed    0.06 sec
+      Start  5: ble_client_offline
+ 5/10 Test  #5: ble_client_offline ...............   Passed    0.07 sec
+      Start  6: offline_capture
+ 6/10 Test  #6: offline_capture ..................   Passed    0.00 sec
+      Start  7: generated_partitions
+ 7/10 Test  #7: generated_partitions .............   Passed    0.02 sec
+      Start  8: offline_runtime
+ 8/10 Test  #8: offline_runtime ..................   Passed    0.00 sec
+      Start  9: offline_store
+ 9/10 Test  #9: offline_store ....................   Passed    0.00 sec
+      Start 10: audio_runtime
+10/10 Test #10: audio_runtime ....................   Passed    0.00 sec
+
+100% tests passed, 0 tests failed out of 10
+
+Total Test time (real) =   0.20 sec

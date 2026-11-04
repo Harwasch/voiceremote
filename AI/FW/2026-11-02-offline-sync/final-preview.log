@@ -1,0 +1,28 @@
+-- /home/harrison/Documents/Projects/voiceremote/.claude/worktrees/codex-feat-fw-stopwatch/FW/tools/ui_preview/lv_conf.h
+-- Using configuration: /home/harrison/Documents/Projects/voiceremote/.claude/worktrees/codex-feat-fw-stopwatch/FW/tools/ui_preview/lv_conf.h
+-- Configuring done (0.2s)
+-- Generating done (0.1s)
+-- Build files have been written to: /home/harrison/Documents/Projects/voiceremote/.claude/worktrees/codex-feat-fw-stopwatch/FW/build-preview/native
+[ 98%] Built target lvgl
+[100%] Built target ui_preview
+Destination update: 44270 pixels, y=356..450.
+Pulse: 359120 pixels flushed in 1s, bounded to (99,99)-(366,366).
+Offline UI checks passed: disconnected/reconnected listening, full/waiting in OFF, syncing, partial redraws.
+Preview interaction checks passed: touch, direct selection, modals, haptics, render/flush barrier.
+FW/build-preview/off.png (466x466)
+FW/build-preview/ptt-armed.png (466x466)
+FW/build-preview/ptt-listening-transcribe.png (466x466)
+FW/build-preview/rec-listening-ai.png (466x466)
+FW/build-preview/auto-target.png (466x466)
+FW/build-preview/named-target.png (466x466)
+FW/build-preview/long-name.png (466x466)
+FW/build-preview/error-text.png (466x466)
+FW/build-preview/no-link.png (466x466)
+FW/build-preview/pairing-number.png (466x466)
+FW/build-preview/forget-confirm.png (466x466)
+FW/build-preview/rectangular.png (240x280)
+FW/build-preview/offline-recording.png (466x466)
+FW/build-preview/offline-waiting.png (466x466)
+FW/build-preview/storage-full.png (466x466)
+FW/build-preview/recordings-waiting.png (466x466)
+FW/build-preview/syncing.png (466x466)

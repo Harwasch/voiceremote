@@ -1,0 +1,9 @@
+m5: generated NVS offset=0x9000 size=0x6000 matches previous table; fits 16777216 bytes
+  nvs: 0x9000 + 0x6000
+  phy_init: 0xf000 + 0x1000
+  factory: 0x10000 + 0x177000
+  offline: 0x187000 + 0xe79000
+c6: generated NVS offset=0x9000 size=0x6000 matches previous table; fits 4194304 bytes
+  nvs: 0x9000 + 0x6000
+  phy_init: 0xf000 + 0x1000
+  factory: 0x10000 + 0x177000

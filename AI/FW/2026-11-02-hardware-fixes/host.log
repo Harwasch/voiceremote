@@ -1,0 +1,55 @@
+# Purpose: final host verification. Inputs: working firmware + pinned offline toolchain.
+# Verification: command status checked by reproduce.sh; hardware unverified.
+-- /home/harrison/Documents/Projects/voiceremote/.claude/worktrees/codex-feat-fw-stopwatch/FW/tools/ui_preview/lv_conf.h
+-- Using configuration: /home/harrison/Documents/Projects/voiceremote/.claude/worktrees/codex-feat-fw-stopwatch/FW/tools/ui_preview/lv_conf.h
+-- Configuring done (0.1s)
+-- Generating done (0.1s)
+-- Build files have been written to: /home/harrison/Documents/Projects/voiceremote/.claude/worktrees/codex-feat-fw-stopwatch/FW/build-host
+[  1%] Built target audio_tests
+[  2%] Built target offline_runtime_tests
+[  2%] Built target offline_capture_tests
+[  2%] Built target audio_runtime_tests
+[  2%] Built target remote_tests
+[  3%] Built target offline_store_tests
+[  4%] Built target test_hook_tests
+[ 96%] Built target lvgl
+[ 98%] Built target ui_preview
+[100%] Built target ui_preview_hook
+Internal ctest changing into directory: /home/harrison/Documents/Projects/voiceremote/.claude/worktrees/codex-feat-fw-stopwatch/FW/build-host
+Test project /home/harrison/Documents/Projects/voiceremote/.claude/worktrees/codex-feat-fw-stopwatch/FW/build-host
+      Start  1: remote_logic
+ 1/16 Test  #1: remote_logic .....................   Passed    0.00 sec
+      Start  2: ble_client_wire
+ 2/16 Test  #2: ble_client_wire ..................   Passed    0.03 sec
+      Start  3: audio_transport
+ 3/16 Test  #3: audio_transport ..................   Passed    0.00 sec
+      Start  4: audio_client
+ 4/16 Test  #4: audio_client .....................   Passed    0.06 sec
+      Start  5: ble_client_offline
+ 5/16 Test  #5: ble_client_offline ...............   Passed    0.29 sec
+      Start  6: offline_capture
+ 6/16 Test  #6: offline_capture ..................   Passed    0.00 sec
+      Start  7: generated_partitions
+ 7/16 Test  #7: generated_partitions .............   Passed    0.02 sec
+      Start  8: offline_runtime
+ 8/16 Test  #8: offline_runtime ..................   Passed    0.00 sec
+      Start  9: offline_store
+ 9/16 Test  #9: offline_store ....................   Passed    0.00 sec
+      Start 10: audio_runtime
+10/16 Test #10: audio_runtime ....................   Passed    0.00 sec
+      Start 11: test_hook
+11/16 Test #11: test_hook ........................   Passed    0.00 sec
+      Start 12: hil_runner
+12/16 Test #12: hil_runner .......................   Passed    0.57 sec
+      Start 13: phone_render_barrier
+13/16 Test #13: phone_render_barrier .............   Passed    0.05 sec
+      Start 14: ui_hook_debounce
+14/16 Test #14: ui_hook_debounce .................   Passed    0.09 sec
+      Start 15: ui_without_psram
+15/16 Test #15: ui_without_psram .................   Passed    0.07 sec
+      Start 16: release_hook_guard
+16/16 Test #16: release_hook_guard ...............   Passed    0.30 sec
+
+100% tests passed, 0 tests failed out of 16
+
+Total Test time (real) =   1.50 sec

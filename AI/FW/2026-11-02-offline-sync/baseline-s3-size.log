@@ -1,0 +1,36 @@
+Executing action: size
+Running ninja in directory /home/harrison/Documents/Projects/voiceremote/.claude/worktrees/codex-feat-fw-stopwatch/FW/build-m5
+Executing "ninja all"...
+[1/4] cd /home/harrison/Documents/Projects/voiceremote/.claude/worktrees/codex-feat-fw-stopwatch/FW/build-m5/esp-idf/esptool_py && /home/harrison/hw-tools/espressif/python_env/idf5.5_py3.12_env/bin/python /home/harrison/hw-tools/esp-idf/components/partition_table/check_sizes.py --offset 0x8000 partition --type app /home/harrison/Documents/Projects/voiceremote/.claude/worktrees/codex-feat-fw-stopwatch/FW/build-m5/partition_table/partition-table.bin /home/harrison/Documents/Projects/voiceremote/.claude/worktrees/codex-feat-fw-stopwatch/FW/build-m5/voice_remote.bin
+voice_remote.bin binary size 0x119200 bytes. Smallest app partition is 0x177000 bytes. 0x5de00 bytes (25%) free.
+[2/4] Performing build step for 'bootloader'
+[1/1] cd /home/harrison/Documents/Projects/voiceremote/.claude/worktrees/codex-feat-fw-stopwatch/FW/build-m5/bootloader/esp-idf/esptool_py && /home/harrison/hw-tools/espressif/python_env/idf5.5_py3.12_env/bin/python /home/harrison/hw-tools/esp-idf/components/partition_table/check_sizes.py --offset 0x8000 bootloader 0x0 /home/harrison/Documents/Projects/voiceremote/.claude/worktrees/codex-feat-fw-stopwatch/FW/build-m5/bootloader/bootloader.bin
+Bootloader binary size 0x5000 bytes. 0x3000 bytes (38%) free.
+[3/4] No install step for 'bootloader'
+[4/4] Completed 'bootloader'
+Running ninja in directory /home/harrison/Documents/Projects/voiceremote/.claude/worktrees/codex-feat-fw-stopwatch/FW/build-m5
+Executing "ninja size"...
+[0/1] cd /home/harrison/Documents/Projects/voiceremote/.claude/worktrees/codex-feat-fw-stopwatch/FW/build-m5 && /home/harrison/hw-tools/cuttle-venv/lib/python3.12/site-packages/cmake/data/bin/cmake -D "IDF_SIZE_TOOL=/home/harrison/hw-tools/espressif/python_env/idf5.5_py3.12_env/bin/python;-m;esp_idf_size" -D MAP_FILE=/home/harrison/Documents/Projects/voiceremote/.claude/worktrees/codex-feat-fw-stopwatch/FW/build-m5/voice_remote.map -D OUTPUT_JSON= -P /home/harrison/hw-tools/esp-idf/tools/cmake/run_size_tool.cmake
+                            Memory Type Usage Summary                             
+┏━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┓
+┃ Memory Type/Section ┃ Used [bytes] ┃ Used [%] ┃ Remain [bytes] ┃ Total [bytes] ┃
+┡━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━┩
+│ Flash Code          │       779194 │          │                │               │
+│    .text            │       779194 │          │                │               │
+│ Flash Data          │       242532 │          │                │               │
+│    .rodata          │       242276 │          │                │               │
+│    .appdesc         │          256 │          │                │               │
+│ DIRAM               │       173251 │    50.69 │         168509 │        341760 │
+│    .text            │        94255 │    27.58 │                │               │
+│    .bss             │        60024 │    17.56 │                │               │
+│    .data            │        18972 │     5.55 │                │               │
+│ IRAM                │        16384 │    100.0 │              0 │         16384 │
+│    .text            │        15356 │    93.73 │                │               │
+│    .vectors         │         1028 │     6.27 │                │               │
+│ RTC SLOW            │           32 │     0.39 │           8160 │          8192 │
+│    .force_slow      │           32 │     0.39 │                │               │
+│ RTC FAST            │           24 │     0.29 │           8168 │          8192 │
+│    .rtc_reserved    │           24 │     0.29 │                │               │
+└─────────────────────┴──────────────┴──────────┴────────────────┴───────────────┘
+Total image size: 1151369 bytes (.bin may be padded larger)
+Note: The reported total sizes may be smaller than those in the technical reference manual due to reserved memory and application configuration. The total flash size available for the application is not included by default, as it cannot be reliably determined due to the presence of other data like the bootloader, partition table, and application partition size.

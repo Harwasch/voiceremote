@@ -140,7 +140,7 @@ synthetic behavior; device, GUI, provider and deployed acceptance stay **unverif
 | CI release/simulator guards | hwgeekom | `python3 -m unittest discover -s SW/ios/ci -p 'test_*.py'` |
 | `SW/bench` synthetic scorer | hwgeekom | `HEAVY_CPUS=4 heavy uv run --project SW/bench pytest SW/bench/tests` |
 | iOS app + Apple adapters | **GitHub Actions macOS runner only** | After XcodeGen + simulator selection: `xcodebuild test -project SW/ios/VoiceRemote.xcodeproj -scheme VoiceRemote -destination "platform=iOS Simulator,id=$SIMULATOR_ID" -parallel-testing-enabled NO -jobs 4 CODE_SIGNING_ALLOWED=NO` |
-| `FW/` | hwgeekom | `idf.py build` + ESP-IDF Unity tests (runner TBD); ESP-IDF at `~/hw-tools/esp-idf` |
+| `FW/` | hwgeekom | `heavy bash FW/tests/run.sh` (host); board builds: see `FW/README.md`; ESP-IDF at `~/hw-tools/esp-idf` |
 | `HW/` | hworker lab only | **TBD**: no versioned artifact yet; no valid build/test command |
 
 - **Compute tiers (owner's machines).** On hwgeekom, builds and tests up to

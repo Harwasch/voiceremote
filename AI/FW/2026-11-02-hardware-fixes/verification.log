@@ -1,0 +1,10 @@
+# Purpose: final verification verification. Inputs: working firmware + pinned offline toolchain.
+# Verification: command status checked by reproduce.sh; hardware unverified.
+m5: -O2, 240 MHz, hook=False, app USB dependency=False, bin=1199280 B
+c6: -O2, 160 MHz, hook=False, app USB dependency=False, bin=1294720 B
+m5-hook: -O2, 240 MHz, hook=True, app USB dependency=True, bin=1207376 B
+17 PNGs: byte-identical to b0daefb baseline and primitive fallback
+13 external licence notices: identical after move
+s3: image=1199167 B, DIRAM=170111 B
+c6: image=1294382 B, DIRAM=156636 B
+hook: image=1207259 B, DIRAM=173755 B

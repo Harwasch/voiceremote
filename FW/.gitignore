@@ -1,0 +1,8 @@
+/build*/
+/managed_components/
+/sdkconfig*
+!/sdkconfig.defaults
+/boards/*/sdkconfig
+/boards/*/sdkconfig.old
+__pycache__/
+.venv/

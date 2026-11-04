@@ -1,0 +1,14 @@
+-- Configuring done (0.1s)
+-- Generating done (0.0s)
+-- Build files have been written to: /home/harrison/Documents/Projects/voiceremote/.claude/worktrees/codex-feat-fw-stopwatch/FW/build-host
+[ 20%] Building C object CMakeFiles/audio_runtime_tests.dir/test_audio_runtime.c.o
+[ 40%] Building C object CMakeFiles/audio_runtime_tests.dir/home/harrison/Documents/Projects/voiceremote/.claude/worktrees/codex-feat-fw-stopwatch/FW/app/audio.c.o
+[ 60%] Building C object CMakeFiles/audio_runtime_tests.dir/home/harrison/Documents/Projects/voiceremote/.claude/worktrees/codex-feat-fw-stopwatch/FW/app/state.c.o
+[ 80%] Building C object CMakeFiles/audio_runtime_tests.dir/home/harrison/Documents/Projects/voiceremote/.claude/worktrees/codex-feat-fw-stopwatch/FW/app/protocol.c.o
+[100%] Linking C executable audio_runtime_tests
+[100%] Built target audio_runtime_tests
+[ 16%] Building C object CMakeFiles/offline_runtime_tests.dir/test_offline_runtime.c.o
+[ 33%] Linking C executable offline_runtime_tests
+[100%] Built target offline_runtime_tests
+audio runtime: offline codec survives BLE resets, OFF stops/suspends and discards in-flight encoding, live reset passes
+offline runtime: production writer/queue, OFF, overflow, clock/progress, sync/resume/delete and live priority pass
