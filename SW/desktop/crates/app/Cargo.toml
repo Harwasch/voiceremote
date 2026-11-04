@@ -1,0 +1,64 @@
+[package]
+name = "voiceremote-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "voiceremote"
+path = "src/main.rs"
+
+[features]
+default = []
+# Local integration only: fixed synthetic TextInjector and loopback HTTP relay.
+e2e-test = []
+os-keychain = ["voiceremote-core/os-keychain"]
+# Installed hotkey helper: suppress the Windows console so it cannot steal focus.
+# The Tauri GUI lives in ../tray; ordinary headless builds keep their console.
+tray = []
+
+[dependencies]
+anyhow = "1.0"
+base64 = "0.22"
+clap = { version = "4", features = ["derive", "env"] }
+qrcode = { version = "0.14", default-features = false }
+serde_json = "1.0"
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "process", "io-util"] }
+voiceremote-core = { path = "../core" }
+voiceremote-agents = { path = "../agents" }
+voiceremote-protocol = { path = "../protocol" }
+
+[target.'cfg(windows)'.dependencies]
+voiceremote-inject-windows = { path = "../inject-windows" }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+voiceremote-inject-linux = { path = "../inject-linux" }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[target.'cfg(any(windows, target_os = "linux"))'.dependencies]
+async-trait = "0.1"
+if-addrs = "0.13"
+mdns-sd = "0.13"
+sha2 = "0.10"
+socket2 = { version = "0.6", features = ["all"] }
+futures-util = { version = "0.3", features = ["sink"] }
+tokio-tungstenite = { version = "0.28", features = ["rustls-tls-webpki-roots"] }
+
+[dev-dependencies]
+tempfile = "3"
+zeroize = "1.8"
+async-trait = "0.1"
+if-addrs = "0.13"
+mdns-sd = "0.13"
+sha2 = "0.10"
+socket2 = { version = "0.6", features = ["all"] }
+futures-util = { version = "0.3", features = ["sink"] }
+tokio-tungstenite = "0.28"
+
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", features = ["process"] }
+
+[target.'cfg(windows)'.dependencies.windows-sys]
+version = "0.61"
+features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_System_Threading", "Win32_System_Memory", "Win32_System_Pipes"]

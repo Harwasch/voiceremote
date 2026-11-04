@@ -251,7 +251,8 @@
         "account_id": "fixture-account",
         "device_id": "fixture-desktop",
         "text_field_focused": true,
-        "last_activity_at": 1793664000000
+        "last_activity_at": 1793664000000,
+        "activity_age_ms": 0
       }
     },
     {
@@ -262,7 +263,8 @@
         "account_id": "fixture-account",
         "device_id": "fixture-desktop",
         "text_field_focused": false,
-        "last_activity_at": 0
+        "last_activity_at": 0,
+        "activity_age_ms": 0
       }
     },
     {
@@ -1015,7 +1017,8 @@
         "account_id": "fixture-account",
         "device_id": "fixture-desktop",
         "text_field_focused": true,
-        "last_activity_at": 1793664000000
+        "last_activity_at": 1793664000000,
+        "activity_age_ms": 0
       }
     },
     {
@@ -1253,6 +1256,411 @@
         "text": "SYNTHETIC café 🛰️ é \"quoted\" \\"
       },
       "json": "{\"kind\": \"dictation_text\", \"account_id\": \"fixture-account\", \"segment_id\": \"fixture-segment\", \"revision\": -0, \"state\": \"committed\", \"target_device_id\": \"fixture-desktop\", \"text\": \"SYNTHETIC caf\\u00e9 \\ud83d\\udef0\\ufe0f e\\u0301 \\\"quoted\\\" \\\\\"}"
+    },
+    {
+      "schema": "TargetPrepare",
+      "name": "TargetPrepare round trip TargetPrepare",
+      "value": {
+        "kind": "target_prepare",
+        "account_id": "fixture-account",
+        "request_id": "fixture-request",
+        "target_device_id": "fixture-desktop"
+      }
+    },
+    {
+      "schema": "InnerMessage",
+      "name": "TargetPrepare round trip InnerMessage",
+      "value": {
+        "kind": "target_prepare",
+        "account_id": "fixture-account",
+        "request_id": "fixture-request",
+        "target_device_id": "fixture-desktop"
+      }
+    },
+    {
+      "schema": "TargetReady",
+      "name": "TargetReady round trip TargetReady",
+      "value": {
+        "kind": "target_ready",
+        "account_id": "fixture-account",
+        "request_id": "fixture-request",
+        "target_device_id": "fixture-desktop",
+        "ready": true
+      }
+    },
+    {
+      "schema": "InnerMessage",
+      "name": "TargetReady round trip InnerMessage",
+      "value": {
+        "kind": "target_ready",
+        "account_id": "fixture-account",
+        "request_id": "fixture-request",
+        "target_device_id": "fixture-desktop",
+        "ready": true
+      }
+    },
+    {
+      "schema": "DictationOutcome",
+      "name": "DictationOutcome round trip DictationOutcome",
+      "value": {
+        "kind": "dictation_outcome",
+        "account_id": "fixture-account",
+        "segment_id": "fixture-segment",
+        "target_device_id": "fixture-desktop",
+        "outcome": "inserted"
+      }
+    },
+    {
+      "schema": "InnerMessage",
+      "name": "DictationOutcome round trip InnerMessage",
+      "value": {
+        "kind": "dictation_outcome",
+        "account_id": "fixture-account",
+        "segment_id": "fixture-segment",
+        "target_device_id": "fixture-desktop",
+        "outcome": "inserted"
+      }
+    },
+    {
+      "schema": "DictationQuery",
+      "name": "DictationQuery round trip DictationQuery",
+      "value": {
+        "kind": "dictation_query",
+        "account_id": "fixture-account",
+        "segment_id": "fixture-segment",
+        "target_device_id": "fixture-desktop"
+      }
+    },
+    {
+      "schema": "InnerMessage",
+      "name": "DictationQuery round trip InnerMessage",
+      "value": {
+        "kind": "dictation_query",
+        "account_id": "fixture-account",
+        "segment_id": "fixture-segment",
+        "target_device_id": "fixture-desktop"
+      }
+    },
+    {
+      "schema": "CaptureControl",
+      "name": "CaptureControl round trip CaptureControl",
+      "value": {
+        "kind": "capture_control",
+        "account_id": "fixture-account",
+        "request_id": "fixture-request",
+        "target_device_id": "fixture-phone",
+        "capture_state": "off",
+        "ttl_ms": 2000,
+        "request_sequence": 1,
+        "expires_at": 2000
+      }
+    },
+    {
+      "schema": "InnerMessage",
+      "name": "CaptureControl round trip InnerMessage",
+      "value": {
+        "kind": "capture_control",
+        "account_id": "fixture-account",
+        "request_id": "fixture-request",
+        "target_device_id": "fixture-phone",
+        "capture_state": "off",
+        "ttl_ms": 2000,
+        "request_sequence": 1,
+        "expires_at": 2000
+      }
+    },
+    {
+      "schema": "CaptureControlResult",
+      "name": "CaptureControlResult round trip CaptureControlResult",
+      "value": {
+        "kind": "capture_control_result",
+        "account_id": "fixture-account",
+        "request_id": "fixture-request",
+        "device_id": "fixture-phone",
+        "capture_state": "off",
+        "outcome": "applied"
+      }
+    },
+    {
+      "schema": "InnerMessage",
+      "name": "CaptureControlResult round trip InnerMessage",
+      "value": {
+        "kind": "capture_control_result",
+        "account_id": "fixture-account",
+        "request_id": "fixture-request",
+        "device_id": "fixture-phone",
+        "capture_state": "off",
+        "outcome": "applied"
+      }
+    },
+    {
+      "schema": "DictationOutcome",
+      "name": "dictation unavailable",
+      "value": {
+        "kind": "dictation_outcome",
+        "account_id": "fixture-account",
+        "segment_id": "fixture-segment",
+        "target_device_id": "fixture-desktop",
+        "outcome": "unavailable"
+      }
+    },
+    {
+      "schema": "DictationOutcome",
+      "name": "dictation unconfirmed",
+      "value": {
+        "kind": "dictation_outcome",
+        "account_id": "fixture-account",
+        "segment_id": "fixture-segment",
+        "target_device_id": "fixture-desktop",
+        "outcome": "unconfirmed"
+      }
+    },
+    {
+      "schema": "DictationText",
+      "name": "prepared dictation segment",
+      "value": {
+        "kind": "dictation_text",
+        "account_id": "fixture-account",
+        "segment_id": "fixture-segment",
+        "revision": 0,
+        "state": "committed",
+        "target_device_id": "fixture-desktop",
+        "text": "Synthetic.",
+        "preparation_id": "fixture-prepare"
+      }
+    },
+    {
+      "schema": "CaptureControlResult",
+      "name": "capture result unavailable",
+      "value": {
+        "kind": "capture_control_result",
+        "account_id": "fixture-account",
+        "request_id": "fixture-request",
+        "device_id": "fixture-phone",
+        "capture_state": "off",
+        "outcome": "unavailable"
+      }
+    },
+    {
+      "schema": "CaptureControlResult",
+      "name": "capture result expired",
+      "value": {
+        "kind": "capture_control_result",
+        "account_id": "fixture-account",
+        "request_id": "fixture-request",
+        "device_id": "fixture-phone",
+        "capture_state": "off",
+        "outcome": "expired"
+      }
+    },
+    {
+      "schema": "CaptureControlResult",
+      "name": "capture result cancelled",
+      "value": {
+        "kind": "capture_control_result",
+        "account_id": "fixture-account",
+        "request_id": "fixture-request",
+        "device_id": "fixture-phone",
+        "capture_state": "off",
+        "outcome": "cancelled"
+      }
+    },
+    {
+      "schema": "CaptureStateReport",
+      "name": "actual mic state distinct from selected capture",
+      "value": {
+        "kind": "capture_state",
+        "account_id": "fixture-account",
+        "device_id": "fixture-phone",
+        "capture_state": "continuous",
+        "listening": false
+      }
+    },
+    {
+      "name": "AuditArchiveBlock archive round trip",
+      "schema": "AuditArchiveBlock",
+      "value": {
+        "account_id": "fixture-account",
+        "room_id": "fixture-room",
+        "sequence": 0,
+        "previous_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "ciphertext": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "block_hash": "1111111111111111111111111111111111111111111111111111111111111111"
+      }
+    },
+    {
+      "name": "AuditArchiveRead archive round trip",
+      "schema": "AuditArchiveRead",
+      "value": {
+        "account_id": "fixture-account",
+        "room_id": "fixture-room",
+        "sequence": 0
+      }
+    },
+    {
+      "name": "AuditArchivePage archive round trip",
+      "schema": "AuditArchivePage",
+      "value": {
+        "account_id": "fixture-account",
+        "room_id": "fixture-room",
+        "blocks": [
+          {
+            "account_id": "fixture-account",
+            "room_id": "fixture-room",
+            "sequence": 0,
+            "previous_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+            "ciphertext": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "block_hash": "1111111111111111111111111111111111111111111111111111111111111111"
+          }
+        ]
+      }
+    },
+    {
+      "schema": "AuditArchiveWriter",
+      "name": "old phone signs archive writer replacement",
+      "value": {
+        "account_id": "fixture-account",
+        "room_id": "fixture-room",
+        "device_id": "fixture-phone",
+        "public_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "old_signature": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "revision": 0
+      }
+    },
+    {
+      "schema": "AuditArchiveBlock",
+      "name": "archive epoch checkpoint",
+      "value": {
+        "account_id": "fixture-account",
+        "room_id": "fixture-room",
+        "sequence": 0,
+        "previous_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "ciphertext": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "block_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "epoch": 1
+      }
+    },
+    {
+      "schema": "AgentSession",
+      "name": "synthetic AgentSession",
+      "value": {
+        "account_id": "fixture-account",
+        "device_id": "fixture-desktop",
+        "project_id": "fixture-project",
+        "workspace": "/synthetic/workspace",
+        "provider": "claude",
+        "provider_session_id": "fixture-session",
+        "capability_profile": "read_only",
+        "capabilities": [
+          "delegate_task",
+          "cancel_task"
+        ]
+      }
+    },
+    {
+      "schema": "AgentInventoryRequest",
+      "name": "synthetic AgentInventoryRequest",
+      "value": {
+        "kind": "agent_inventory_request",
+        "account_id": "fixture-account",
+        "request_id": "fixture-query"
+      }
+    },
+    {
+      "schema": "AgentInventory",
+      "name": "synthetic AgentInventory",
+      "value": {
+        "kind": "agent_inventory",
+        "account_id": "fixture-account",
+        "device_id": "fixture-desktop",
+        "request_id": "fixture-query",
+        "authenticated_actor": "fixture-owner",
+        "sessions": [
+          {
+            "account_id": "fixture-account",
+            "device_id": "fixture-desktop",
+            "project_id": "fixture-project",
+            "workspace": "/synthetic/workspace",
+            "provider": "claude",
+            "provider_session_id": "fixture-session",
+            "capability_profile": "read_only",
+            "capabilities": [
+              "delegate_task",
+              "cancel_task"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "schema": "AgentTaskQuery",
+      "name": "synthetic AgentTaskQuery",
+      "value": {
+        "kind": "agent_task_query",
+        "account_id": "fixture-account",
+        "command_id": "fixture-command"
+      }
+    },
+    {
+      "schema": "AgentDispatch",
+      "name": "synthetic AgentDispatch",
+      "value": {
+        "kind": "agent_dispatch",
+        "command": {
+          "kind": "authorized_command",
+          "account_id": "fixture-account",
+          "command_id": "fixture-command",
+          "candidate_id": "fixture-candidate",
+          "immutable_task_payload": {
+            "kind": "open_resource",
+            "account_id": "fixture-account",
+            "device_id": "fixture-desktop",
+            "resource_uri": "https://example.invalid/fixture"
+          },
+          "payload_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "source_tier": "explicit",
+          "activation_kind": "ptt",
+          "authenticated_actor": "fixture-actor",
+          "approval_credential_class": "scoped_grant",
+          "risk_class": "read_display",
+          "policy_version": "fixture-policy-v1",
+          "granted_scope_id": "fixture-grant",
+          "destination_id": "fixture-desktop",
+          "idempotency_key": "fixture-command-once",
+          "execution_state": "queued",
+          "created_at": 1793664000000,
+          "updated_at": 1793664000000
+        },
+        "session": {
+          "account_id": "fixture-account",
+          "device_id": "fixture-desktop",
+          "project_id": "fixture-project",
+          "workspace": "/synthetic/workspace",
+          "provider": "claude",
+          "provider_session_id": "fixture-session",
+          "capability_profile": "read_only",
+          "capabilities": [
+            "delegate_task",
+            "cancel_task"
+          ]
+        },
+        "immutable_preview": "e30=",
+        "expires_at": 9000,
+        "account_id": "fixture-account"
+      }
+    },
+    {
+      "schema": "TaskStatus",
+      "name": "CLI dispatch is not verified success",
+      "value": {
+        "kind": "task_status",
+        "account_id": "fixture-account",
+        "command_id": "fixture-command",
+        "execution_state": "dispatched",
+        "updated_at": 1000,
+        "outcome": "dispatched",
+        "app_reply": "Synthetic app reply: I cannot open that resource."
+      }
     }
   ],
   "invalid": [
@@ -3741,6 +4149,358 @@
         "instruction": "SYNTHETIC TASK",
         "recording_consent_state": "forbidden"
       }
+    },
+    {
+      "schema": "TargetPrepare",
+      "name": "TargetPrepare rejects extras",
+      "value": {
+        "kind": "target_prepare",
+        "account_id": "fixture-account",
+        "request_id": "fixture-request",
+        "target_device_id": "fixture-desktop",
+        "unexpected": true
+      }
+    },
+    {
+      "schema": "TargetReady",
+      "name": "TargetReady rejects extras",
+      "value": {
+        "kind": "target_ready",
+        "account_id": "fixture-account",
+        "request_id": "fixture-request",
+        "target_device_id": "fixture-desktop",
+        "ready": true,
+        "unexpected": true
+      }
+    },
+    {
+      "schema": "DictationOutcome",
+      "name": "DictationOutcome rejects extras",
+      "value": {
+        "kind": "dictation_outcome",
+        "account_id": "fixture-account",
+        "segment_id": "fixture-segment",
+        "target_device_id": "fixture-desktop",
+        "outcome": "inserted",
+        "unexpected": true
+      }
+    },
+    {
+      "schema": "DictationQuery",
+      "name": "DictationQuery rejects extras",
+      "value": {
+        "kind": "dictation_query",
+        "account_id": "fixture-account",
+        "segment_id": "fixture-segment",
+        "target_device_id": "fixture-desktop",
+        "unexpected": true
+      }
+    },
+    {
+      "schema": "CaptureControl",
+      "name": "CaptureControl rejects extras",
+      "value": {
+        "kind": "capture_control",
+        "account_id": "fixture-account",
+        "request_id": "fixture-request",
+        "target_device_id": "fixture-phone",
+        "capture_state": "off",
+        "ttl_ms": 2000,
+        "unexpected": true,
+        "request_sequence": 1,
+        "expires_at": 2000
+      }
+    },
+    {
+      "schema": "CaptureControlResult",
+      "name": "CaptureControlResult rejects extras",
+      "value": {
+        "kind": "capture_control_result",
+        "account_id": "fixture-account",
+        "request_id": "fixture-request",
+        "device_id": "fixture-phone",
+        "capture_state": "off",
+        "outcome": "applied",
+        "unexpected": true
+      }
+    },
+    {
+      "schema": "CaptureControl",
+      "name": "invalid capture TTL 0",
+      "value": {
+        "kind": "capture_control",
+        "account_id": "fixture-account",
+        "request_id": "fixture-request",
+        "target_device_id": "fixture-phone",
+        "capture_state": "off",
+        "ttl_ms": 0,
+        "request_sequence": 1,
+        "expires_at": 2000
+      }
+    },
+    {
+      "schema": "CaptureControl",
+      "name": "invalid capture TTL 2001",
+      "value": {
+        "kind": "capture_control",
+        "account_id": "fixture-account",
+        "request_id": "fixture-request",
+        "target_device_id": "fixture-phone",
+        "capture_state": "off",
+        "ttl_ms": 2001,
+        "request_sequence": 1,
+        "expires_at": 2000
+      }
+    },
+    {
+      "schema": "FocusReport",
+      "name": "invalid age -1",
+      "value": {
+        "kind": "focus_report",
+        "account_id": "fixture-account",
+        "device_id": "fixture-desktop",
+        "last_activity_at": 0,
+        "text_field_focused": true,
+        "activity_age_ms": -1
+      }
+    },
+    {
+      "schema": "FocusReport",
+      "name": "invalid age 9007199254740992",
+      "value": {
+        "kind": "focus_report",
+        "account_id": "fixture-account",
+        "device_id": "fixture-desktop",
+        "last_activity_at": 0,
+        "text_field_focused": true,
+        "activity_age_ms": 9007199254740992
+      }
+    },
+    {
+      "schema": "CaptureControl",
+      "name": "capture request requires sequence",
+      "value": {
+        "kind": "capture_control",
+        "account_id": "fixture-account",
+        "request_id": "fixture-request",
+        "target_device_id": "fixture-phone",
+        "capture_state": "off",
+        "ttl_ms": 2000,
+        "expires_at": 2000
+      }
+    },
+    {
+      "schema": "CaptureControl",
+      "name": "capture request requires absolute deadline",
+      "value": {
+        "kind": "capture_control",
+        "account_id": "fixture-account",
+        "request_id": "fixture-request",
+        "target_device_id": "fixture-phone",
+        "capture_state": "off",
+        "ttl_ms": 2000,
+        "request_sequence": 1
+      }
+    },
+    {
+      "name": "archive invalid sequence",
+      "schema": "AuditArchiveBlock",
+      "value": {
+        "account_id": "fixture-account",
+        "room_id": "fixture-room",
+        "sequence": -1,
+        "previous_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "ciphertext": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "block_hash": "1111111111111111111111111111111111111111111111111111111111111111"
+      }
+    },
+    {
+      "name": "archive invalid previous_hash",
+      "schema": "AuditArchiveBlock",
+      "value": {
+        "account_id": "fixture-account",
+        "room_id": "fixture-room",
+        "sequence": 0,
+        "previous_hash": "fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "ciphertext": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "block_hash": "1111111111111111111111111111111111111111111111111111111111111111"
+      }
+    },
+    {
+      "name": "archive invalid ciphertext",
+      "schema": "AuditArchiveBlock",
+      "value": {
+        "account_id": "fixture-account",
+        "room_id": "fixture-room",
+        "sequence": 0,
+        "previous_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "ciphertext": "plaintext",
+        "block_hash": "1111111111111111111111111111111111111111111111111111111111111111"
+      }
+    },
+    {
+      "name": "archive invalid plaintext",
+      "schema": "AuditArchiveBlock",
+      "value": {
+        "account_id": "fixture-account",
+        "room_id": "fixture-room",
+        "sequence": 0,
+        "previous_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "ciphertext": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "block_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+        "plaintext": "SYNTHETIC-REJECT"
+      }
+    },
+    {
+      "name": "archive hash trailing LF previous_hash",
+      "schema": "AuditArchiveBlock",
+      "value": {
+        "account_id": "fixture-account",
+        "room_id": "fixture-room",
+        "sequence": 0,
+        "previous_hash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\n",
+        "ciphertext": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "block_hash": "1111111111111111111111111111111111111111111111111111111111111111"
+      }
+    },
+    {
+      "name": "archive hash trailing LF block_hash",
+      "schema": "AuditArchiveBlock",
+      "value": {
+        "account_id": "fixture-account",
+        "room_id": "fixture-room",
+        "sequence": 0,
+        "previous_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+        "ciphertext": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "block_hash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\n"
+      }
+    },
+    {
+      "schema": "AgentSession",
+      "name": "closed AgentSession",
+      "value": {
+        "account_id": "fixture-account",
+        "device_id": "fixture-desktop",
+        "project_id": "fixture-project",
+        "workspace": "/synthetic/workspace",
+        "provider": "claude",
+        "provider_session_id": "fixture-session",
+        "capability_profile": "read_only",
+        "capabilities": [
+          "delegate_task",
+          "cancel_task"
+        ],
+        "model_authority": "forbidden"
+      }
+    },
+    {
+      "schema": "AgentInventoryRequest",
+      "name": "closed AgentInventoryRequest",
+      "value": {
+        "kind": "agent_inventory_request",
+        "account_id": "fixture-account",
+        "request_id": "fixture-query",
+        "model_authority": "forbidden"
+      }
+    },
+    {
+      "schema": "AgentInventory",
+      "name": "closed AgentInventory",
+      "value": {
+        "kind": "agent_inventory",
+        "account_id": "fixture-account",
+        "device_id": "fixture-desktop",
+        "request_id": "fixture-query",
+        "authenticated_actor": "fixture-owner",
+        "sessions": [
+          {
+            "account_id": "fixture-account",
+            "device_id": "fixture-desktop",
+            "project_id": "fixture-project",
+            "workspace": "/synthetic/workspace",
+            "provider": "claude",
+            "provider_session_id": "fixture-session",
+            "capability_profile": "read_only",
+            "capabilities": [
+              "delegate_task",
+              "cancel_task"
+            ]
+          }
+        ],
+        "model_authority": "forbidden"
+      }
+    },
+    {
+      "schema": "AgentTaskQuery",
+      "name": "closed AgentTaskQuery",
+      "value": {
+        "kind": "agent_task_query",
+        "account_id": "fixture-account",
+        "command_id": "fixture-command",
+        "model_authority": "forbidden"
+      }
+    },
+    {
+      "schema": "AgentDispatch",
+      "name": "closed AgentDispatch",
+      "value": {
+        "kind": "agent_dispatch",
+        "command": {
+          "kind": "authorized_command",
+          "account_id": "fixture-account",
+          "command_id": "fixture-command",
+          "candidate_id": "fixture-candidate",
+          "immutable_task_payload": {
+            "kind": "open_resource",
+            "account_id": "fixture-account",
+            "device_id": "fixture-desktop",
+            "resource_uri": "https://example.invalid/fixture"
+          },
+          "payload_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "source_tier": "explicit",
+          "activation_kind": "ptt",
+          "authenticated_actor": "fixture-actor",
+          "approval_credential_class": "scoped_grant",
+          "risk_class": "read_display",
+          "policy_version": "fixture-policy-v1",
+          "granted_scope_id": "fixture-grant",
+          "destination_id": "fixture-desktop",
+          "idempotency_key": "fixture-command-once",
+          "execution_state": "queued",
+          "created_at": 1793664000000,
+          "updated_at": 1793664000000
+        },
+        "session": {
+          "account_id": "fixture-account",
+          "device_id": "fixture-desktop",
+          "project_id": "fixture-project",
+          "workspace": "/synthetic/workspace",
+          "provider": "claude",
+          "provider_session_id": "fixture-session",
+          "capability_profile": "read_only",
+          "capabilities": [
+            "delegate_task",
+            "cancel_task"
+          ]
+        },
+        "immutable_preview": "e30=",
+        "expires_at": 9000,
+        "model_authority": "forbidden",
+        "account_id": "fixture-account"
+      }
+    },
+    {
+      "schema": "TaskStatus",
+      "name": "app reply bounded",
+      "value": {
+        "kind": "task_status",
+        "account_id": "fixture-account",
+        "command_id": "fixture-command",
+        "execution_state": "dispatched",
+        "updated_at": 1000,
+        "outcome": "dispatched",
+        "app_reply": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      }
     }
   ],
   "raw_invalid": [
@@ -3858,6 +4618,11 @@
       "schema": "CandidateAction",
       "name": "trailing comma in array",
       "json": "{\"kind\":\"candidate_action\",\"account_id\":\"fixture-account\",\"candidate_id\":\"fixture-candidate\",\"parent_capture_session\":\"fixture-capture\",\"segment_span_ids\":[\"fixture-segment\",],\"proposed_task_kind\":\"open_resource\",\"proposed_task\":{\"kind\":\"open_resource\",\"account_id\":\"fixture-account\",\"device_id\":\"fixture-desktop\",\"resource_uri\":\"https://example.invalid/fixture\"},\"proposed_payload_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"destination_hint\":\"fixture-desktop\",\"origin_confidence\":0.75,\"proposed_risk_class\":\"read_display\",\"suggestion_expiry\":1793664120000,\"card_visibility\":\"visible\",\"candidate_state\":\"suggested\"}"
+    },
+    {
+      "name": "archive duplicate sequence",
+      "schema": "AuditArchiveBlock",
+      "json": "{\"account_id\": \"fixture-account\", \"room_id\": \"fixture-room\", \"sequence\": 0, \"previous_hash\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"ciphertext\": \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\", \"block_hash\": \"1111111111111111111111111111111111111111111111111111111111111111\",\"sequence\":0}"
     }
   ]
 }

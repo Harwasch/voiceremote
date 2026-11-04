@@ -60,7 +60,12 @@ flowchart LR
 
 A release tag must equal the component's declared version (Xcode marketing
 version, `Cargo.toml`, `package.json`, firmware `VERSION`) or the release job
-refuses it. **TBD:** the release scripts that enforce this.
+refuses it. iOS, desktop and relay guards live in
+`.github/workflows/{ios,desktop,relay}.yml`, `SW/ios/ci/checks.py` and
+`SW/relay/ci/check-version.mjs`; release commits must be accepted on `origin/main`.
+Desktop also checks the Tauri bundle version. Signing/deployment still require
+owner credentials; successful releases remain **unverified**. FW/HW guards are
+**TBD** until their first actual versioned artifacts.
 
 ## READMEs
 
@@ -122,15 +127,21 @@ the folder, not an essay:
 
 ## Build and test
 
-**TBD:** exact commands land with each component's first task. Planned:
+Commands below run from the repository root. They prove local contracts and
+synthetic behavior; device, GUI, provider and deployed acceptance stay **unverified**.
 
-| Component | Where it runs | Test command (planned) |
+| Component | Where it runs | Test command |
 |---|---|---|
 | `SYS/` schemas + codegen | hwgeekom | `make -C SYS check` |
-| `SW/desktop` | hwgeekom (Linux); Windows via CI | `cargo test --workspace` |
-| `SW/relay` | hwgeekom | `npm test` |
-| `SW/ios` | **GitHub Actions macOS runner only** (no Mac) | `xcodebuild test` in CI |
+| Local E2E: Worker + desktop CLI + Swift harness, synthetic injector | hwgeekom (Linux) | `bash SYS/tests/e2e/run.sh` |
+| `SW/desktop` | hwgeekom; Windows via CI | `HEAVY_CPUS=4 heavy cargo test --workspace -j4 --locked --manifest-path SW/desktop/Cargo.toml` |
+| `SW/relay` | hwgeekom | `HEAVY_CPUS=4 heavy npm --prefix SW/relay test` (max 4 workers) |
+| iOS portable packages | hwgeekom (Linux) | `HEAVY_CPUS=4 heavy swift test -j 4 --package-path SW/ios/Packages/Core` (repeat for Protocol, Stt, Brain, Policy, Router, KeyboardBridge, AppModel, Pairing) |
+| CI release/simulator guards | hwgeekom | `python3 -m unittest discover -s SW/ios/ci -p 'test_*.py'` |
+| `SW/bench` synthetic scorer | hwgeekom | `HEAVY_CPUS=4 heavy uv run --project SW/bench pytest SW/bench/tests` |
+| iOS app + Apple adapters | **GitHub Actions macOS runner only** | After XcodeGen + simulator selection: `xcodebuild test -project SW/ios/VoiceRemote.xcodeproj -scheme VoiceRemote -destination "platform=iOS Simulator,id=$SIMULATOR_ID" -parallel-testing-enabled NO -jobs 4 CODE_SIGNING_ALLOWED=NO` |
 | `FW/` | hwgeekom | `heavy bash FW/tests/run.sh` (host); board builds: see `FW/README.md`; ESP-IDF at `~/hw-tools/esp-idf` |
+| `HW/` | hworker lab only | **TBD**: no versioned artifact yet; no valid build/test command |
 
 - **Compute tiers (owner's machines).** On hwgeekom, builds and tests up to
   10 cores / 20 GB go through `heavy <command>` (lowest priority, capped), one
@@ -169,4 +180,12 @@ with a failing test. Commit subjects are prefixed by area: `SYS:`, `SW:`, `FW:`,
 - Leave formatting and lint to CI.
 
 ## Lessons
+
+- CI cost: `desktop-ci-*` skips the 20-minute tray and installer build; use `tray-ci-*` only when `crates/tray` or packaging changes. Use `ios-ci-*` only when Swift changed.
 <!-- one line per lesson learned after a merge; repo-specific only -->
+
+- To run CI on a branch, the coordinator tags its commit `ios-ci-*` or
+  `desktop-ci-*` (or dispatches the workflow); ordinary branch pushes do not run
+  those workflows. These CI tags do not authorize a release.
+- Swift control-character checks must iterate `unicodeScalars`; `Character`
+  iteration can combine CR/LF and miss forbidden scalar values.

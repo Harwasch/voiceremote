@@ -32,3 +32,7 @@ Trace: REQ-3/4/5/8, REQ-16/17/18, REQ-25, REQ-56/60.
 | File privacy | One actor per file; owner-only temporary file and atomic replacement; startup removes a crash-orphaned pending file. Apple file protection/backup policy is a UI adapter obligation. |
 
 Phone capture, remote/tray presentation, key storage, network delivery and on-device behavior remain **unverified**.
+
+REQ-56: [InstallationAccount](Sources/InstallationAccount.swift) resolves the legacy account once and rejects a different requested account after pinning. The Apple host persists the pin in Keychain; Keychain/device behavior is **unverified**. [Regression](Tests/LogicTests.swift).
+
+REQ-61 local history: [HistoryStore.swift](Sources/HistoryStore.swift) writes a version-2 account envelope and account-bound entries. Legacy arrays migrate under the trusted installation pin; wrong/mixed accounts fail before retention/display. [LogicTests.swift](Tests/LogicTests.swift) proves migration, reopen and rejection on Linux.

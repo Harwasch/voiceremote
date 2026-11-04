@@ -1,0 +1,48 @@
+[package]
+name = "voiceremote-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = []
+os-keychain = ["dep:keyring"]
+
+[dependencies]
+anyhow = "1.0"
+async-trait = "0.1"
+base64 = "0.22"
+ed25519-dalek = { version = "2", features = ["zeroize"] }
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+socket2 = { version = "0.6", features = ["all"] }
+fs2 = "0.4"
+futures-util = { version = "0.3", features = ["sink"] }
+hex = "0.4"
+if-addrs = "0.13"
+mdns-sd = "0.13"
+rand = "0.8"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+# Select only the suite primitives; snow std would enable an unused ring backend.
+snow = { version = "0.10", default-features = false, features = ["use-chacha20poly1305", "use-curve25519", "use-blake2", "use-getrandom"] }
+subtle = "2.6"
+tokio = { version = "1", features = ["test-util", "io-util", "net", "rt-multi-thread", "macros", "sync", "time", "signal"] }
+tokio-tungstenite = "0.28"
+voiceremote-protocol = { path = "../protocol" }
+x25519-dalek = "2"
+zeroize = { version = "1.8", features = ["derive"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+tokio-tungstenite = { version = "0.28", features = ["rustls-tls-webpki-roots"] }
+keyring = { version = "3.6", optional = true, features = ["linux-native"] }
+[target.'cfg(target_os = "windows")'.dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["json", "native-tls"] }
+tokio-tungstenite = { version = "0.28", features = ["native-tls"] }
+keyring = { version = "3.6", optional = true, features = ["windows-native"] }
+
+[dev-dependencies]
+axum = { version = "0.8", features = ["ws"] }
+tempfile = "3"

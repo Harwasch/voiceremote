@@ -5,7 +5,7 @@ import sys
 
 from jsonschema import ValidationError
 
-from .scoring import battery, gate, stt_metrics, timing
+from .scoring import battery, gate, stt_metrics, timing, stage_timing
 from .validation import ROOT, REPO, read_json, validate_run, validator
 
 
@@ -41,6 +41,12 @@ def report(run, config):
         clip = f'{m["clipped"]}/{m["clipped_n"]}' if m["clipped_n"] else "TBD (n=0)"
         verdict = "BASELINE" if name == config["apple_engine_id"] else verdicts[name]
         lines.append(f'| {safe(name)} ({safe(engine["version"])}) | {m["wer"]:.1%} ({m["errors"]}/{m["words"]}) | {term} ({m["term_errors"]}/{m["term_total"]}) | {clip} | {m["first_deleted"]}/{len(run["stt_cases"])} | {timing(engine["results"], "first_text_ms")} | {timing(engine["results"], "final_after_eos_ms")} | {battery(engine)} | {verdict} |')
+    lines += ["", "| STT engine | Cleanup mean / p95 ms | Delivery mean / p95 ms | Capture→field mean / p95 ms | Battery cohort |",
+              "|---|---|---|---|---|"]
+    for engine in stt:
+        rows = engine["results"]
+        cohort = engine.get("battery", {}).get("cohort_id", "TBD")
+        lines.append(f'| {safe(engine["id"])} | {stage_timing(rows, "cleanup_started_ms", "cleanup_completed_ms")} | {stage_timing(rows, "delivery_started_ms", "delivery_completed_ms")} | {stage_timing(rows, None, "field_confirmed_ms")} | {safe(cohort)} |')
     # Numeric labels prevent model-supplied identifiers becoming Mermaid syntax.
     lines += ["", "```mermaid", "xychart-beta", '    title "WER percent (lower is better)"']
     if stt:
@@ -50,8 +56,8 @@ def report(run, config):
     else:
         lines += ['    x-axis ["No STT samples"]', '    y-axis "WER %" 0 --> 100', "    bar [0]"]
     lines += ["```", "", "Chart key: " + (", ".join(f'E{i + 1} = {safe(e["id"])}' for i, e in enumerate(stt)) if stt else "no STT data; zero is a placeholder."), "",
-              "| Brain (version) | Correct sequences | Invalid proposals | Latency mean / p95 ms | Battery / 10 min |",
-              "|---|---|---|---|---|"]
+              "| Brain (version) | Correct sequences | Invalid proposals | Latency mean / p95 ms | Battery / 10 min | Battery cohort |",
+              "|---|---|---|---|---|---|"]
     tool_validator = validator(REPO / "SYS/tools/tool-call.schema.json")
     expected = {c["id"]: c["expected_calls"] for c in run["brain_cases"]}
     ranked = []
@@ -65,7 +71,7 @@ def report(run, config):
         latencies = [r["latency_ms"] for r in engine["results"] if "latency_ms" in r]
         mean = sum(latencies) / count if len(latencies) == count else float("inf")
         ranked.append((-correct / count, mean, engine["id"]))
-        lines.append(f'| {safe(engine["id"])} ({safe(engine["version"])}) | {correct}/{count} ({correct / count:.1%}) | {invalid} | {timing(engine["results"], "latency_ms")} | {battery(engine)} |')
+        lines.append(f'| {safe(engine["id"])} ({safe(engine["version"])}) | {correct}/{count} ({correct / count:.1%}) | {invalid} | {timing(engine["results"], "latency_ms")} | {battery(engine)} | {safe(engine.get("battery", {}).get("cohort_id", "TBD"))} |')
     if ranked:
         lines += ["", f'Brain leader: **{safe(min(ranked)[2])}** (accuracy, then complete mean latency, then ID; no shipping gate specified).']
     lines += ["", "Assumptions and limits:", "",

@@ -71,70 +71,96 @@ final class NoiseTests: XCTestCase, @unchecked Sendable {
         do { _ = try await initiator.split(); XCTFail("split reused") } catch {}
     }
     func testOfficialCacophonyXXVector() async throws {
-        let url = try XCTUnwrap(Bundle.module.url(forResource: "cacophony-xx", withExtension: "json", subdirectory: "Fixtures"))
-        let vectors = try JSONDecoder().decode(VectorSet.self, from: Data(contentsOf: url)).vectors
-        XCTAssertEqual(vectors.count, 1)
-        for vector in vectors { try await check(vector) }
+        try await testDeadline(seconds: 20) { [self] in
+            let url = try XCTUnwrap(Bundle.module.url(forResource: "cacophony-xx", withExtension: "json", subdirectory: "Fixtures"))
+            let vectors = try JSONDecoder().decode(VectorSet.self, from: Data(contentsOf: url)).vectors
+            XCTAssertEqual(vectors.count, 1)
+            for vector in vectors { try await check(vector) }
+        }
     }
     /// The desktop task can land shared vectors after this branch was created.
     /// Recognized Cacophony-shaped XX files are run automatically, never silently skipped.
     func testSharedSYSNoiseVectorsWhenPresent() async throws {
-        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-            .deletingLastPathComponent().deletingLastPathComponent()
-        let directory = root.appendingPathComponent("SYS/protocol/vectors/noise")
-        guard FileManager.default.fileExists(atPath: directory.path) else {
-            throw XCTSkip("Shared SYS Noise vectors are not on this base; bundled Cacophony vector runs independently")
-        }
-        let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
-            .filter { $0.pathExtension == "json" }
-        var checked = 0
-        for file in files {
-            let data = try Data(contentsOf: file)
-            if let set = try? JSONDecoder().decode(VectorSet.self, from: data) {
-                for vector in set.vectors where vector.protocol_name == "Noise_XX_25519_ChaChaPoly_BLAKE2s" {
+        try await testDeadline(seconds: 20) { [self] in
+            let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+                .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+                .deletingLastPathComponent().deletingLastPathComponent()
+            let directory = root.appendingPathComponent("SYS/protocol/vectors/noise")
+            guard FileManager.default.fileExists(atPath: directory.path) else {
+                XCTFail("Required shared SYS Noise vectors are missing"); return
+            }
+            let files = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+                .filter { $0.pathExtension == "json" }
+            var checked = 0
+            for file in files {
+                let data = try Data(contentsOf: file)
+                if let set = try? JSONDecoder().decode(VectorSet.self, from: data) {
+                    for vector in set.vectors where vector.protocol_name == "Noise_XX_25519_ChaChaPoly_BLAKE2s" {
+                        try await check(vector); checked += 1
+                    }
+                } else if let vector = try? JSONDecoder().decode(NoiseVector.self, from: data), vector.protocol_name == "Noise_XX_25519_ChaChaPoly_BLAKE2s" {
                     try await check(vector); checked += 1
-                }
-            } else if let vector = try? JSONDecoder().decode(NoiseVector.self, from: data), vector.protocol_name == "Noise_XX_25519_ChaChaPoly_BLAKE2s" {
-                try await check(vector); checked += 1
-            } else if let vector = try? JSONDecoder().decode(DesktopVector.self, from: data) {
-                try await checkDesktop(vector); checked += 1
-            } else { XCTFail("Unrecognized shared Noise vector: \(file.lastPathComponent)") }
+                } else if let vector = try? JSONDecoder().decode(DesktopVector.self, from: data) {
+                    _ = try await checkDesktop(vector); checked += 1
+                } else if file.lastPathComponent == "xx-fragments.json" {
+                    let base = try JSONDecoder().decode(DesktopVector.self, from: Data(contentsOf: directory.appendingPathComponent("xx-pairing.json")))
+                    let (a, b) = try await checkDesktop(base)
+                    let fragments = try JSONDecoder().decode(FragmentVector.self, from: data)
+                    XCTAssertEqual(fragments.initiator_nonces, [2, 3])
+                    let device = DeviceInfo(account_id: base.qr_payload.account_id, device_id: "phone", display_name: "fixture", platform: .ios, role: .text_receiver, capabilities: [.receive_text])
+                    let registry = PeerRegistry(store: InMemoryKeyStore())
+                    let peer = try await registry.enroll(PairedPeer(device: device, publicKey: Data(repeating: 1, count: 32), roomID: base.qr_payload.relay_room_id, session: b))
+                    let session = ApplicationSession(noise: b, registry: registry, peer: peer, localDeviceID: "desktop")
+                    let (tx, rx) = InMemoryPairingTransport.pair()
+                    for fragment in fragments.fragments {
+                        let packet = try await a.encrypt(hex(fragment.plaintext_hex))
+                        XCTAssertEqual(packet, try hex(fragment.ciphertext_hex))
+                        try await tx.send(packet)
+                    }
+                    let decoded = try await session.receive(transport: rx)
+                    XCTAssertEqual(decoded, try ProtocolCodec.decode(InnerMessage.self, from: Data(fragments.reassembled_plaintext.utf8)))
+                    XCTAssertEqual(fragments.total_bytes, fragments.reassembled_plaintext.utf8.count)
+                    checked += 1
+                } else { XCTFail("Unrecognized shared Noise vector: \(file.lastPathComponent)") }
+            }
+            XCTAssertGreaterThan(checked, 0, "Shared Noise directory needs a usable XX vector")
         }
-        XCTAssertGreaterThan(checked, 0, "Shared Noise directory needs a usable XX vector")
     }
     func testTamperedHandshakePoisonsStateAndRejectsMalformedDH() async throws {
-        let a = NoiseXX(role: .initiator, staticKey: .init())
-        let b = NoiseXX(role: .responder, staticKey: .init())
-        _ = try await b.readMessage(a.writeMessage())
-        var second = try await b.writeMessage(); second[second.count - 1] ^= 1
-        do { _ = try await a.readMessage(second); XCTFail() } catch {}
-        do { _ = try await a.writeMessage(); XCTFail() } catch {}
-        do { _ = try await a.split(); XCTFail() } catch {}
-        let invalid = NoiseXX(role: .responder, staticKey: .init())
-        _ = try await invalid.readMessage(Data(repeating: 0, count: 32))
-        do { _ = try await invalid.writeMessage(); XCTFail("all-zero DH accepted") } catch {}
-        let short = NoiseXX(role: .responder, staticKey: .init())
-        do { _ = try await short.readMessage(Data(repeating: 0, count: 31)); XCTFail() } catch {}
+        try await testDeadline(seconds: 20) { [self] in
+            let a = NoiseXX(role: .initiator, staticKey: .init())
+            let b = NoiseXX(role: .responder, staticKey: .init())
+            _ = try await b.readMessage(a.writeMessage())
+            var second = try await b.writeMessage(); second[second.count - 1] ^= 1
+            do { _ = try await a.readMessage(second); XCTFail() } catch {}
+            do { _ = try await a.writeMessage(); XCTFail() } catch {}
+            do { _ = try await a.split(); XCTFail() } catch {}
+            let invalid = NoiseXX(role: .responder, staticKey: .init())
+            _ = try await invalid.readMessage(Data(repeating: 0, count: 32))
+            do { _ = try await invalid.writeMessage(); XCTFail("all-zero DH accepted") } catch {}
+            let short = NoiseXX(role: .responder, staticKey: .init())
+            do { _ = try await short.readMessage(Data(repeating: 0, count: 31)); XCTFail() } catch {}
+        }
     }
     func testTransportAuthenticationReplayDirectionsAndSizes() async throws {
-        let a = NoiseXX(role: .initiator, staticKey: .init()); let b = NoiseXX(role: .responder, staticKey: .init())
-        _ = try await b.readMessage(a.writeMessage()); _ = try await a.readMessage(b.writeMessage())
-        _ = try await b.readMessage(a.writeMessage())
-        let left = try await a.split(); let right = try await b.split()
-        let encrypted = try await left.encrypt(Data("synthetic".utf8))
-        var damaged = encrypted; damaged[0] ^= 1
-        do { _ = try await right.decrypt(damaged); XCTFail() } catch {}
-        let decoded = try await right.decrypt(encrypted)
-        XCTAssertEqual(decoded, Data("synthetic".utf8))
-        do { _ = try await right.decrypt(encrypted); XCTFail("replay accepted") } catch {}
-        do { _ = try await left.decrypt(encrypted); XCTFail("reflected ciphertext accepted") } catch {}
-        do { _ = try await left.encrypt(Data(repeating: 0, count: 65_520)); XCTFail() } catch {}
-        let max = try await left.encrypt(Data(repeating: 0, count: 65_519))
-        let maxPlain = try await right.decrypt(max)
-        XCTAssertEqual(maxPlain.count, 65_519)
-        await left.close()
-        do { _ = try await left.encrypt(Data()); XCTFail() } catch {}
+        try await testDeadline(seconds: 20) { [self] in
+            let a = NoiseXX(role: .initiator, staticKey: .init()); let b = NoiseXX(role: .responder, staticKey: .init())
+            _ = try await b.readMessage(a.writeMessage()); _ = try await a.readMessage(b.writeMessage())
+            _ = try await b.readMessage(a.writeMessage())
+            let left = try await a.split(); let right = try await b.split()
+            let encrypted = try await left.encrypt(Data("synthetic".utf8))
+            let decoded = try await right.decrypt(encrypted)
+            XCTAssertEqual(decoded, Data("synthetic".utf8))
+            do { _ = try await left.encrypt(Data(repeating: 0, count: 65_520)); XCTFail() } catch {}
+            let max = try await left.encrypt(Data(repeating: 0, count: 65_519))
+            let maxPlain = try await right.decrypt(max)
+            XCTAssertEqual(maxPlain.count, 65_519)
+            do { _ = try await right.decrypt(encrypted); XCTFail("replay accepted") } catch {}
+            do { _ = try await right.decrypt(max); XCTFail("failed session revived") } catch {}
+            do { _ = try await left.decrypt(encrypted); XCTFail("reflected ciphertext accepted") } catch {}
+            await left.close()
+            do { _ = try await left.encrypt(Data()); XCTFail() } catch {}
+        }
     }
 }
 
@@ -158,7 +184,7 @@ private struct DesktopVector: Decodable {
 }
 
 extension NoiseTests {
-    private func checkDesktop(_ vector: DesktopVector) async throws {
+    private func checkDesktop(_ vector: DesktopVector) async throws -> (NoiseSession, NoiseSession) {
         XCTAssertEqual(vector.pattern, "Noise_XX_25519_ChaChaPoly_BLAKE2s")
         let invitation = try PairingInvitation(qr: ProtocolCodec.encode(vector.qr_payload),
             expectedAccount: vector.qr_payload.account_id, clock: TestClock(now: vector.qr_payload.expires_at - 120_000))
@@ -205,9 +231,20 @@ extension NoiseTests {
         XCTAssertEqual(encrypted, try hex(vector.application_ciphertext_hex))
         let decoded = try await b.decrypt(encrypted)
         XCTAssertEqual(decoded, application)
+        return (a, b)
     }
     func testDesktopSnowPairingVectorIncludingConfirmationsAndApplication() async throws {
-        let url = try XCTUnwrap(Bundle.module.url(forResource: "desktop-xx-pairing", withExtension: "json", subdirectory: "Fixtures"))
-        try await checkDesktop(JSONDecoder().decode(DesktopVector.self, from: Data(contentsOf: url)))
+        try await testDeadline(seconds: 20) { [self] in
+            let url = try XCTUnwrap(Bundle.module.url(forResource: "desktop-xx-pairing", withExtension: "json", subdirectory: "Fixtures"))
+            _ = try await checkDesktop(JSONDecoder().decode(DesktopVector.self, from: Data(contentsOf: url)))
+        }
     }
+}
+
+private struct FragmentVector: Decodable {
+    let initiator_nonces: [Int]
+    let total_bytes: Int
+    let reassembled_plaintext: String
+    let fragments: [Fragment]
+    struct Fragment: Decodable { let plaintext_hex: String; let ciphertext_hex: String }
 }

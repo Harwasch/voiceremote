@@ -3,10 +3,12 @@ import PackageDescription
 
 let package = Package(
     name: "Pairing",
-    platforms: [.iOS("26.0"), .macOS(.v14)],
-    products: [.library(name: "Pairing", targets: ["Pairing"])],
+    platforms: [.iOS("26.0"), .macOS("26.0")],
+    products: [.library(name: "Pairing", targets: ["Pairing"]),
+               .executable(name: "phone-e2e", targets: ["PhoneE2E"])],
     dependencies: [
         .package(path: "../Protocol"),
+        .package(path: "../Core"),
         .package(url: "https://github.com/apple/swift-crypto.git", exact: "4.0.0")
     ],
     targets: [
@@ -14,6 +16,7 @@ let package = Package(
             .product(name: "Crypto", package: "swift-crypto"),
             .product(name: "VoiceRemoteProtocol", package: "Protocol")
         ], path: "Sources", exclude: ["README.md"]),
+        .executableTarget(name: "PhoneE2E", dependencies: ["Pairing", "Core"], path: "E2E", exclude: ["README.md"]),
         .testTarget(name: "PairingTests", dependencies: ["Pairing"], path: "Tests",
                     exclude: ["README.md"], resources: [.copy("Fixtures")])
     ]

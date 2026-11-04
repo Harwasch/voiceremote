@@ -217,3 +217,32 @@ def test_real_export_cannot_use_synthetic_capture_source(run):
     run['synthetic'] = False
     with pytest.raises(ValidationError):
         validate_run(run)
+
+
+def test_stage_timing_and_missing_confirmation_stay_tbd(run, config):
+    from benchkit.scoring import stage_timing
+    rows = [{"stages": {"cleanup_started_ms": 10, "cleanup_completed_ms": 20}}, {}]
+    assert stage_timing(rows, "cleanup_started_ms", "cleanup_completed_ms") == '10.0 / 10.0 (n=1)'
+    assert stage_timing(rows, None, "field_confirmed_ms") == 'TBD (n=0)'
+    run['engines'][0]['results'][0]['stages'] = rows[0]['stages']
+    validate_run(run)
+    text = report(run, config)
+    assert 'Capture→field mean / p95 ms' in text
+    assert '10.0 / 10.0 (n=1)' in text
+    for bad in [{'cleanup_started_ms': 20, 'cleanup_completed_ms': 10},
+                {'field_confirmed_ms': 10}, {'delivery_completed_ms': 10}]:
+        run['engines'][0]['results'][0]['stages'] = bad
+        with pytest.raises(ValueError):
+            validate_run(run)
+
+
+def test_spoken_command_provenance_is_complete(run):
+    for case in run['brain_cases']:
+        case['recording_id'] = 'synthetic-' + case['id']
+    with pytest.raises(ValueError):
+        validate_run(run)
+    for engine in run['engines']:
+        if engine['kind'] == 'brain':
+            for row in engine['results']:
+                row['transcript'] = 'Synthetic recognized speech'
+    validate_run(run)

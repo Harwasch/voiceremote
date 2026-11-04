@@ -1,0 +1,29 @@
+# Purpose: owner-reviewed user service template, not installed by this change.
+# Inputs: existing pairing, owner allowlist, installed authenticated provider CLIs.
+# Verification: template only; deployment and live providers unverified.
+[Unit]
+Description=Voice Control Fabric headless agent node
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/voiceremote/agent.env
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/.local/bin/voiceremote --state-dir %h/.local/state/voiceremote run --headless --account ${VOICEREMOTE_ACCOUNT} --peer ${VOICEREMOTE_PHONE} --agents-config %h/.config/voiceremote/agents.toml
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=yes
+KillMode=control-group
+KillSignal=SIGINT
+TimeoutStopSec=15
+LimitCORE=0
+# Defensive defaults; owner sizing/benchmarks TBC. Per-task scopes have the same caps.
+MemoryMax=2G
+CPUQuota=100%
+StandardOutput=null
+StandardError=journal
+
+[Install]
+WantedBy=default.target

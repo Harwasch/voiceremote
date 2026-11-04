@@ -33,6 +33,25 @@ final class KeyboardBridgeTests: XCTestCase {
         CommittedSegment(id: UUID(), createdAt: now.addingTimeInterval(-age), text: text)
     }
 
+    @MainActor func testOnlySuccessfulInsertionCreatesPositiveSharedReceipt() throws {
+        let (_, shared, local) = try directories()
+        let writer = QueueWriter(sharedDirectory: shared)
+        let success = segment("Synthetic success")
+        try writer.enqueue(success, listening: false, now: now)
+        XCTAssertFalse(try writer.insertionConfirmed(id: success.id, now: now))
+        let destination = Destination()
+        _ = try QueueReader(sharedDirectory: shared, localDirectory: local).drain(into: destination, now: now)
+        XCTAssertTrue(try writer.insertionConfirmed(id: success.id, now: now))
+        let uncertain = segment("Synthetic uncertainty")
+        try writer.enqueue(uncertain, listening: false, now: now)
+        destination.interruptAfterInsert = true
+        XCTAssertThrowsError(try QueueReader(sharedDirectory: shared, localDirectory: local).drain(into: destination, now: now))
+        XCTAssertFalse(try writer.insertionConfirmed(id: uncertain.id, now: now))
+        destination.interruptAfterInsert = false
+        XCTAssertEqual(try QueueReader(sharedDirectory: shared, localDirectory: local).drain(into: destination, now: now), 0)
+        XCTAssertEqual(destination.texts.count, 2)
+    }
+
     @MainActor func testCommitOrderingAndDeduplicationAcrossInstances() async throws {
         let (_, shared, local) = try directories()
         let writer = QueueWriter(sharedDirectory: shared)
@@ -172,5 +191,37 @@ final class KeyboardBridgeTests: XCTestCase {
         try Data("{\"version\":2,\"listening\":false,\"segments\":[]}".utf8).write(to: file)
         XCTAssertThrowsError(try reader.drain(into: destination, now: now))
         XCTAssertTrue(destination.texts.isEmpty)
+    }
+}
+
+extension KeyboardBridgeTests {
+    @MainActor func testNoSendRejectsCRLFAndControlCombiningClustersAtBothBoundaries() async throws {
+        let (_, shared, local) = try directories()
+        let writer = QueueWriter(sharedDirectory: shared)
+        try FileManager.default.createDirectory(at: shared, withIntermediateDirectories: true)
+        for text in ["\r\n", "a\r\nb", "\n\u{0301}", "a\u{0000}\u{0301}b"] {
+            XCTAssertThrowsError(try BridgePolicy.validate(text))
+            let unsafe = segment(text)
+            XCTAssertThrowsError(try writer.enqueue(unsafe, listening: false, now: now))
+            // Model a corrupted queue that bypassed the app's enqueue validation.
+            let bytes = try JSONSerialization.data(withJSONObject: ["version": 1, "listening": false,
+                "segments": [["id": unsafe.id.uuidString, "createdAt": now.timeIntervalSinceReferenceDate, "text": text]]])
+            try bytes.write(to: shared.appendingPathComponent(BridgePolicy.queueFilename))
+            let destination = Destination()
+            XCTAssertThrowsError(try QueueReader(sharedDirectory: shared, localDirectory: local).drain(into: destination, now: now))
+            XCTAssertTrue(destination.texts.isEmpty)
+        }
+    }
+}
+
+extension KeyboardBridgeTests {
+    func testDormantQueuePurgedFromDiskByRelaunchedWriter() throws {
+        let (_, shared, _) = try directories()
+        let fixture = segment("Synthetic dormant text")
+        try QueueWriter(sharedDirectory: shared).enqueue(fixture, listening: false, now: now)
+        let expired = now.addingTimeInterval(BridgePolicy.retention)
+        try QueueWriter(sharedDirectory: shared).maintain(listening: false, now: expired)
+        let bytes = try Data(contentsOf: shared.appendingPathComponent(BridgePolicy.queueFilename))
+        XCTAssertFalse(String(decoding: bytes, as: UTF8.self).contains(fixture.text))
     }
 }

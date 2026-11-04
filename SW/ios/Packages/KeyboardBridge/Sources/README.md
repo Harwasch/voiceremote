@@ -12,3 +12,5 @@ flowchart LR
 | [CommittedTextFallback.swift](CommittedTextFallback.swift) | Explicit main-app copy and share APIs | 🟡 Apple compile/device **unverified** |
 
 Start with the [package contract](../README.md); traces [REQ-16], [REQ-46–48], [REQ-56].
+
+QueueReader persists a separate shared success receipt only after insertText returns. QueueWriter reads that receipt for reconciliation; enqueue and the pre-call dedup ledger cannot imply delivery.

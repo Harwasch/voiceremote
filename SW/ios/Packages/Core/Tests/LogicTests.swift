@@ -20,10 +20,36 @@ private func device(_ id: String, role: DeviceInfoRole = .text_receiver, capabil
     DeviceInfo(account_id: account, device_id: id, display_name: id, platform: .ios, role: role, capabilities: capabilities)
 }
 private func focus(_ id: String, _ time: Int64, focused: Bool = true, account: String = "test") -> FocusReport {
-    FocusReport(account_id: account, device_id: id, text_field_focused: focused, last_activity_at: time)
+    FocusReport(account_id: account, device_id: id, text_field_focused: focused, last_activity_at: time, activity_age_ms: 0)
 }
 
 final class LogicTests: XCTestCase, @unchecked Sendable {
+    func testIdleHeartbeatCannotRefreshActivityDespiteClockSkew() throws {
+        let clock = TestFocusClock(100_000)
+        var picker = TargetPicker(accountID: "test", phoneID: "phone", clock: clock)
+        let bytes = Data(#"{"kind":"focus_report","account_id":"test","device_id":"desktop","text_field_focused":true,"last_activity_at":9007199254740991,"activity_age_ms":61000}"#.utf8)
+        try picker.update(ProtocolCodec.decode(FocusReport.self, from: bytes))
+        XCTAssertEqual(try picker.resolve(devices: [device("desktop")]).device_id, "phone")
+    }
+    func testAutoRanksActivityAgeAcrossTwoDevicesAndIdleHeartbeats() throws {
+        let clock = TestFocusClock(100_000)
+        var picker = TargetPicker(accountID: "test", phoneID: "phone", clock: clock)
+        func report(_ id: String, _ age: Int64, epoch: Int64) -> FocusReport {
+            FocusReport(account_id: "test", device_id: id, text_field_focused: true, last_activity_at: epoch, activity_age_ms: age)
+        }
+        try picker.update(report("a", 500, epoch: 0))
+        clock.set(100_100)
+        try picker.update(report("b", 30_000, epoch: 9_007_199_254_740_991))
+        XCTAssertEqual(try picker.resolve(devices: [device("a"), device("b")]).device_id, "a")
+        clock.set(160_100)
+        try picker.update(report("b", 90_000, epoch: 9_007_199_254_740_991))
+        XCTAssertEqual(try picker.resolve(devices: [device("a"), device("b")]).device_id, "phone")
+        // Legacy focus without an age is unknown; a heartbeat is not input.
+        try picker.update(FocusReport(account_id: "test", device_id: "a", text_field_focused: true, last_activity_at: 0))
+        XCTAssertEqual(try picker.resolve(devices: [device("a")]).device_id, "phone")
+        try picker.update(report("a", 0, epoch: 0)); picker.clear("a")
+        XCTAssertEqual(try picker.resolve(devices: [device("a")]).device_id, "phone")
+    }
     func testModeCaptureAndTargetAreIndependent() {
         var state = AppState()
         XCTAssertEqual(state.mode, .dictation); XCTAssertEqual(state.capture, .off)
@@ -137,7 +163,8 @@ final class LogicTests: XCTestCase, @unchecked Sendable {
         let entries = try await reopened.entries(now: 604_800_002)
         XCTAssertTrue(entries.isEmpty)
         let raw = try String(contentsOf: url, encoding: .utf8)
-        XCTAssertEqual(raw, "[]")
+        let envelope = try JSONDecoder().decode(AccountRecordEnvelope<[HistoryEntry]>.self, from: Data(raw.utf8))
+        XCTAssertEqual(envelope.accountID, "owner-local"); XCTAssertTrue(envelope.records.isEmpty)
         let permissions = try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? Int
         XCTAssertEqual(permissions, 0o600)
     }
@@ -462,5 +489,45 @@ extension LogicTests {
         XCTAssertEqual(trigger.capture, .off)
         trigger.release(at: 799)
         XCTAssertEqual(trigger.capture, .off)
+    }
+}
+
+extension LogicTests {
+    func testDictationSanitizesControlScalarsInCRLFAndCombiningClusters() {
+        let cases = [("\r\n", ""), ("a\r\nb", "a b"), ("\n\u{0301}", "\u{0301}"),
+                     ("a\n\u{0301}b", "a \u{0301}b"), ("a\u{0000}\u{0301}b", "a\u{0301}b")]
+        for (input, expected) in cases {
+            let clean = DictationPipeline.sanitize(input)
+            XCTAssertEqual(Array(clean.unicodeScalars), Array(expected.unicodeScalars))
+            XCTAssertFalse(clean.unicodeScalars.contains { $0.value <= 0x1f || (0x7f...0x9f).contains($0.value) || $0.value == 0x2028 || $0.value == 0x2029 })
+        }
+    }
+}
+
+final class InstallationAccountTests: XCTestCase {
+    func testRejectsSwitchAcrossRelaunch() throws {
+        let first = try InstallationAccount.resolve(requested: "synthetic-owner", pinned: nil)
+        XCTAssertEqual(try InstallationAccount.resolve(requested: "synthetic-owner", pinned: first), first)
+        XCTAssertThrowsError(try InstallationAccount.resolve(requested: "other", pinned: first))
+        XCTAssertThrowsError(try InstallationAccount.resolve(requested: nil, pinned: first))
+        XCTAssertEqual(try InstallationAccount.resolve(requested: nil, pinned: nil), "owner-local")
+    }
+}
+
+extension LogicTests {
+    func testPinnedHistoryEnvelopeMigratesLegacyAndRejectsMixedAccountsBeforeRetention() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let legacy = HistoryEntry(segmentID: "synthetic", targetID: "phone", text: "Invented", createdAt: 1)
+        try JSONEncoder().encode([legacy]).write(to: url)
+        let store = try FileHistoryStore(url: url, now: 1, accountID: "test")
+        let entries = try await store.entries(now: 1)
+        XCTAssertEqual(entries.first?.accountID, "test")
+        XCTAssertThrowsError(try FileHistoryStore(url: url, now: 1, accountID: "wrong"))
+        let wrong = HistoryEntry(segmentID: "wrong", targetID: "phone", text: "Invented", createdAt: 0, accountID: "wrong")
+        try JSONEncoder().encode([legacy, wrong]).write(to: url)
+        let before = try Data(contentsOf: url)
+        XCTAssertThrowsError(try FileHistoryStore(url: url, now: 604_800_001, accountID: "test"))
+        XCTAssertEqual(try Data(contentsOf: url), before)
     }
 }

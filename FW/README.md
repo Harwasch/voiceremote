@@ -8,7 +8,7 @@ flowchart LR
     UI --> Render[Lower-priority LVGL / DMA task]
     UI --> State[Pure protocol + state]
     Board --> Encoder[16 kHz mono / 20 ms Opus]
-    Encoder --> Queue[4 packets / MTU fragmentation]
+    Encoder --> Queue[8 packets / MTU fragmentation]
     Queue -->|Authenticated Audio notifications| Phone[Bench client → segment WAV]
     Encoder --> Local[Bounded flash writer: StopWatch only]
     Local -->|Resumable sync / confirmed delete| Phone
@@ -18,12 +18,12 @@ flowchart LR
 
 | Path | What it is | Status |
 |---|---|---|
-| [app/](app/) | Independent input/render tasks, partial redraws, timing log + bounded Opus transport | 🟡 Audio hardware unverified |
-| [boards/](boards/) | StopWatch ES8311/display driver and compiling C6 mic stub | 🟡 Audio hardware unverified |
+| [app/](app/) | Independent input/render tasks, partial redraws, timing log + bounded Opus transport | ✅ Audio tested on StopWatch; speech-to-text untested |
+| [boards/](boards/) | StopWatch ES8311/display driver and compiling C6 mic stub | ✅ StopWatch tested; C6 stub only |
 | [tests/](tests/) | Pure C logic and Python wire tests; no board/adapter | ✅ Host verified |
 | [tools/ui_preview/](tools/ui_preview/) | Real UI, native LVGL renderer, seventeen masked PNG fixtures | ✅ Host verified |
-| [tools/hil/](tools/hil/) | Unattended USB-hook + BLE offline/live regression | 🟡 Fake-tested; hardware unverified |
-| [tools/ble_client/](tools/ble_client/) | uv/Bleak Linux client, Numeric Comparison and segment WAV recorder | 🟡 Adapter unverified |
+| [tools/hil/](tools/hil/) | Unattended USB-hook + BLE offline/live regression | ✅ 12 of 12 steps on StopWatch; always reads USB logs, so it can't see unread-log stalls |
+| [tools/ble_client/](tools/ble_client/) | uv/Bleak Linux client, Numeric Comparison and segment WAV recorder | ✅ Used on hwgeekom |
 | [licences](../DOCS/licences/) | External MIT / BSD / Apache / OFL notices | ✅ Relocated |
 | `dependencies.lock.*` | Separate pinned dependency graph per board | ✅ Offline resolved |
 | [partitions-stopwatch.csv](partitions-stopwatch.csv) | StopWatch-only 16 MiB layout; preserves NVS/PHY/app | ✅ Generated table checked |
@@ -34,8 +34,8 @@ Start with [the contract](../SYS/protocol/remote-ble.md), then [hardware-fix evi
 Traces to [REQ-8], [REQ-18], [REQ-49–53]; no claim of hardware compliance.
 Firmware **0.3.0**, BLE contract **1.1**, advertised as **Voice Remote**. StopWatch reports required
 capabilities 0–5 and 7 (`0xbf`) and a 512-byte encoder output bound; both boards keep `hw_mic_cut=0`.
-Owner confirmed the existing controls, pairing and Orb on hardware; new audio is
-**unverified on hardware**. The C6 remains a build-only mic/display/control stub.
+Owner confirmed controls, pairing, Orb, screen speed and voice recordings on hardware;
+speech-to-text, full storage and abrupt power loss remain **unverified on hardware**. The C6 remains a build-only mic/display/control stub.
 
 Host tests, from the repository root (CMake, C compiler, Python ≥3.12):
 

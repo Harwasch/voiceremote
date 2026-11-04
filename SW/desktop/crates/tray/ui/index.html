@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Voice Receiver</title><link rel="stylesheet" href="style.css"><script src="app.js" defer></script></head>
+<body><main>
+<header><span class="mark">V</span><div><h1>Voice Receiver</h1><p>Your phone, this computer.</p></div></header>
+<section aria-label="Phone state"><div class="state"><strong id="mode">Mode unknown</strong><span id="capture">Phone disconnected</span></div><p>Destination: <strong id="destination">Waiting for phone</strong></p><button id="toggle">Stop dictation</button><button id="gesture">Hold / double-tap capture</button><p class="hint">Starting the phone microphone requires a tap on the phone.</p></section>
+<section><h2>Pair a phone</h2><form id="pair-form">
+<label>Account ID <input id="account" required maxlength="128" autocomplete="off" placeholder="Use the account shown on your phone"></label>
+<label>Computer name <input id="device" required maxlength="128" value="desktop" autocomplete="off"></label>
+<label>Role <select id="role"><option value="text_receiver">Text receiver</option><option value="agent">Agent</option><option value="both">Both</option></select></label>
+<label>Enable agent commands with owner allowlist (optional)<input id="agents-config" autocomplete="off" placeholder="Absolute path to owner agent TOML"></label><p class="hint">Choosing Agent or Both and supplying this file explicitly enables the listed projects and CLI sessions. Confirm agent access on the phone too. Installed app permissions still apply.</p>
+<details><summary>Remote network</summary><label>Relay origin (optional)<input id="relay" type="url" placeholder="https://relay.example.com" autocomplete="off"></label><p class="hint">LAN is preferred automatically; this relay is the fallback. Leave blank for LAN only.</p><label>Provisioning secret (if required)<input id="provisioning-secret" type="password" autocomplete="off"></label><p class="hint">Used once to create this pairing room; never saved.</p></details>
+<button id="pair" type="submit">Show pairing QR</button><button id="cancel" type="button" hidden>Cancel pairing</button></form>
+<div id="qr-panel" hidden><div id="qr"></div><label>Camera-free pairing invitation<textarea id="invitation" readonly rows="4"></textarea></label><p class="hint">Copy the complete invitation into the phone’s pairing field. It expires in two minutes and works once.</p><p id="expiry"></p></div>
+<form id="confirm-form" hidden><p>Compare these four words on both displays:</p><strong id="phrase" class="phrase"></strong><label>Enter all four words<input id="confirmation" required autocomplete="off" spellcheck="false"></label><button type="submit">Confirm this computer</button><p class="hint">Also confirm on your phone. Enrollment waits for both.</p></form>
+<p id="message" role="status" aria-live="polite"></p></section>
+<section><h2>Paired devices</h2><ul id="devices"></ul></section>
+<footer><label class="check"><input id="autostart" type="checkbox"> Start Voice Receiver when I sign in</label><p class="hint">Closing this window keeps the tray receiver running. Logs contain event names only.</p></footer>
+</main></body></html>

@@ -45,3 +45,5 @@ For unsupported fields, offer explicit history actions using `CommittedTextFallb
 main app, anchor its popover on iPad). Sharing leaves the app under user control; recipients
 and pasted copies control their own retention. App buttons/presentation are **unverified**
 and outside this task's ownership. The extension cannot appear in fields/apps that reject it.
+
+REQ-56 dormant retention: a relaunched writer removes expired queue text from the physical file before further use. [Regression](Tests/KeyboardBridgeTests.swift); extension/device behavior **unverified**.

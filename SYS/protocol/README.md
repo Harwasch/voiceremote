@@ -15,7 +15,10 @@ flowchart LR
 | File / folder | What it is | Status |
 |---|---|---|
 | [protocol.schema.json](protocol.schema.json) | Version 1 wire records, enums and discriminated unions | ✅ |
-| [remote-ble.md](remote-ble.md) | Binary remote ↔ iPhone BLE contract, UUIDs and hex examples; separate from JSON | 🟡 Draft; unimplemented / unverified |
+| [remote-ble.md](remote-ble.md) | Binary remote ↔ iPhone BLE contract, UUIDs and hex examples; separate from JSON | 🟡 Draft; StopWatch firmware built and tested, iPhone side unverified |
+| [audit-archive.md](audit-archive.md) | Encrypted audit append/read, protected recovery anchors, signed rollover/writer handoff, TTL, padded storage, fenced loss acceptance and content-free wake reconciliation | ✅ local synthetic tests; phone adapters unverified |
+| [relay-join.md](relay-join.md) | Room enrollment and exact cloud proxy challenge/header/query-normalization contract | ✅ synthetic relay tests; live client/vendor integration unverified |
+| [noise.md](noise.md) | Exact Noise suite, enrollment, relay auth, fragment framing and published ciphertext vectors | ✅ synthetic Rust tests; Swift/deployment unverified |
 | [wire-contract.md](wire-contract.md) | Boundaries, encoding rules and runtime obligations | ✅ contract; runtime integration unverified |
 | [vectors/](vectors/) | Shared synthetic valid and invalid fixtures | ✅ |
 | [../tools/](../tools/) / [../codegen/](../codegen/) | Model proposal contract / reproducible generator and checks | ✅ |
@@ -55,4 +58,12 @@ Trace: [REQ-59](../requirements.md#extensibility) (generated compatibility),
 [REQ-16, REQ-18](../requirements.md#dictation-delivery-and-targets) (insertion/focus),
 [REQ-22, REQ-24](../requirements.md#pairing-and-transport) (pairing/relay), and
 [REQ-28–36](../requirements.md#authorization-and-policy) (authority contracts).
-Only contract checks are proven here; component integration remains unverified.
+Contract checks and the desktop’s synthetic pairing/security tests are proven here; physical phone and deployed relay integration remain unverified.
+
+The [delivery exchange](wire-contract.md#dictation-target-and-capture-exchange) defines prepare/ready, durable outcome/query, sequenced, expiring stop-only remote capture control and clock-skew-safe activity age. Physical display/native acceptance remains **unverified**.
+
+Agent inventory/query/dispatch records authenticate through paired Noise. AgentDispatch carries exact session metadata, retained preview bytes and expiry; types are regenerated in Swift/Rust/TypeScript and covered by shared round-trip/rejection vectors.
+
+`TaskStatus` distinguishes dispatched CLI turns from verified success and optionally carries a 4096-character `app_reply`. Dispatch outcomes never release success-dependent work.
+
+The [audit archive contract](audit-archive.md) documents local account-envelope migration inside opaque encrypted blocks. Outer generated wire messages remain unchanged; legacy record bytes/hashes are preserved and round-trip tested in Policy.

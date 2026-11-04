@@ -2,7 +2,7 @@ import UIKit
 import CoreFoundation
 import KeyboardBridge
 
-final class KeyboardViewController: UIInputViewController, TextInserter {
+@MainActor final class KeyboardViewController: UIInputViewController, TextInserter {
     private let statusLine = UILabel()
     private var reader: QueueReader?
     private var observing = false
@@ -54,17 +54,13 @@ final class KeyboardViewController: UIInputViewController, TextInserter {
         active = true
         if !observing {
             CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(),
-                Unmanaged.passUnretained(self).toOpaque(), { _, observer, _, _, _ in
-                    guard let observer else { return }
-                    // Darwin callback payloads carry no text. UIKit work always runs on main.
-                    let controller = Unmanaged<KeyboardViewController>.fromOpaque(observer).takeUnretainedValue()
-                    Task { @MainActor [weak controller] in controller?.refresh() }
-                }, BridgePolicy.notificationName as CFString, nil, .deliverImmediately)
+                Unmanaged.passUnretained(self).toOpaque(), Self.notificationCallback(),
+                BridgePolicy.notificationName as CFString, nil, .deliverImmediately)
             observing = true
         }
         // Notifications are advisory and can be coalesced/lost while suspended.
         poll?.invalidate()
-        poll = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+        poll = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { @Sendable [weak self] _ in
             Task { @MainActor [weak self] in self?.refresh() }
         }
         refresh()
@@ -86,6 +82,16 @@ final class KeyboardViewController: UIInputViewController, TextInserter {
     deinit {
         CFNotificationCenterRemoveEveryObserver(CFNotificationCenterGetDarwinNotifyCenter(),
             Unmanaged.passUnretained(self).toOpaque())
+    }
+
+    // A C callback can arrive off-main; forming it in viewDidAppear must not
+    // inherit MainActor isolation and trap before it can schedule the UI work.
+    nonisolated private static func notificationCallback() -> CFNotificationCallback {
+        { _, observer, _, _, _ in
+            guard let observer else { return }
+            let controller = Unmanaged<KeyboardViewController>.fromOpaque(observer).takeUnretainedValue()
+            Task { @MainActor [weak controller] in controller?.refresh() }
+        }
     }
 
     private func refresh() {
