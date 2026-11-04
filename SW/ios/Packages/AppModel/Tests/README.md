@@ -10,6 +10,7 @@ flowchart LR
 
 | File | What | Status |
 |---|---|---|
+| [PresentationTests.swift](PresentationTests.swift) | Every tool/enum/category label, Home state matrix, microphone preview and real settings persistence for consent on/off | ✅ Portable synthetic tests; native interaction **unverified** |
 | [CrossReviewTests.swift](CrossReviewTests.swift) | Background-only reconciliation, REC restart gating, target/PTT ordering, held-PTT snapshot acknowledgement/wrap, trigger source pinning, presentation failure, empty-journal migration and Apple source wiring | ✅ Portable behavior/source checks; Apple SDK **unverified** |
 | [PhoneAdaptersTests.swift](PhoneAdaptersTests.swift) | AEAD nonce/AAD/key mutation, durable read-back loss, denied/accepted/crash-resumed biometric recovery, content-free wakes, BLE tick wrap/snapshots/source loss and remote tier 3 refusal | ✅ Portable synthetic boundaries |
 | [SignedPhoneTransportTests.swift](SignedPhoneTransportTests.swift) | Real Ed25519 proofs over exact production adapter bytes, uncertain append retry with identical ciphertext, read-back/typed writer refusal and APNs registration metadata | ✅ In-memory transport; service **unverified** |

@@ -12,6 +12,7 @@ flowchart LR
 
 | File | What | Status |
 |---|---|---|
+| [Presentation.swift](Presentation.swift) | Plain tool sentences, enum/status labels, planned microphone labels and Home control visibility; no authority changes | ✅ Portable tests; Apple UI **unverified** |
 | [AgentControl.swift](AgentControl.swift) | Paired inventory/identity, live Router targets, retained preview dispatch, status/query/cancel and revocation | ✅ Synthetic tests; Apple UI unverified |
 | [PhoneWake.swift](PhoneWake.swift) | Fixed-hint validation; APNs token registration on the existing authenticated relay socket; retained intent for reconnect | ✅ Synthetic signed-byte checks; APNs **unverified** |
 | [PhoneArchive.swift](PhoneArchive.swift), [ArchiveHTTP.swift](ArchiveHTTP.swift) | Real AES-GCM, exact member-signed HTTP, typed refusal mapping, bounded/no-redirect reads, biometric restore adapter | ✅ Portable crypto/transport/recovery; Apple HTTP **unverified** |

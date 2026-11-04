@@ -13,7 +13,9 @@ flowchart LR
 
 | Path | What | Status |
 |---|---|---|
-| [VoiceRemoteApp.swift](VoiceRemoteApp.swift) | Controls, cloud indicator, history Send/Copy/Share, approval | 🟡 Apple/device **unverified** |
+| [VoiceRemoteApp.swift](VoiceRemoteApp.swift) | Transcript-first Home, native glass talk/capture controls, five tabs, history actions and exact approval | 🟡 Apple/device **unverified** |
+| [AgentsView.swift](AgentsView.swift) | Tasks, sessions and time-limited permissions; existing Policy/model operations | 🟡 New Apple UI **unverified** |
+| [InfoSheet.swift](InfoSheet.swift) | Native scrollable explanatory sheets; system toolbar and dismissal | 🟡 Apple UI **unverified** |
 | [UIDemo.swift](UIDemo.swift) | DEBUG-only synthetic capture/STT/Brain, pairing, transport and biometric adapters; real AppModel/Policy/router | ✅ Linux adapter probe; Apple UI **unverified** |
 | [AppRuntime.swift](AppRuntime.swift) | Protected storage, signed cloud transports, deferred STT | 🟡 Apple/device **unverified** |
 | [PhoneWakeDelegate.swift](PhoneWakeDelegate.swift), [Push.entitlements](Push.entitlements) | Signing-gated APNs registration, fixed-hint background handler, bounded/coalesced reconciliation and best-effort daily archive scheduler | 🟡 Apple/APNs **unverified** |
@@ -89,3 +91,18 @@ arguments. [UITests](../UITests/README.md) documents the screenshot matrix and
 permission/state fault flags; fakes do not grant authority or replace Policy.
 The recorder marks demo runs synthetic. OS prompts, actual audit restoration and hardware remain
 **unverified**. No synthetic data enters production identity/history storage.
+
+Native iOS 26 revamp: Home, Devices, History, Suggestions and Agents are the five
+tabs; Settings is the Home gear. Home keeps transcript content off glass, groups
+capture/mode/destination controls in a native glass container, and morphs the
+primary talk state with motion disabled under Reduce Motion. Native bars and
+button styles adapt to system preferences; the custom Hold fallback is opaque
+under Reduce Transparency. An emergency toolbar Stop stays reachable while a
+long transcript scrolls. Off cancels preparation and failed/interrupted states.
+
+Pairing is a sheet with invitation and four-word confirmation steps; account/phone
+IDs are in Phone details. History has one primary action and a More menu. Exact
+approval still calls the real Policy/Face ID path. Plain labels and tool sentences
+come from [portable formatters](../Packages/AppModel/Sources/Presentation.swift).
+[Research, source URLs and audit triage](../../../AI/SW/2026-11-04-liquid-glass-research.md).
+New SDK compilation, glass, haptics, layout and accessibility results are **unverified**.

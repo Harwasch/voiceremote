@@ -49,7 +49,7 @@ The coordinator pushes an `ios-ci-*` tag or dispatches the workflow. Only `ios-c
 `ios-v*` tags and manual dispatch run it; no PR, branch, schedule or automatic macOS build.
 Each macOS job has a 30-minute timeout and uses at most four build jobs. XcodeGen is installed
 with Homebrew; generated projects, Info plists and placeholder icon catalog are ignored.
-`Configuration/generate_icon.py` supplies an opaque waveform icon for archive validation.
+`Configuration/generate_icon.py` supplies original light/dark/tinted microphone icons.
 The workflow discovers an available iPhone on iOS 26+ and runs `xcodebuild test ... CODE_SIGNING_ALLOWED=NO`.
 No Apple account is needed for that job. Test results are retained for seven days.
 
@@ -177,3 +177,10 @@ Cross-review: relay 403 suspends without deleting credentials; cleanup always at
 Push defaults off; an owner-signed profile and opt-in entitlement/environment are required. Background verification is best effort; foreground and reconnect also check. New authority after irrecoverable loss needs an executor fence and is unavailable here. The shared bench schema has no remote enum: named board exports use `voiceremote-named-source-benchmark-v1`, not a false phone-mic cohort.
 
 Cross-review: push registration shares the live relay socket, background-only resume preserves biometric-sheet approvals, remote controls use control-event acknowledgements, and source selection pins before async setup with a visible active microphone. [Portable regressions](Packages/AppModel/Tests/CrossReviewTests.swift) cover REC/target/HOLD, upgrade and presentation boundaries; [socket tests](Packages/AppModel/Tests/SignedPhoneTransportTests.swift) enforce replacement/drain behavior. Apple SDK/device checks remain **unverified**.
+
+The iOS 26 interface uses five native tabs (Home, Devices, History, Suggestions,
+Agents) and a Home settings gear. Home is transcript-first with system glass
+controls; pairing and approval are focused sheets. [Design rules and audit triage](../../AI/SW/2026-11-04-liquid-glass-research.md).
+The coordinator’s first run compiled/launched and exported 73 screenshots before
+a consent-toggle test failure. The updated switch interaction, layout and glass
+APIs require the next run; new Apple SDK/UI/accessibility acceptance **unverified**.

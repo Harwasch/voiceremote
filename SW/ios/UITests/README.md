@@ -29,9 +29,8 @@ No new product requirements or device-performance claims.
 | Suggestions / Policy | Connected/offline sessions, real scoped grant/revoke, tier 3 exact preview, fake biometric success/refusal, task delivery/completion review/cancel |
 | Settings / recorder | Cloud consent off/on/off; withdrawal stops capture; synthetic-only recorder prompt and completion |
 
-Screenshots and audits run for every visited screen in light/dark. The five tabs,
-destination picker and approval also run at `.accessibility5`; the small debug
-instrumentation panel keeps its own fixed size. The audit uses Apple's
+Screenshots and audits run for every visited screen in light/dark. The five tabs plus Settings,
+destination picker and approval also run at `.accessibility5`; the debug instrumentation is behind a small disclosure and scales normally. The audit uses Apple's
 [`performAccessibilityAudit`](https://developer.apple.com/documentation/xcuiautomation/xcuiapplication/performaccessibilityaudit(for:_:))
 with **report-only** issue handling: every issue is retained, no finding is waived,
 and no accessibility pass is claimed. Audit infrastructure errors fail the test.
@@ -48,3 +47,21 @@ Fault arguments (all require `--ui-demo` and DEBUG): `--ui-first-run`,
 Presentation: `--ui-dark`, `--ui-largest`. Slow adapters await cancellation; they
 cannot emit late text after Stop. No network, BLE or LocalAuthentication prompt
 is required for these synthetic paths.
+
+Revamp coverage: native segmented Capture/Mode; one primary control per state;
+Home gear → Settings; separate Agents tab; invitation/confirmation pairing sheet;
+keyboard dismissal and visible four words; History More menu; Phone details and
+help sheets. All toggles under test use the native child switch or its trailing
+edge, with value assertions. Consent also asserts real/saved model state; its
+binding is unchanged. OFF cancels every state; Stop/Finish are visible only for
+active recording/finishing. An emergency toolbar Stop remains reachable.
+
+`testTalkStateGallery` covers holding, live transcript, continuous, finishing,
+Off and Hold-ready in light/dark/default/AX5. Holding preview uses the DEBUG
+`--ui-holding-preview` argument through the same phone press handler; the real
+hold gesture is tested separately. `--ui-reduce-transparency` previews the custom
+Hold control’s opaque fallback; it does **not** set the OS preference (read-only
+SwiftUI environment). Native bar preference handling, VoiceOver and motion/haptics
+remain **unverified**. Normal demo launches no longer pin Dynamic Type. The forced
+AX5 fixture can still produce audit “unsupported font size” findings; no findings
+are suppressed. [First-run audit triage](../../../AI/SW/2026-11-04-liquid-glass-research.md#first-run-audit-triage).

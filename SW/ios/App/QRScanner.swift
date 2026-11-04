@@ -30,7 +30,13 @@ struct QRScanner: UIViewControllerRepresentable {
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
-        let cancel = UIButton(type: .system); cancel.setTitle("Cancel scan", for: .normal)
+        let cancel = UIButton(type: .system)
+        var configuration = UIButton.Configuration.glass()
+        configuration.title = "Cancel scan"
+        configuration.contentInsets = NSDirectionalEdgeInsets(top: 12, leading: 24, bottom: 12, trailing: 24)
+        cancel.configuration = configuration
+        cancel.titleLabel?.font = UIFont.preferredFont(forTextStyle: .body)
+        cancel.titleLabel?.adjustsFontForContentSizeCategory = true
         cancel.addTarget(self, action: #selector(cancelScan), for: .touchUpInside)
         cancel.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(cancel)
@@ -40,8 +46,10 @@ struct QRScanner: UIViewControllerRepresentable {
             if demoDenied {
                 let label = UILabel()
                 label.text = "Camera access denied"; label.textAlignment = .center
+                label.font = UIFont.preferredFont(forTextStyle: .title2)
+                label.adjustsFontForContentSizeCategory = true; label.numberOfLines = 0
                 label.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(label)
-                NSLayoutConstraint.activate([label.centerXAnchor.constraint(equalTo: view.centerXAnchor), label.centerYAnchor.constraint(equalTo: view.centerYAnchor)])
+                NSLayoutConstraint.activate([label.centerXAnchor.constraint(equalTo: view.centerXAnchor), label.centerYAnchor.constraint(equalTo: view.centerYAnchor), label.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 24), label.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -24)])
                 return
             }
             #endif

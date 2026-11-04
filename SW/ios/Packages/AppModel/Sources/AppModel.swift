@@ -68,7 +68,7 @@ public struct ApprovalCard: Identifiable, Sendable {
     public var routingRules: RoutingRules? = nil
     public var routeDescription: String? {
         guard let route else { return nil }
-        return (route.isCloud ? "Cloud fallback · new execution\n" : "") + (route.available ? "Connected\n" : "Offline — this task will wait\n") + "\(route.session.provider) / \(route.session.host) / \(route.session.workspace) / \(route.session.providerSessionID) / \(route.session.capabilityProfile)\n" + (route.session.executionWorkspace ?? "")
+        return (route.isCloud ? "Cloud fallback · new execution\n" : "") + (route.available ? "Connected\n" : "Offline — this task will wait\n") + "\(route.session.provider) / \(route.session.host) / \(route.session.workspace) / \(route.session.providerSessionID) / \(AppPresentation.profile(route.session.capabilityProfile))\n" + (route.session.executionWorkspace ?? "")
     }
     public var suggestionID: UUID? = nil
     public var suggestionRevision: Int = 0

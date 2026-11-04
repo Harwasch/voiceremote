@@ -32,22 +32,60 @@ import UIKit
         XCTFail("Element did not become visible: \(element)")
     }
     private func tap(_ element: XCUIElement) { visible(element); element.tap() }
-    private func tab(_ name: String) { app.tabBars.buttons[name].tap() }
+    private func tab(_ name: String) {
+        if name == "Settings" {
+            tab("Home"); tap(app.buttons["settings-link"])
+            XCTAssertTrue(app.navigationBars["Settings"].waitForExistence(timeout: 5)); return
+        }
+        app.tabBars.buttons[name].tap()
+        if name == "Home" {
+            for _ in 0..<4 where !app.segmentedControls["capture-picker"].exists && !app.buttons["permission-continue"].exists && !app.buttons["permission-allow"].exists {
+                app.navigationBars.buttons.firstMatch.tap()
+            }
+        }
+    }
+    private func setSwitch(_ identifier: String, on: Bool) {
+        let control = app.switches.matching(identifier: identifier).firstMatch
+        visible(control)
+        let desired = on ? "1" : "0"
+        if control.value as? String == desired { return }
+        let native = control.switches.firstMatch
+        if native.exists && native.isHittable { native.tap() }
+        else { control.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 0.5)).withOffset(CGVector(dx: -26, dy: 0)).tap() }
+        let changed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", desired), object: control)
+        XCTAssertEqual(XCTWaiter.wait(for: [changed], timeout: 5), .completed)
+    }
+    private func assertSavedConsent(_ on: Bool) {
+        tap(app.buttons["settings-demo-details"])
+        let value = on ? "On" : "Off"
+        XCTAssertTrue(app.staticTexts["consent-state"].wait(for: \.label, toEqual: "Cloud processing: " + value + "; saved: " + value, timeout: 5))
+        tap(app.buttons["settings-demo-details"]); top()
+    }
+    private func assertCaptureOff() {
+        XCTAssertEqual(app.segmentedControls["capture-picker"].buttons["Off"].value as? String, "1")
+    }
+    private func diagnostic(_ id: String) -> String {
+        tap(app.buttons["demo-disclosure"])
+        let value = app.staticTexts[id].label
+        tap(app.buttons["demo-disclosure"])
+        return value
+    }
     private func top() { for _ in 0..<5 { app.swipeDown() } }
     private func state(_ value: String) {
-        let element = app.staticTexts["demo-state"]
+        let element = app.staticTexts["listening-state"]
         if !element.exists { top() }
-        let predicate = NSPredicate(format: "label BEGINSWITH %@", value + " / ")
+        let labels = ["idle": "Ready", "preparing": "Getting ready", "listening": "Listening", "finishing": "Finishing", "interrupted": "Interrupted", "failed": "Recording unavailable"]
+        let predicate = NSPredicate(format: "label == %@", labels[value] ?? value)
         expectation(for: predicate, evaluatedWith: element)
         waitForExpectations(timeout: 12)
     }
     private func capture(_ value: String) {
-        tap(app.buttons["capture-picker"])
-        tap(app.buttons.matching(identifier: value).firstMatch)
+        let labels = ["OFF": "Off", "HOLD": "Hold", "CONTINUOUS": "Continuous"]
+        let segment = app.segmentedControls["capture-picker"].buttons[labels[value] ?? value]
+        tap(segment)
     }
     private func mode(_ value: String) {
-        tap(app.buttons["mode-picker"])
-        tap(app.buttons.matching(identifier: value).firstMatch)
+        tap(app.segmentedControls["mode-picker"].buttons[value])
     }
     private func shot(_ screen: String, audit: Bool = true) throws {
         let label = "\(appearance)__\(size)__\(screen)"
@@ -74,14 +112,17 @@ import UIKit
     private func gallery(dark: Bool) throws {
         launch(["--ui-first-run"], dark: dark)
         XCTAssertTrue(app.buttons["permission-continue"].exists)
-        XCTAssertFalse(app.buttons["hold-to-talk"].isEnabled)
+        XCTAssertFalse(app.buttons["hold-to-talk"].exists)
         try shot("first-run")
         tap(app.buttons["permission-continue"])
-        XCTAssertTrue(app.buttons["permission-continue"].waitForNonExistence(timeout: 5))
+        try shot("permission-explanation")
+        tap(app.buttons["permission-allow"])
+        XCTAssertTrue(app.buttons["permission-allow"].waitForNonExistence(timeout: 5))
         try shot("first-run-consented")
 
         launch(dark: dark)
         state("idle"); try shot("home")
+        tap(app.buttons["About recording"]); try shot("recording-info"); tap(app.buttons["Done"])
         tap(app.buttons["destination-link"])
         XCTAssertTrue(app.buttons["target-auto"].exists)
         try shot("target-picker")
@@ -100,7 +141,7 @@ import UIKit
         // destination/empty-text invariant before emitting its first frame.
         hold.press(forDuration: 1.0)
         state("idle")
-        XCTAssertEqual(app.staticTexts["demo-order"].label, "Destination before capture: true")
+        XCTAssertEqual(diagnostic("demo-order"), "Destination before capture: Yes")
         tab("History")
         XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "synthetic workspace note")).firstMatch.waitForExistence(timeout: 5))
         try shot("history-after-hold")
@@ -108,6 +149,8 @@ import UIKit
         XCTAssertTrue(app.buttons["send-synthetic-held"].wait(for: \.label, toEqual: "Resend after checking computer", timeout: 5))
         try shot("history-held-sent-unconfirmed")
         XCTAssertTrue(app.staticTexts["history-synthetic-unconfirmed"].exists)
+        tap(app.buttons["history-more-synthetic-held"]); try shot("history-actions")
+        tap(app.buttons["Copy"])
 
         tab("Home"); top()
         mode("AI Control"); capture("CONTINUOUS"); state("listening")
@@ -115,21 +158,26 @@ import UIKit
         XCTAssertTrue(app.staticTexts["partial-text"].waitForExistence(timeout: 5))
         try shot("listening")
         tap(app.buttons["finish-utterance"]); state("idle")
+        XCTAssertTrue(app.buttons["start-continuous"].exists)
         try shot("utterance-finished")
-        tap(app.buttons["stop-immediately"]); state("idle")
+        capture("Off"); state("idle")
+        XCTAssertFalse(app.buttons["stop-immediately"].exists)
         XCTAssertFalse(app.staticTexts["partial-text"].exists)
 
         tab("Suggestions")
         try shot("suggestions")
+        XCTAssertFalse(app.staticTexts["suggestion-summary"].label.contains("delegateTaskTool"))
+        tab("Agents")
         visible(app.staticTexts["Offline — commands held"])
         try shot("agent-sessions")
-        top()
+        tab("Suggestions")
         tap(app.buttons.matching(identifier: "review-suggestion").firstMatch)
         XCTAssertTrue(app.staticTexts["approval-exact-action"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Face ID or iPhone passcode required"].exists)
         try shot("tier3-approval")
         tap(app.buttons["approve-action"])
         XCTAssertTrue(app.staticTexts["approval-exact-action"].waitForNonExistence(timeout: 8))
+        tab("Agents")
         let task = app.staticTexts.matching(identifier: "task-status").firstMatch
         visible(task); XCTAssertTrue(task.exists)
         try shot("agent-task-dispatched")
@@ -139,6 +187,7 @@ import UIKit
         tap(app.buttons["Keep waiting"])
         tap(app.buttons.matching(identifier: "cancel-task").firstMatch)
         XCTAssertTrue(app.buttons.matching(identifier: "cancel-task").firstMatch.wait(for: \.label, toEqual: "Retry cancellation", timeout: 5))
+        XCTAssertTrue(app.staticTexts["task-status"].label.contains("Cancelling"))
         try shot("agent-cancellation-pending")
         visible(app.buttons.matching(identifier: "Revoke permission").firstMatch)
         try shot("scoped-grants")
@@ -146,6 +195,10 @@ import UIKit
         XCTAssertFalse(app.buttons["Revoke permission"].exists)
 
         tab("Devices"); top(); try shot("devices")
+        tap(app.buttons["About devices"]); try shot("devices-info"); tap(app.buttons["Done"])
+        tap(app.buttons["phone-details"]); try shot("phone-details")
+        app.navigationBars.buttons.firstMatch.tap()
+        tap(app.buttons["pair-computer"]); try shot("pairing-invitation")
         let invitation = app.descendants(matching: .any).matching(identifier: "pairing-invitation").firstMatch
         tap(invitation)
         UIPasteboard.general.string = "voiceremote://synthetic-invitation"
@@ -153,11 +206,11 @@ import UIKit
         let paste = app.menuItems["Paste"]
         if paste.waitForExistence(timeout: 2) { paste.tap() } else { app.buttons.matching(identifier: "Paste").firstMatch.tap() }
         if app.alerts.firstMatch.waitForExistence(timeout: 1) { app.alerts.buttons["Allow Paste"].tap() }
-        // Hide the keyboard without triggering Connect implicitly.
-        app.swipeUp()
         tap(app.buttons["Connect"])
         XCTAssertEqual(app.staticTexts["pairing-phrase"].waitForExistence(timeout: 5), true)
         XCTAssertEqual(app.staticTexts["pairing-phrase"].label, "maple river copper orbit")
+        XCTAssertEqual(app.keyboards.count, 0)
+        XCTAssertTrue(app.staticTexts["pairing-phrase"].isHittable)
         XCTAssertFalse(app.staticTexts["device-synthetic-new"].exists)
         try shot("pairing-four-words")
         tap(app.buttons["The words match on both screens"])
@@ -168,10 +221,12 @@ import UIKit
         tap(app.buttons.matching(identifier: "Revoke").firstMatch)
         XCTAssertTrue(app.staticTexts["device-synthetic-new"].waitForNonExistence(timeout: 5))
         try shot("pairing-revoked")
+        tap(app.buttons["pair-computer"])
         tap(app.buttons["Scan QR code"])
         XCTAssertTrue(app.staticTexts["Camera access denied"].waitForExistence(timeout: 5))
         try shot("camera-denied")
         tap(app.buttons["Cancel scan"])
+        tap(app.buttons["pairing-cancel"])
         visible(app.staticTexts["remote-status"])
         try shot("remote-bluetooth-denied")
 
@@ -179,21 +234,25 @@ import UIKit
         let consent = app.switches["cloud-consent"]
         XCTAssertEqual(consent.value as? String, "0")
         try shot("settings")
-        consent.tap(); XCTAssertEqual(consent.value as? String, "1")
+        tap(app.buttons["Privacy and help"]); try shot("privacy-info"); tap(app.buttons["Done"])
+        setSwitch("cloud-consent", on: true)
+        assertSavedConsent(true)
         try shot("settings-cloud-consented")
         tab("Home"); top(); capture("CONTINUOUS"); state("listening")
         tab("Settings"); top()
-        consent.tap(); XCTAssertEqual(consent.value as? String, "0")
+        setSwitch("cloud-consent", on: false)
+        assertSavedConsent(false)
         tab("Home"); top(); state("idle")
-        XCTAssertTrue(app.staticTexts["demo-state"].label.hasSuffix("off"))
+        assertCaptureOff()
         tab("Settings")
         tap(app.buttons["benchmark-recorder"])
         XCTAssertTrue(app.navigationBars["Benchmark recorder"].waitForExistence(timeout: 5))
         try shot("benchmark-recorder")
+        tap(app.buttons["About recorder"]); try shot("recorder-info"); tap(app.buttons["Done"])
         tap(app.buttons["Record prompt"])
-        XCTAssertTrue(app.buttons["Finish phrase"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Finish"].waitForExistence(timeout: 5))
         try shot("benchmark-recording")
-        tap(app.buttons["Finish phrase"]); top()
+        tap(app.buttons["Finish"]); top()
         XCTAssertTrue(app.staticTexts["1 / 1 prompts completed"].waitForExistence(timeout: 8))
         try shot("benchmark-completed")
 
@@ -202,15 +261,15 @@ import UIKit
         tap(app.buttons["approve-action"])
         XCTAssertTrue(app.staticTexts["Approval denied or expired. Nothing was started."].waitForExistence(timeout: 5))
         try shot("biometric-refused")
-        tap(app.buttons["Deny"]); tab("Home")
-        XCTAssertEqual(app.staticTexts["demo-tasks"].label, "Tasks: 0")
+        tap(app.buttons["approval-deny"]); tab("Home")
+        XCTAssertEqual(diagnostic("demo-tasks"), "Tasks: 0")
 
         launch(["--ui-permission-denied"], dark: dark)
-        tap(app.buttons["permission-continue"])
+        tap(app.buttons["permission-continue"]); tap(app.buttons["permission-allow"])
         XCTAssertTrue(app.alerts["Voice Remote"].waitForExistence(timeout: 5))
         try shot("microphone-speech-denied")
         app.alerts.buttons["OK"].tap()
-        XCTAssertFalse(app.buttons["hold-to-talk"].isEnabled)
+        XCTAssertFalse(app.buttons["hold-to-talk"].exists)
 
         launch(["--ui-storage-denied"], dark: dark)
         XCTAssertFalse(app.tabBars.buttons["Home"].exists)
@@ -228,8 +287,10 @@ import UIKit
                 capture("CONTINUOUS")
                 if expected == "finishing" { state("listening"); tap(app.buttons["finish-utterance"]) }
                 state(expected); try shot("stop-before-" + expected)
-                tap(app.buttons["stop-immediately"]); state("idle")
-                XCTAssertTrue(app.staticTexts["demo-state"].label.hasSuffix("off"))
+                if expected == "listening" || expected == "finishing" { tap(app.buttons["emergency-stop"]) }
+                else { XCTAssertFalse(app.buttons["stop-immediately"].exists); capture("Off") }
+                state("idle")
+                assertCaptureOff()
                 XCTAssertFalse(app.staticTexts["partial-text"].exists)
                 try shot("stop-after-" + expected)
                 tab("History")
@@ -238,15 +299,61 @@ import UIKit
             }
             launch(dark: dark)
             for value in ["OFF", "HOLD", "CONTINUOUS"] {
-                capture(value); tap(app.buttons["stop-immediately"]); state("idle")
-                XCTAssertTrue(app.staticTexts["demo-state"].label.hasSuffix("off"))
+                capture(value); capture("Off"); state("idle")
+                assertCaptureOff()
             }
         }
     }
 
+    func testTalkStateGallery() throws {
+        for dark in [false, true] {
+            for largest in [false, true] {
+                launch(["--ui-holding-preview"], dark: dark, largest: largest)
+                state("listening")
+                visible(app.buttons["hold-to-talk"])
+                XCTAssertTrue(app.buttons["hold-to-talk"].label.contains("Release to finish"))
+                try shot("holding", audit: !largest)
+                top(); visible(app.staticTexts["partial-text"]); try shot("holding-live-transcript", audit: !largest)
+                tap(app.buttons["emergency-stop"]); state("idle")
+                try shot("capture-off", audit: !largest)
+                tap(app.buttons["enable-capture"])
+                XCTAssertTrue(app.buttons["hold-to-talk"].exists)
+                try shot("hold-ready", audit: !largest)
+                launch(["--ui-slow-finish"], dark: dark, largest: largest)
+                capture("Continuous"); state("listening")
+                XCTAssertFalse(app.buttons["hold-to-talk"].exists)
+                try shot("continuous-live-transcript", audit: !largest)
+                tap(app.buttons["finish-utterance"]); state("finishing")
+                try shot("finishing", audit: !largest)
+                tap(app.buttons["emergency-stop"]); state("idle")
+            }
+            launch(["--ui-holding-preview", "--ui-reduce-transparency"], dark: dark)
+            state("listening"); visible(app.buttons["hold-to-talk"])
+            try shot("reduce-transparency-preview")
+            tap(app.buttons["emergency-stop"])
+        }
+    }
+
+    func testToggleControls() throws {
+        launch()
+        tab("Suggestions"); setSwitch("mute-suggestions", on: true); setSwitch("mute-suggestions", on: false)
+        tab("Settings")
+        setSwitch("maximum-accuracy", on: true); setSwitch("maximum-accuracy", on: false)
+        setSwitch("comparison-tools", on: false); setSwitch("comparison-tools", on: true)
+        setSwitch("cloud-consent", on: true); assertSavedConsent(true)
+        setSwitch("cloud-consent", on: false); assertSavedConsent(false)
+        tab("Agents")
+        for id in ["cloud-fallback", "independent-task", "wake-permission"] {
+            setSwitch(id, on: true); setSwitch(id, on: false)
+        }
+        tab("Settings"); tap(app.buttons["benchmark-recorder"])
+        setSwitch("keep-benchmark-audio", on: true); setSwitch("keep-benchmark-audio", on: false)
+    }
+
     func testLargestDynamicTypeMainScreens() throws {
         launch(largest: true)
-        for name in ["Home", "Devices", "History", "Suggestions", "Settings"] {
+        XCTAssertEqual(app.tabBars.buttons.count, 5)
+        for name in ["Home", "Devices", "History", "Suggestions", "Agents", "Settings"] {
             tab(name); try shot("main-" + name.lowercased())
         }
         tab("Home"); tap(app.buttons["destination-link"]); try shot("target-picker")

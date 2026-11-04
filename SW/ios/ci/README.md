@@ -8,6 +8,7 @@ flowchart LR
 |---|---|---|
 | [export_screenshots.py](export_screenshots.py) | xcresulttool attachment export → labelled PNGs, index.json and every accessibility finding; test_ui_gallery.py covers naming, collisions, malformed input, release isolation and job configuration | ✅ Linux fixture tests; Xcode export **unverified** |
 | [check_demo_adapters.py](check_demo_adapters.py) | Reproducible Linux smoke probe of exact app demo adapters through real AppModel/Policy/router; run after AppModel tests | ✅ Local synthetic probe; Apple UI **unverified** |
+| [test_icon.py](test_icon.py) | PNG headers/pixels/transparency, grayscale tinted appearance and native catalog references | ✅ Linux fixture tests; Apple icon rendering **unverified** |
 | [checks.py](checks.py) | iOS/desktop version guards, accepted-main ancestry check and compatible available iPhone selection; test_checks.py exercises rejection and selection. | ✅ Linux tested |
 
 Start with the linked file; see the [iOS map](../README.md) for design and validation.

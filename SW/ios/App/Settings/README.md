@@ -30,7 +30,7 @@ Privacy/consent: Settings shows the fixed installation account, participant/clou
 
 Named BLE sources export `voiceremote-named-source-benchmark-v1` with the board name and quality estimates; the comparison omits the shared schema's phone-only source label. Choose Remote in Devices and use REC or a fresh qualified HOLD before starting the recorder. Mixed named sources require a new cohort. Source scoring, first-word loss and board performance remain **unverified** (REQ-13/15/51/53).
 
-Active Settings shows Argmax unavailable until a licensed host adapter is loaded, and persists local/cloud provider fallback orders. Suggestions owns selected/default sessions, per-action cloud independence and exact-route reapproval. Apple UI execution remains **unverified**.
+Active Settings shows Argmax unavailable until a licensed host adapter is loaded, and persists local/cloud provider fallback orders. Agents owns selected/default sessions, per-action cloud independence and exact-route reapproval. Apple UI execution remains **unverified**.
 
 Provider-order TextFields edit independent raw drafts, so typing a trailing comma does not normalize it away. Parsed settings update separately; Apple UI execution remains **unverified**.
 
@@ -38,3 +38,11 @@ Provider-order TextFields edit independent raw drafts, so typing a trailing comm
 benchmark recorder with synthetic capture/engines; exported demo runs are marked
 synthetic. Consent/recorder Apple UI and accessibility findings remain **unverified**
 until the coordinator's `ios-ui-*` run.
+
+Settings is reached from Home’s gear. Privacy and explanatory text live in a native
+info sheet; the recorder has separate help. The UI suite taps each native switch
+(or its trailing control edge), asserts its value, and checks both the actual
+cloud setting and the runtime’s successfully saved value through a debug-only
+disclosure. Portable tests independently reopen the real settings file for both
+consent choices. The new iOS 26 interaction and saved-value UI assertions remain
+**unverified** until CI; no alternate consent-setting path was added.

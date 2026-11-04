@@ -32,6 +32,7 @@ import VoiceRemoteProtocol
     }
     #if DEBUG
     var demo: UIDemo?
+    var savedCloudConsentForDemo: Bool? { savedSettings?.cloudConsent }
     /// Fresh temporary storage and adapter fakes; never opens production identity or audit data.
     private init(demo: UIDemo) throws {
         self.demo = demo
@@ -105,9 +106,14 @@ import VoiceRemoteProtocol
     private var wakeReconciliation: Task<Void, Error>?
     var acceptingRemoteControl = true
     private var sourceSelectionEpoch = UUID()
-    var activeCaptureSource = "None"
+    var activeCaptureSource = "iPhone microphone"
     var activeSourceDisplay: String {
-        model.isRecording || model.listening == .preparing || recorder.recording ? activeCaptureSource : "None"
+        if model.isRecording || model.listening == .finishing || recorder.recording { return activeCaptureSource }
+        #if DEBUG
+        if demo != nil { return "Synthetic microphone" }
+        #endif
+        let phone = AVAudioSession.sharedInstance().currentRoute.inputs.first?.portName ?? "Phone or connected headset"
+        return AppPresentation.microphone(choice: captureChoice, phone: phone, remote: remote.isEnrolled ? remote.sourceName : nil)
     }
     private var preparingRecorder = false
     var captureChoice: CaptureChoice = .phone {
