@@ -53,7 +53,7 @@ flowchart LR
 | `SW/desktop/` | Rust workspace: `core`, `inject-windows`, `inject-linux`, `agents`, `app` (Tauri tray; `--headless` for agent nodes) | `desktop-v*` → Windows + Linux installers |
 | `SW/relay/` | Cloudflare Worker + Durable Objects | `relay-v*` → Worker deploy |
 | `SW/bench/` | STT + brain benchmark tools and curated phrase/command sets (audio in Git LFS) | — |
-| `FW/` | Voice remote firmware (nRF5340, Zephyr), host tools, `docs/characterisation/` | `fw-v*` → firmware images |
+| `FW/` | Voice remote firmware (Proto 1 ESP32-C6; ESP32-S3 stand-in, ESP-IDF), host tools, `docs/characterisation/` | `fw-v*` → firmware images |
 | `HW/` | Remote PCB + mic array (KiCad), enclosure and stand CAD, `fixtures/` | `hw-v*` → fab and assembly package |
 | `DOCS/` | External references only | — |
 | `AI/` | Working material. Not authoritative until promoted. | — |
@@ -115,7 +115,8 @@ the folder, not an essay:
   firmware pin claims are checked against it by a script, not by reading a PDF.
   **TBD** until P3 starts.
 - The remote's physical OFF switch cuts microphone power in hardware. Firmware
-  must not be able to override it.
+  must not be able to override it. Test-board exception granted by the owner on
+  2026-11-02: see [the BLE contract](SYS/protocol/remote-ble.md).
 
 ## Style
 
@@ -139,7 +140,8 @@ synthetic behavior; device, GUI, provider and deployed acceptance stay **unverif
 | CI release/simulator guards | hwgeekom | `python3 -m unittest discover -s SW/ios/ci -p 'test_*.py'` |
 | `SW/bench` synthetic scorer | hwgeekom | `HEAVY_CPUS=4 heavy uv run --project SW/bench pytest SW/bench/tests` |
 | iOS app + Apple adapters | **GitHub Actions macOS runner only** | After XcodeGen + simulator selection: `xcodebuild test -project SW/ios/VoiceRemote.xcodeproj -scheme VoiceRemote -destination "platform=iOS Simulator,id=$SIMULATOR_ID" -parallel-testing-enabled NO -jobs 4 CODE_SIGNING_ALLOWED=NO` |
-| `FW/` and `HW/` | hwgeekom build; hworker lab only | **TBD**: no board/versioned artifact yet; no valid build/test command |
+| `FW/` | hwgeekom | `idf.py build` + ESP-IDF Unity tests (runner TBD); ESP-IDF at `~/hw-tools/esp-idf` |
+| `HW/` | hworker lab only | **TBD**: no versioned artifact yet; no valid build/test command |
 
 - **Compute tiers (owner's machines).** On hwgeekom, builds and tests up to
   10 cores / 20 GB go through `heavy <command>` (lowest priority, capped), one
