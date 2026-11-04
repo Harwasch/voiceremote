@@ -38,7 +38,7 @@ strictly lower corpus WER **and** strictly fewer term errors meeting `gate.json`
 relative reduction. Override with `report RUN --config PATH`. No battery or brain
 shipping threshold is invented. See [scoring details](FORMAT.md#scoring).
 
-Owner phone steps — **unverified until the iOS recorder exists**:
+Owner phone steps — **device execution unverified**:
 
 1. Review [prompts and seed vocabulary](sets/README.md); replace fictional names
    only in your private copy. Keep owner transcripts, exports and reports out of git and CI logs.
@@ -49,7 +49,7 @@ Owner phone steps — **unverified until the iOS recorder exists**:
    source/session, export [run v1](schemas/run.schema.json), including recording IDs,
    expected text, outputs and monotonic timing durations. Annotate acoustic clipping
    by listening; omitted annotation means TBD. Include failed outputs as empty text.
-4. Read the 50 commands using their supplied fictional registry/context. Capture
+4. Read the 50 commands using their supplied fictional registry/context. Import the 50-command set into the recorder before recording. Export
    proposed calls and request-to-complete latency; **never execute benchmark calls**.
    Use empty calls for failures. Export in the same format (brain-only runs work).
 5. If measuring battery, use a controlled interval per engine; supply elapsed seconds
@@ -64,3 +64,7 @@ Inputs: [system design](../../SYS/system-design-v1.md),
 [requirements](../../SYS/requirements.md), [tool contract](../../SYS/tools/tool-call.schema.json).
 Verification: synthetic arithmetic and local contracts only; real phone accuracy,
 latency, clipping, battery and requirement fulfilment remain **unverified**.
+
+Recorder instrumentation now exists in AppModel/Settings: clipping review with private listening, controlled battery cohort entry, automatic cleanup timing, optional correlated delivery/field offsets, and 50 spoken-command import via Files. Device/UI execution remains **unverified**. Reports show separate measured stage sample counts; absent acknowledgement stays TBD. No synthetic gate chooses a shipping engine.
+
+After a successful share, start a new cohort for another microphone or command set; source/engine/vocabulary changes never mix into the prior export.

@@ -70,7 +70,7 @@ public actor DictationPipeline {
         let message = DictationText(account_id: device.account_id, segment_id: segmentID, revision: revision,
                                     state: .committed, target_device_id: device.device_id, text: cleanText)
         _ = try ProtocolCodec.encode(message)
-        try await history.append(HistoryEntry(segmentID: segmentID, targetID: device.device_id, text: message.text, createdAt: now), now: now)
+        try await history.append(HistoryEntry(segmentID: segmentID, targetID: device.device_id, text: message.text, createdAt: now, accountID: device.account_id), now: now)
         if !preparedTarget.isPhone { _ = try await registry.textReceiver(device.device_id) }
         try await target.insert(message)
     }

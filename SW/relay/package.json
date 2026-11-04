@@ -4,15 +4,27 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "tsc --noEmit --strict --target ES2022 --module NodeNext --moduleResolution NodeNext --types node --skipLibCheck src/protocol/generated.ts test/protocol.test.ts && npx --no-install vitest run --maxWorkers=4"
+    "test": "tsc -p tsconfig.json && vitest run --maxWorkers=4",
+    "dev": "wrangler dev --local",
+    "build": "wrangler deploy --dry-run --outdir dist",
+    "deploy": "wrangler deploy",
+    "check-version": "node ci/check-version.mjs",
+    "test:mutations": "node ci/check-mutations.mjs"
   },
   "dependencies": {
     "ajv": "8.20.0"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "5.20261102.1",
     "@types/node": "22.19.11",
+    "@types/ws": "8.18.2",
+    "esbuild": "0.28.2",
+    "miniflare": "5.20261102.0-beta",
     "typescript": "7.0.2",
-    "vitest": "5.1.0"
+    "vitest": "5.1.0",
+    "wrangler": "4.156.2",
+    "ws": "8.21.0",
+    "yaml": "2.9.1"
   },
   "engines": {
     "node": ">=22.12.0"

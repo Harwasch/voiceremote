@@ -2,7 +2,7 @@
 import PackageDescription
 let package = Package(
     name: "KeyboardBridge",
-    platforms: [.iOS(.v16)],
+    platforms: [.iOS("26.0"), .macOS("26.0")],
     products: [.library(name: "KeyboardBridge", targets: ["KeyboardBridge"])],
     targets: [
         .target(name: "KeyboardBridge", path: "Sources", exclude: ["README.md"]),

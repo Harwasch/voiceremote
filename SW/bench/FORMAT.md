@@ -58,3 +58,25 @@ The default reduction is `0.25`, proposed **TBC** per [REQ-14], not a measured
 number or owner-approved target. Config accepts `0..1`; zero still requires strict
 term improvement. The kit does not certify shipping: full owner recordings,
 both microphones, a named phone and human review remain unverified.
+
+
+Optional measured stages and spoken commands ([REQ-13], [REQ-15], [REQ-39]):
+
+| Field | Meaning |
+|---|---|
+| STT `cleaned_text` | Conservative cleanup output; raw `text` remains the accuracy input |
+| STT `stages.cleanup_started_ms` / `cleanup_completed_ms` | Measured offsets from first captured frame on the same continuous clock |
+| STT `stages.delivery_started_ms` / `delivery_completed_ms` | Correlated delivery interval offsets; completion alone is not field insertion |
+| STT `stages.field_confirmed_ms` | Positive correlated field confirmation offset; requires delivery start |
+| Battery `cohort_id`, `conditions` | Separate controlled single-engine interval and device/load/thermal provenance; simultaneous A/B drain cannot be attributed |
+| Brain case `recording_id`, result `transcript` | Spoken capture identity and actual recognized input; expected prompt is never substituted |
+
+All supplied stage offsets are nonnegative, finite and ordered. Completed stages require
+start offsets. Missing stages are omitted and reported TBD with n=0, never zero-filled.
+Recorder measures cleanup after both A/B recognizers finish, so its capture-clock offset
+includes harness scheduling; cleanup duration is the paired difference. Pre-EOS finals
+have no EOS-to-final sample. No benchmark injects text or executes proposals. Owner can
+attach external field measurements only when correlated to the same capture clock.
+Command mode requires all 50 recordings from one unchanged source/engine cohort. Import
+`sets/commands.json` through Files before any phrases. Export includes A/B speech results
+and Apple Foundation Models proposals. Native UI/SDK and device performance **unverified**.

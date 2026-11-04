@@ -42,6 +42,7 @@ public struct TargetPicker: Sendable {
         if let old = focus[report.device_id], old.receivedAt > receipt { return }
         focus[report.device_id] = ReceivedFocus(report: report, receivedAt: receipt)
     }
+    public mutating func clear(_ deviceID: String) { focus.removeValue(forKey: deviceID) }
     public func resolve(devices: [DeviceInfo]) throws -> DeviceInfo {
         try resolve(at: clock.nowMilliseconds(), devices: devices)
     }
@@ -60,7 +61,10 @@ public struct TargetPicker: Sendable {
             let recent = eligible.compactMap { device -> (DeviceInfo, Int64)? in
                 guard let received = focus[device.device_id], received.report.text_field_focused,
                       received.receivedAt <= now, now - received.receivedAt <= 60_000 else { return nil }
-                return (device, received.receivedAt)
+                guard let age = received.report.activity_age_ms, age <= 60_000,
+                      now - received.receivedAt <= 60_000 - age else { return nil }
+                // Compare estimated activity on the phone's monotonic axis.
+                return (device, received.receivedAt - age)
             }.sorted { $0.1 == $1.1 ? $0.0.device_id < $1.0.device_id : $0.1 > $1.1 }
             return recent.first?.0 ?? phone
         }

@@ -1,0 +1,2 @@
+# Wire fixtures are byte-exact; Windows checkout must not rewrite LF to CRLF.
+* -text

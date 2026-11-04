@@ -8,7 +8,7 @@ import subprocess
 import sys
 import unittest
 
-from generate import ROOT, bundle, check_dialect, render, schema_children
+from generate import ROOT, PORTABLE_PATTERNS, bundle, check_dialect, render, schema_children
 
 # Product §4.1–4.4 and §7: input evidence, policy decisions, approval bindings
 # and execution results are trusted; proposed risk/payload and UI state are hints.
@@ -16,7 +16,7 @@ FORBIDDEN = {'authenticated_actor', 'activation_kind', 'approval_credential_clas
              'granted_scope_id', 'source_tier', 'approval_event_id', 'policy_version',
              'risk_class', 'payload_hash', 'execution_state', 'outcome',
              'speaker_evidence', 'recording_consent_state'}
-DICTATION_FIELDS = {'kind', 'account_id', 'segment_id', 'revision', 'state', 'target_device_id', 'text'}
+DICTATION_FIELDS = {'kind', 'account_id', 'segment_id', 'revision', 'state', 'target_device_id', 'text', 'preparation_id'}
 RELAY_FIELDS = {
     'RelayCiphertext': {'kind', 'account_id', 'room_id', 'sender_device_id', 'ciphertext'},
     'RelayPresence': {'kind', 'account_id', 'room_id', 'sender_device_id', 'state'},
@@ -50,7 +50,7 @@ def dictation_invariant(defs):
     assert props['kind'] == {'const': 'dictation_text'}
     assert props['state'] == {'type': 'string', 'enum': ['partial', 'committed']}, 'dictation state gained an action'
     assert props['text']['type'] == 'string', 'dictation text became structured actions'
-    for field in ('account_id', 'segment_id', 'target_device_id'):
+    for field in ('account_id', 'segment_id', 'target_device_id', 'preparation_id'):
         assert props[field] == {'$ref': '#/$defs/Identifier'}, 'dictation identifier gained an action'
     assert props['revision'] == {'$ref': '#/$defs/Counter'}
     assert defs['DictationText']['additionalProperties'] is False
@@ -120,6 +120,16 @@ class ContractTests(unittest.TestCase):
             changed[record]['properties'][field] = {'type': 'string'}
             with self.assertRaises(AssertionError):
                 check(changed)
+
+    def test_swift_patterns_use_scalars_and_cover_the_reviewed_dialect(self):
+        runtime = (ROOT / 'SYS/codegen/templates/runtime.swift').read_text()
+        matcher = runtime.split('static func patternMatches', 1)[1].split('static func bounds', 1)[0]
+        self.assertIn('text.unicodeScalars', matcher)
+        self.assertNotIn('regularExpression', runtime)
+        self.assertNotIn('NSRegularExpression', runtime)
+        cases = {line.strip()[len('case #"'):-len('"#:')]
+                 for line in matcher.splitlines() if line.strip().startswith('case #"')}
+        self.assertEqual(cases, PORTABLE_PATTERNS)
 
     def test_generator_is_deterministic(self):
         self.assertEqual(render(), render())

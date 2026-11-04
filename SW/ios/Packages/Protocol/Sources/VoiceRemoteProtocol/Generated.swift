@@ -149,6 +149,7 @@ public enum TaskStatusOutcome: String, Codable, Sendable {
     case denied = "denied"
     case unavailable = "unavailable"
     case error = "error"
+    case dispatched = "dispatched"
 }
 
 public enum CaptureSegmentKind: String, Codable, Sendable {
@@ -225,6 +226,70 @@ public enum ModeStateKind: String, Codable, Sendable {
 
 public enum CaptureStateReportKind: String, Codable, Sendable {
     case capture_state = "capture_state"
+}
+
+public enum TargetPrepareKind: String, Codable, Sendable {
+    case target_prepare = "target_prepare"
+}
+
+public enum TargetReadyKind: String, Codable, Sendable {
+    case target_ready = "target_ready"
+}
+
+public enum DictationOutcomeKind: String, Codable, Sendable {
+    case dictation_outcome = "dictation_outcome"
+}
+
+public enum DictationOutcomeOutcome: String, Codable, Sendable {
+    case inserted = "inserted"
+    case unavailable = "unavailable"
+    case unconfirmed = "unconfirmed"
+}
+
+public enum DictationQueryKind: String, Codable, Sendable {
+    case dictation_query = "dictation_query"
+}
+
+public enum CaptureControlKind: String, Codable, Sendable {
+    case capture_control = "capture_control"
+}
+
+public enum CaptureControlResultKind: String, Codable, Sendable {
+    case capture_control_result = "capture_control_result"
+}
+
+public enum CaptureControlResultOutcome: String, Codable, Sendable {
+    case applied = "applied"
+    case unavailable = "unavailable"
+    case expired = "expired"
+    case cancelled = "cancelled"
+}
+
+public enum AgentSessionProvider: String, Codable, Sendable {
+    case claude = "claude"
+    case codex = "codex"
+    case cloud = "cloud"
+}
+
+public enum AgentSessionCapabilityProfile: String, Codable, Sendable {
+    case read_only = "read_only"
+    case workspace_write = "workspace_write"
+}
+
+public enum AgentInventoryRequestKind: String, Codable, Sendable {
+    case agent_inventory_request = "agent_inventory_request"
+}
+
+public enum AgentInventoryKind: String, Codable, Sendable {
+    case agent_inventory = "agent_inventory"
+}
+
+public enum AgentDispatchKind: String, Codable, Sendable {
+    case agent_dispatch = "agent_dispatch"
+}
+
+public enum AgentTaskQueryKind: String, Codable, Sendable {
+    case agent_task_query = "agent_task_query"
 }
 
 public struct SelectTargetTool: ProtocolRecord, Equatable {
@@ -524,7 +589,8 @@ public struct DictationText: ProtocolRecord, Equatable {
     public let state: DictationTextState
     public let target_device_id: Identifier
     public let text: String
-    public init(kind: DictationTextKind = .dictation_text, account_id: Identifier, segment_id: Identifier, revision: Counter, state: DictationTextState, target_device_id: Identifier, text: String) {
+    public let preparation_id: Identifier?
+    public init(kind: DictationTextKind = .dictation_text, account_id: Identifier, segment_id: Identifier, revision: Counter, state: DictationTextState, target_device_id: Identifier, text: String, preparation_id: Identifier? = nil) {
         self.kind = kind
         self.account_id = account_id
         self.segment_id = segment_id
@@ -532,8 +598,9 @@ public struct DictationText: ProtocolRecord, Equatable {
         self.state = state
         self.target_device_id = target_device_id
         self.text = text
+        self.preparation_id = preparation_id
     }
-    private enum CodingKeys: String, CodingKey { case kind, account_id, segment_id, revision, state, target_device_id, text }
+    private enum CodingKeys: String, CodingKey { case kind, account_id, segment_id, revision, state, target_device_id, text, preparation_id }
     public init(from decoder: Decoder) throws {
         try Schema.validate(Self.schemaName, JSONValue(from: decoder))
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -544,6 +611,7 @@ public struct DictationText: ProtocolRecord, Equatable {
         self.state = try c.decode(DictationTextState.self, forKey: .state)
         self.target_device_id = try c.decode(Identifier.self, forKey: .target_device_id)
         self.text = try c.decode(String.self, forKey: .text)
+        self.preparation_id = try c.decodeIfPresent(Identifier.self, forKey: .preparation_id)
     }
 }
 
@@ -554,14 +622,16 @@ public struct FocusReport: ProtocolRecord, Equatable {
     public let device_id: Identifier
     public let text_field_focused: Bool
     public let last_activity_at: Timestamp
-    public init(kind: FocusReportKind = .focus_report, account_id: Identifier, device_id: Identifier, text_field_focused: Bool, last_activity_at: Timestamp) {
+    public let activity_age_ms: Counter?
+    public init(kind: FocusReportKind = .focus_report, account_id: Identifier, device_id: Identifier, text_field_focused: Bool, last_activity_at: Timestamp, activity_age_ms: Counter? = nil) {
         self.kind = kind
         self.account_id = account_id
         self.device_id = device_id
         self.text_field_focused = text_field_focused
         self.last_activity_at = last_activity_at
+        self.activity_age_ms = activity_age_ms
     }
-    private enum CodingKeys: String, CodingKey { case kind, account_id, device_id, text_field_focused, last_activity_at }
+    private enum CodingKeys: String, CodingKey { case kind, account_id, device_id, text_field_focused, last_activity_at, activity_age_ms }
     public init(from decoder: Decoder) throws {
         try Schema.validate(Self.schemaName, JSONValue(from: decoder))
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -570,6 +640,7 @@ public struct FocusReport: ProtocolRecord, Equatable {
         self.device_id = try c.decode(Identifier.self, forKey: .device_id)
         self.text_field_focused = try c.decode(Bool.self, forKey: .text_field_focused)
         self.last_activity_at = try c.decode(Timestamp.self, forKey: .last_activity_at)
+        self.activity_age_ms = try c.decodeIfPresent(Counter.self, forKey: .activity_age_ms)
     }
 }
 
@@ -642,15 +713,17 @@ public struct TaskStatus: ProtocolRecord, Equatable {
     public let execution_state: ExecutionState
     public let updated_at: Timestamp
     public let outcome: TaskStatusOutcome?
-    public init(kind: TaskStatusKind = .task_status, account_id: Identifier, command_id: Identifier, execution_state: ExecutionState, updated_at: Timestamp, outcome: TaskStatusOutcome? = nil) {
+    public let app_reply: String?
+    public init(kind: TaskStatusKind = .task_status, account_id: Identifier, command_id: Identifier, execution_state: ExecutionState, updated_at: Timestamp, outcome: TaskStatusOutcome? = nil, app_reply: String? = nil) {
         self.kind = kind
         self.account_id = account_id
         self.command_id = command_id
         self.execution_state = execution_state
         self.updated_at = updated_at
         self.outcome = outcome
+        self.app_reply = app_reply
     }
-    private enum CodingKeys: String, CodingKey { case kind, account_id, command_id, execution_state, updated_at, outcome }
+    private enum CodingKeys: String, CodingKey { case kind, account_id, command_id, execution_state, updated_at, outcome, app_reply }
     public init(from decoder: Decoder) throws {
         try Schema.validate(Self.schemaName, JSONValue(from: decoder))
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -660,6 +733,7 @@ public struct TaskStatus: ProtocolRecord, Equatable {
         self.execution_state = try c.decode(ExecutionState.self, forKey: .execution_state)
         self.updated_at = try c.decode(Timestamp.self, forKey: .updated_at)
         self.outcome = try c.decodeIfPresent(TaskStatusOutcome.self, forKey: .outcome)
+        self.app_reply = try c.decodeIfPresent(String.self, forKey: .app_reply)
     }
 }
 
@@ -945,13 +1019,15 @@ public struct CaptureStateReport: ProtocolRecord, Equatable {
     public let account_id: Identifier
     public let device_id: Identifier
     public let capture_state: CaptureState
-    public init(kind: CaptureStateReportKind = .capture_state, account_id: Identifier, device_id: Identifier, capture_state: CaptureState) {
+    public let listening: Bool?
+    public init(kind: CaptureStateReportKind = .capture_state, account_id: Identifier, device_id: Identifier, capture_state: CaptureState, listening: Bool? = nil) {
         self.kind = kind
         self.account_id = account_id
         self.device_id = device_id
         self.capture_state = capture_state
+        self.listening = listening
     }
-    private enum CodingKeys: String, CodingKey { case kind, account_id, device_id, capture_state }
+    private enum CodingKeys: String, CodingKey { case kind, account_id, device_id, capture_state, listening }
     public init(from decoder: Decoder) throws {
         try Schema.validate(Self.schemaName, JSONValue(from: decoder))
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -959,6 +1035,7 @@ public struct CaptureStateReport: ProtocolRecord, Equatable {
         self.account_id = try c.decode(Identifier.self, forKey: .account_id)
         self.device_id = try c.decode(Identifier.self, forKey: .device_id)
         self.capture_state = try c.decode(CaptureState.self, forKey: .capture_state)
+        self.listening = try c.decodeIfPresent(Bool.self, forKey: .listening)
     }
 }
 
@@ -976,6 +1053,16 @@ public enum InnerMessage: ProtocolRecord, Equatable {
     case grant(Grant)
     case modeState(ModeState)
     case captureStateReport(CaptureStateReport)
+    case targetPrepare(TargetPrepare)
+    case targetReady(TargetReady)
+    case dictationOutcome(DictationOutcome)
+    case dictationQuery(DictationQuery)
+    case captureControl(CaptureControl)
+    case captureControlResult(CaptureControlResult)
+    case agentInventoryRequest(AgentInventoryRequest)
+    case agentInventory(AgentInventory)
+    case agentDispatch(AgentDispatch)
+    case agentTaskQuery(AgentTaskQuery)
     public init(from decoder: Decoder) throws {
         try Schema.validate(Self.schemaName, JSONValue(from: decoder))
         let c = try decoder.singleValueContainer()
@@ -991,6 +1078,16 @@ public enum InnerMessage: ProtocolRecord, Equatable {
         if let value = try? c.decode(Grant.self) { self = .grant(value); return }
         if let value = try? c.decode(ModeState.self) { self = .modeState(value); return }
         if let value = try? c.decode(CaptureStateReport.self) { self = .captureStateReport(value); return }
+        if let value = try? c.decode(TargetPrepare.self) { self = .targetPrepare(value); return }
+        if let value = try? c.decode(TargetReady.self) { self = .targetReady(value); return }
+        if let value = try? c.decode(DictationOutcome.self) { self = .dictationOutcome(value); return }
+        if let value = try? c.decode(DictationQuery.self) { self = .dictationQuery(value); return }
+        if let value = try? c.decode(CaptureControl.self) { self = .captureControl(value); return }
+        if let value = try? c.decode(CaptureControlResult.self) { self = .captureControlResult(value); return }
+        if let value = try? c.decode(AgentInventoryRequest.self) { self = .agentInventoryRequest(value); return }
+        if let value = try? c.decode(AgentInventory.self) { self = .agentInventory(value); return }
+        if let value = try? c.decode(AgentDispatch.self) { self = .agentDispatch(value); return }
+        if let value = try? c.decode(AgentTaskQuery.self) { self = .agentTaskQuery(value); return }
         throw WireError.invalid("No matching union variant")
     }
     public func encode(to encoder: Encoder) throws {
@@ -1007,6 +1104,16 @@ public enum InnerMessage: ProtocolRecord, Equatable {
         case .grant(let value): try value.encode(to: encoder)
         case .modeState(let value): try value.encode(to: encoder)
         case .captureStateReport(let value): try value.encode(to: encoder)
+        case .targetPrepare(let value): try value.encode(to: encoder)
+        case .targetReady(let value): try value.encode(to: encoder)
+        case .dictationOutcome(let value): try value.encode(to: encoder)
+        case .dictationQuery(let value): try value.encode(to: encoder)
+        case .captureControl(let value): try value.encode(to: encoder)
+        case .captureControlResult(let value): try value.encode(to: encoder)
+        case .agentInventoryRequest(let value): try value.encode(to: encoder)
+        case .agentInventory(let value): try value.encode(to: encoder)
+        case .agentDispatch(let value): try value.encode(to: encoder)
+        case .agentTaskQuery(let value): try value.encode(to: encoder)
         }
     }
 }
@@ -1014,6 +1121,408 @@ public enum InnerMessage: ProtocolRecord, Equatable {
 public typealias PairingToken = String
 
 public typealias PairingExpiry = Int64
+
+public struct TargetPrepare: ProtocolRecord, Equatable {
+    public static let schemaName = "TargetPrepare"
+    public let kind: TargetPrepareKind
+    public let account_id: Identifier
+    public let request_id: Identifier
+    public let target_device_id: Identifier
+    public init(kind: TargetPrepareKind = .target_prepare, account_id: Identifier, request_id: Identifier, target_device_id: Identifier) {
+        self.kind = kind
+        self.account_id = account_id
+        self.request_id = request_id
+        self.target_device_id = target_device_id
+    }
+    private enum CodingKeys: String, CodingKey { case kind, account_id, request_id, target_device_id }
+    public init(from decoder: Decoder) throws {
+        try Schema.validate(Self.schemaName, JSONValue(from: decoder))
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.kind = try c.decode(TargetPrepareKind.self, forKey: .kind)
+        self.account_id = try c.decode(Identifier.self, forKey: .account_id)
+        self.request_id = try c.decode(Identifier.self, forKey: .request_id)
+        self.target_device_id = try c.decode(Identifier.self, forKey: .target_device_id)
+    }
+}
+
+public struct TargetReady: ProtocolRecord, Equatable {
+    public static let schemaName = "TargetReady"
+    public let kind: TargetReadyKind
+    public let account_id: Identifier
+    public let request_id: Identifier
+    public let target_device_id: Identifier
+    public let ready: Bool
+    public init(kind: TargetReadyKind = .target_ready, account_id: Identifier, request_id: Identifier, target_device_id: Identifier, ready: Bool) {
+        self.kind = kind
+        self.account_id = account_id
+        self.request_id = request_id
+        self.target_device_id = target_device_id
+        self.ready = ready
+    }
+    private enum CodingKeys: String, CodingKey { case kind, account_id, request_id, target_device_id, ready }
+    public init(from decoder: Decoder) throws {
+        try Schema.validate(Self.schemaName, JSONValue(from: decoder))
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.kind = try c.decode(TargetReadyKind.self, forKey: .kind)
+        self.account_id = try c.decode(Identifier.self, forKey: .account_id)
+        self.request_id = try c.decode(Identifier.self, forKey: .request_id)
+        self.target_device_id = try c.decode(Identifier.self, forKey: .target_device_id)
+        self.ready = try c.decode(Bool.self, forKey: .ready)
+    }
+}
+
+public struct DictationOutcome: ProtocolRecord, Equatable {
+    public static let schemaName = "DictationOutcome"
+    public let kind: DictationOutcomeKind
+    public let account_id: Identifier
+    public let segment_id: Identifier
+    public let target_device_id: Identifier
+    public let outcome: DictationOutcomeOutcome
+    public init(kind: DictationOutcomeKind = .dictation_outcome, account_id: Identifier, segment_id: Identifier, target_device_id: Identifier, outcome: DictationOutcomeOutcome) {
+        self.kind = kind
+        self.account_id = account_id
+        self.segment_id = segment_id
+        self.target_device_id = target_device_id
+        self.outcome = outcome
+    }
+    private enum CodingKeys: String, CodingKey { case kind, account_id, segment_id, target_device_id, outcome }
+    public init(from decoder: Decoder) throws {
+        try Schema.validate(Self.schemaName, JSONValue(from: decoder))
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.kind = try c.decode(DictationOutcomeKind.self, forKey: .kind)
+        self.account_id = try c.decode(Identifier.self, forKey: .account_id)
+        self.segment_id = try c.decode(Identifier.self, forKey: .segment_id)
+        self.target_device_id = try c.decode(Identifier.self, forKey: .target_device_id)
+        self.outcome = try c.decode(DictationOutcomeOutcome.self, forKey: .outcome)
+    }
+}
+
+public struct DictationQuery: ProtocolRecord, Equatable {
+    public static let schemaName = "DictationQuery"
+    public let kind: DictationQueryKind
+    public let account_id: Identifier
+    public let segment_id: Identifier
+    public let target_device_id: Identifier
+    public init(kind: DictationQueryKind = .dictation_query, account_id: Identifier, segment_id: Identifier, target_device_id: Identifier) {
+        self.kind = kind
+        self.account_id = account_id
+        self.segment_id = segment_id
+        self.target_device_id = target_device_id
+    }
+    private enum CodingKeys: String, CodingKey { case kind, account_id, segment_id, target_device_id }
+    public init(from decoder: Decoder) throws {
+        try Schema.validate(Self.schemaName, JSONValue(from: decoder))
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.kind = try c.decode(DictationQueryKind.self, forKey: .kind)
+        self.account_id = try c.decode(Identifier.self, forKey: .account_id)
+        self.segment_id = try c.decode(Identifier.self, forKey: .segment_id)
+        self.target_device_id = try c.decode(Identifier.self, forKey: .target_device_id)
+    }
+}
+
+public struct CaptureControl: ProtocolRecord, Equatable {
+    public static let schemaName = "CaptureControl"
+    public let kind: CaptureControlKind
+    public let account_id: Identifier
+    public let request_id: Identifier
+    public let target_device_id: Identifier
+    public let capture_state: CaptureState
+    public let ttl_ms: Int64
+    public let request_sequence: Counter
+    public let expires_at: Timestamp
+    public init(kind: CaptureControlKind = .capture_control, account_id: Identifier, request_id: Identifier, target_device_id: Identifier, capture_state: CaptureState, ttl_ms: Int64, request_sequence: Counter, expires_at: Timestamp) {
+        self.kind = kind
+        self.account_id = account_id
+        self.request_id = request_id
+        self.target_device_id = target_device_id
+        self.capture_state = capture_state
+        self.ttl_ms = ttl_ms
+        self.request_sequence = request_sequence
+        self.expires_at = expires_at
+    }
+    private enum CodingKeys: String, CodingKey { case kind, account_id, request_id, target_device_id, capture_state, ttl_ms, request_sequence, expires_at }
+    public init(from decoder: Decoder) throws {
+        try Schema.validate(Self.schemaName, JSONValue(from: decoder))
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.kind = try c.decode(CaptureControlKind.self, forKey: .kind)
+        self.account_id = try c.decode(Identifier.self, forKey: .account_id)
+        self.request_id = try c.decode(Identifier.self, forKey: .request_id)
+        self.target_device_id = try c.decode(Identifier.self, forKey: .target_device_id)
+        self.capture_state = try c.decode(CaptureState.self, forKey: .capture_state)
+        self.ttl_ms = try c.decode(Int64.self, forKey: .ttl_ms)
+        self.request_sequence = try c.decode(Counter.self, forKey: .request_sequence)
+        self.expires_at = try c.decode(Timestamp.self, forKey: .expires_at)
+    }
+}
+
+public struct CaptureControlResult: ProtocolRecord, Equatable {
+    public static let schemaName = "CaptureControlResult"
+    public let kind: CaptureControlResultKind
+    public let account_id: Identifier
+    public let request_id: Identifier
+    public let device_id: Identifier
+    public let capture_state: CaptureState
+    public let outcome: CaptureControlResultOutcome
+    public init(kind: CaptureControlResultKind = .capture_control_result, account_id: Identifier, request_id: Identifier, device_id: Identifier, capture_state: CaptureState, outcome: CaptureControlResultOutcome) {
+        self.kind = kind
+        self.account_id = account_id
+        self.request_id = request_id
+        self.device_id = device_id
+        self.capture_state = capture_state
+        self.outcome = outcome
+    }
+    private enum CodingKeys: String, CodingKey { case kind, account_id, request_id, device_id, capture_state, outcome }
+    public init(from decoder: Decoder) throws {
+        try Schema.validate(Self.schemaName, JSONValue(from: decoder))
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.kind = try c.decode(CaptureControlResultKind.self, forKey: .kind)
+        self.account_id = try c.decode(Identifier.self, forKey: .account_id)
+        self.request_id = try c.decode(Identifier.self, forKey: .request_id)
+        self.device_id = try c.decode(Identifier.self, forKey: .device_id)
+        self.capture_state = try c.decode(CaptureState.self, forKey: .capture_state)
+        self.outcome = try c.decode(CaptureControlResultOutcome.self, forKey: .outcome)
+    }
+}
+
+public struct AuditArchiveBlock: ProtocolRecord, Equatable {
+    public static let schemaName = "AuditArchiveBlock"
+    public let account_id: Identifier
+    public let room_id: Identifier
+    public let sequence: Counter
+    public let previous_hash: String
+    public let ciphertext: String
+    public let block_hash: String
+    public let epoch: Counter?
+    public init(account_id: Identifier, room_id: Identifier, sequence: Counter, previous_hash: String, ciphertext: String, block_hash: String, epoch: Counter? = nil) {
+        self.account_id = account_id
+        self.room_id = room_id
+        self.sequence = sequence
+        self.previous_hash = previous_hash
+        self.ciphertext = ciphertext
+        self.block_hash = block_hash
+        self.epoch = epoch
+    }
+    private enum CodingKeys: String, CodingKey { case account_id, room_id, sequence, previous_hash, ciphertext, block_hash, epoch }
+    public init(from decoder: Decoder) throws {
+        try Schema.validate(Self.schemaName, JSONValue(from: decoder))
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.account_id = try c.decode(Identifier.self, forKey: .account_id)
+        self.room_id = try c.decode(Identifier.self, forKey: .room_id)
+        self.sequence = try c.decode(Counter.self, forKey: .sequence)
+        self.previous_hash = try c.decode(String.self, forKey: .previous_hash)
+        self.ciphertext = try c.decode(String.self, forKey: .ciphertext)
+        self.block_hash = try c.decode(String.self, forKey: .block_hash)
+        self.epoch = try c.decodeIfPresent(Counter.self, forKey: .epoch)
+    }
+}
+
+public struct AuditArchiveRead: ProtocolRecord, Equatable {
+    public static let schemaName = "AuditArchiveRead"
+    public let account_id: Identifier
+    public let room_id: Identifier
+    public let sequence: Counter
+    public let epoch: Counter?
+    public init(account_id: Identifier, room_id: Identifier, sequence: Counter, epoch: Counter? = nil) {
+        self.account_id = account_id
+        self.room_id = room_id
+        self.sequence = sequence
+        self.epoch = epoch
+    }
+    private enum CodingKeys: String, CodingKey { case account_id, room_id, sequence, epoch }
+    public init(from decoder: Decoder) throws {
+        try Schema.validate(Self.schemaName, JSONValue(from: decoder))
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.account_id = try c.decode(Identifier.self, forKey: .account_id)
+        self.room_id = try c.decode(Identifier.self, forKey: .room_id)
+        self.sequence = try c.decode(Counter.self, forKey: .sequence)
+        self.epoch = try c.decodeIfPresent(Counter.self, forKey: .epoch)
+    }
+}
+
+public struct AuditArchivePage: ProtocolRecord, Equatable {
+    public static let schemaName = "AuditArchivePage"
+    public let account_id: Identifier
+    public let room_id: Identifier
+    public let blocks: [AuditArchiveBlock]
+    public let epoch: Counter?
+    public init(account_id: Identifier, room_id: Identifier, blocks: [AuditArchiveBlock], epoch: Counter? = nil) {
+        self.account_id = account_id
+        self.room_id = room_id
+        self.blocks = blocks
+        self.epoch = epoch
+    }
+    private enum CodingKeys: String, CodingKey { case account_id, room_id, blocks, epoch }
+    public init(from decoder: Decoder) throws {
+        try Schema.validate(Self.schemaName, JSONValue(from: decoder))
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.account_id = try c.decode(Identifier.self, forKey: .account_id)
+        self.room_id = try c.decode(Identifier.self, forKey: .room_id)
+        self.blocks = try c.decode([AuditArchiveBlock].self, forKey: .blocks)
+        self.epoch = try c.decodeIfPresent(Counter.self, forKey: .epoch)
+    }
+}
+
+public struct AuditArchiveWriter: ProtocolRecord, Equatable {
+    public static let schemaName = "AuditArchiveWriter"
+    public let account_id: Identifier
+    public let room_id: Identifier
+    public let device_id: Identifier
+    public let public_key: Base64
+    public let old_signature: Base64
+    public let revision: Counter
+    public init(account_id: Identifier, room_id: Identifier, device_id: Identifier, public_key: Base64, old_signature: Base64, revision: Counter) {
+        self.account_id = account_id
+        self.room_id = room_id
+        self.device_id = device_id
+        self.public_key = public_key
+        self.old_signature = old_signature
+        self.revision = revision
+    }
+    private enum CodingKeys: String, CodingKey { case account_id, room_id, device_id, public_key, old_signature, revision }
+    public init(from decoder: Decoder) throws {
+        try Schema.validate(Self.schemaName, JSONValue(from: decoder))
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.account_id = try c.decode(Identifier.self, forKey: .account_id)
+        self.room_id = try c.decode(Identifier.self, forKey: .room_id)
+        self.device_id = try c.decode(Identifier.self, forKey: .device_id)
+        self.public_key = try c.decode(Base64.self, forKey: .public_key)
+        self.old_signature = try c.decode(Base64.self, forKey: .old_signature)
+        self.revision = try c.decode(Counter.self, forKey: .revision)
+    }
+}
+
+public struct AgentSession: ProtocolRecord, Equatable {
+    public static let schemaName = "AgentSession"
+    public let account_id: Identifier
+    public let device_id: Identifier
+    public let project_id: Identifier
+    public let workspace: String
+    public let provider: AgentSessionProvider
+    public let provider_session_id: Identifier
+    public let capability_profile: AgentSessionCapabilityProfile
+    public let capabilities: [Capability]
+    public init(account_id: Identifier, device_id: Identifier, project_id: Identifier, workspace: String, provider: AgentSessionProvider, provider_session_id: Identifier, capability_profile: AgentSessionCapabilityProfile, capabilities: [Capability]) {
+        self.account_id = account_id
+        self.device_id = device_id
+        self.project_id = project_id
+        self.workspace = workspace
+        self.provider = provider
+        self.provider_session_id = provider_session_id
+        self.capability_profile = capability_profile
+        self.capabilities = capabilities
+    }
+    private enum CodingKeys: String, CodingKey { case account_id, device_id, project_id, workspace, provider, provider_session_id, capability_profile, capabilities }
+    public init(from decoder: Decoder) throws {
+        try Schema.validate(Self.schemaName, JSONValue(from: decoder))
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.account_id = try c.decode(Identifier.self, forKey: .account_id)
+        self.device_id = try c.decode(Identifier.self, forKey: .device_id)
+        self.project_id = try c.decode(Identifier.self, forKey: .project_id)
+        self.workspace = try c.decode(String.self, forKey: .workspace)
+        self.provider = try c.decode(AgentSessionProvider.self, forKey: .provider)
+        self.provider_session_id = try c.decode(Identifier.self, forKey: .provider_session_id)
+        self.capability_profile = try c.decode(AgentSessionCapabilityProfile.self, forKey: .capability_profile)
+        self.capabilities = try c.decode([Capability].self, forKey: .capabilities)
+    }
+}
+
+public struct AgentInventoryRequest: ProtocolRecord, Equatable {
+    public static let schemaName = "AgentInventoryRequest"
+    public let kind: AgentInventoryRequestKind
+    public let account_id: Identifier
+    public let request_id: Identifier
+    public init(kind: AgentInventoryRequestKind = .agent_inventory_request, account_id: Identifier, request_id: Identifier) {
+        self.kind = kind
+        self.account_id = account_id
+        self.request_id = request_id
+    }
+    private enum CodingKeys: String, CodingKey { case kind, account_id, request_id }
+    public init(from decoder: Decoder) throws {
+        try Schema.validate(Self.schemaName, JSONValue(from: decoder))
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.kind = try c.decode(AgentInventoryRequestKind.self, forKey: .kind)
+        self.account_id = try c.decode(Identifier.self, forKey: .account_id)
+        self.request_id = try c.decode(Identifier.self, forKey: .request_id)
+    }
+}
+
+public struct AgentInventory: ProtocolRecord, Equatable {
+    public static let schemaName = "AgentInventory"
+    public let kind: AgentInventoryKind
+    public let account_id: Identifier
+    public let device_id: Identifier
+    public let request_id: Identifier
+    public let authenticated_actor: Identifier
+    public let sessions: [AgentSession]
+    public init(kind: AgentInventoryKind = .agent_inventory, account_id: Identifier, device_id: Identifier, request_id: Identifier, authenticated_actor: Identifier, sessions: [AgentSession]) {
+        self.kind = kind
+        self.account_id = account_id
+        self.device_id = device_id
+        self.request_id = request_id
+        self.authenticated_actor = authenticated_actor
+        self.sessions = sessions
+    }
+    private enum CodingKeys: String, CodingKey { case kind, account_id, device_id, request_id, authenticated_actor, sessions }
+    public init(from decoder: Decoder) throws {
+        try Schema.validate(Self.schemaName, JSONValue(from: decoder))
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.kind = try c.decode(AgentInventoryKind.self, forKey: .kind)
+        self.account_id = try c.decode(Identifier.self, forKey: .account_id)
+        self.device_id = try c.decode(Identifier.self, forKey: .device_id)
+        self.request_id = try c.decode(Identifier.self, forKey: .request_id)
+        self.authenticated_actor = try c.decode(Identifier.self, forKey: .authenticated_actor)
+        self.sessions = try c.decode([AgentSession].self, forKey: .sessions)
+    }
+}
+
+public struct AgentDispatch: ProtocolRecord, Equatable {
+    public static let schemaName = "AgentDispatch"
+    public let kind: AgentDispatchKind
+    public let account_id: Identifier
+    public let command: AuthorizedCommand
+    public let session: AgentSession
+    public let immutable_preview: Base64
+    public let expires_at: Timestamp
+    public init(kind: AgentDispatchKind = .agent_dispatch, account_id: Identifier, command: AuthorizedCommand, session: AgentSession, immutable_preview: Base64, expires_at: Timestamp) {
+        self.kind = kind
+        self.account_id = account_id
+        self.command = command
+        self.session = session
+        self.immutable_preview = immutable_preview
+        self.expires_at = expires_at
+    }
+    private enum CodingKeys: String, CodingKey { case kind, account_id, command, session, immutable_preview, expires_at }
+    public init(from decoder: Decoder) throws {
+        try Schema.validate(Self.schemaName, JSONValue(from: decoder))
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.kind = try c.decode(AgentDispatchKind.self, forKey: .kind)
+        self.account_id = try c.decode(Identifier.self, forKey: .account_id)
+        self.command = try c.decode(AuthorizedCommand.self, forKey: .command)
+        self.session = try c.decode(AgentSession.self, forKey: .session)
+        self.immutable_preview = try c.decode(Base64.self, forKey: .immutable_preview)
+        self.expires_at = try c.decode(Timestamp.self, forKey: .expires_at)
+    }
+}
+
+public struct AgentTaskQuery: ProtocolRecord, Equatable {
+    public static let schemaName = "AgentTaskQuery"
+    public let kind: AgentTaskQueryKind
+    public let account_id: Identifier
+    public let command_id: Identifier
+    public init(kind: AgentTaskQueryKind = .agent_task_query, account_id: Identifier, command_id: Identifier) {
+        self.kind = kind
+        self.account_id = account_id
+        self.command_id = command_id
+    }
+    private enum CodingKeys: String, CodingKey { case kind, account_id, command_id }
+    public init(from decoder: Decoder) throws {
+        try Schema.validate(Self.schemaName, JSONValue(from: decoder))
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.kind = try c.decode(AgentTaskQueryKind.self, forKey: .kind)
+        self.account_id = try c.decode(Identifier.self, forKey: .account_id)
+        self.command_id = try c.decode(Identifier.self, forKey: .command_id)
+    }
+}
 
 
 
@@ -1066,7 +1575,7 @@ public enum ProtocolCodec {
 
 enum Schema {
     static let document: JSONValue = try! JSONDecoder().decode(JSONValue.self, from: Data(#"""
-{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"https://voiceremote.invalid/bundle/v1","$defs":{"SelectTargetTool":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"select_target"},"account_id":{"$ref":"#/$defs/Identifier"},"device_id":{"$ref":"#/$defs/Identifier"}},"required":["kind","account_id","device_id"]},"OpenResourceTool":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"open_resource"},"account_id":{"$ref":"#/$defs/Identifier"},"device_id":{"$ref":"#/$defs/Identifier"},"resource_uri":{"type":"string","minLength":1,"maxLength":2048}},"required":["kind","account_id","device_id","resource_uri"]},"DelegateTaskTool":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"delegate_task"},"account_id":{"$ref":"#/$defs/Identifier"},"device_id":{"$ref":"#/$defs/Identifier"},"project_id":{"$ref":"#/$defs/Identifier"},"provider_session_id":{"$ref":"#/$defs/Identifier"},"instruction":{"type":"string","minLength":1,"maxLength":16384}},"required":["kind","account_id","device_id","project_id","instruction"]},"CancelTaskTool":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"cancel_task"},"account_id":{"$ref":"#/$defs/Identifier"},"command_id":{"$ref":"#/$defs/Identifier"}},"required":["kind","account_id","command_id"]},"PrepareSendTool":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"prepare_send"},"account_id":{"$ref":"#/$defs/Identifier"},"device_id":{"$ref":"#/$defs/Identifier"},"recipient":{"type":"string","minLength":1,"maxLength":512},"content":{"type":"string","minLength":1,"maxLength":16384}},"required":["kind","account_id","device_id","recipient","content"]},"ToolCall":{"oneOf":[{"$ref":"#/$defs/SelectTargetTool"},{"$ref":"#/$defs/OpenResourceTool"},{"$ref":"#/$defs/DelegateTaskTool"},{"$ref":"#/$defs/CancelTaskTool"},{"$ref":"#/$defs/PrepareSendTool"}]},"Identifier":{"type":"string","minLength":1,"maxLength":128},"Timestamp":{"type":"integer","minimum":0,"maximum":9007199254740991,"description":"Unix epoch milliseconds; safe in JavaScript."},"Counter":{"type":"integer","minimum":0,"maximum":9007199254740991},"Base64":{"type":"string","minLength":4,"maxLength":1048576,"pattern":"^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$","not":{"pattern":"[^A-Za-z0-9+/=]"}},"PayloadHash":{"type":"string","minLength":64,"maxLength":64,"pattern":"^[0-9a-f]+$","not":{"pattern":"[^0-9a-f]"},"description":"SHA-256 of the immutable UTF-8 task preview bytes retained by trusted policy; JSON serialization is not canonicalized by this contract."},"Mode":{"type":"string","enum":["dictation","ai_control"]},"CaptureState":{"type":"string","enum":["off","hold","continuous"]},"RiskClass":{"type":"string","enum":["read_display","workspace_modify","sensitive"]},"Capability":{"type":"string","enum":["receive_text","open_resource","delegate_task","cancel_task","external_send"]},"ExecutionState":{"type":"string","enum":["queued","dispatched","running","succeeded","failed","cancelled"]},"CandidateState":{"type":"string","enum":["suggested","edited","approved","dismissed","expired"]},"ActivationKind":{"type":"string","enum":["ptt","wake_word","approval_tap"]},"ApprovalCredentialClass":{"type":"string","enum":["scoped_grant","user_presence","biometric","passcode"]},"RelayCiphertext":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"ciphertext"},"account_id":{"$ref":"#/$defs/Identifier"},"room_id":{"$ref":"#/$defs/Identifier"},"sender_device_id":{"$ref":"#/$defs/Identifier"},"ciphertext":{"$ref":"#/$defs/Base64"}},"required":["kind","account_id","room_id","sender_device_id","ciphertext"]},"RelayPresence":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"presence"},"account_id":{"$ref":"#/$defs/Identifier"},"room_id":{"$ref":"#/$defs/Identifier"},"sender_device_id":{"$ref":"#/$defs/Identifier"},"state":{"type":"string","enum":["online","offline"]}},"required":["kind","account_id","room_id","sender_device_id","state"]},"RelayWakeRegistration":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"wake_registration"},"account_id":{"$ref":"#/$defs/Identifier"},"room_id":{"$ref":"#/$defs/Identifier"},"sender_device_id":{"$ref":"#/$defs/Identifier"},"apns_wake_token":{"$ref":"#/$defs/Base64"},"environment":{"type":"string","enum":["sandbox","production"]}},"required":["kind","account_id","room_id","sender_device_id","apns_wake_token","environment"]},"RelayFrame":{"oneOf":[{"$ref":"#/$defs/RelayCiphertext"},{"$ref":"#/$defs/RelayPresence"},{"$ref":"#/$defs/RelayWakeRegistration"}]},"PairingPayload":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"pairing"},"account_id":{"$ref":"#/$defs/Identifier"},"desktop_public_key":{"$ref":"#/$defs/Base64"},"one_use_token":{"$ref":"#/$defs/PairingToken"},"expires_at":{"$ref":"#/$defs/PairingExpiry"},"relay_room_id":{"$ref":"#/$defs/Identifier"}},"required":["kind","account_id","desktop_public_key","one_use_token","expires_at","relay_room_id"]},"DictationText":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"dictation_text"},"account_id":{"$ref":"#/$defs/Identifier"},"segment_id":{"$ref":"#/$defs/Identifier"},"revision":{"$ref":"#/$defs/Counter"},"state":{"type":"string","enum":["partial","committed"]},"target_device_id":{"$ref":"#/$defs/Identifier"},"text":{"type":"string","maxLength":16384,"not":{"pattern":"[\\u0000-\\u001F\\u007F-\\u009F\\u2028\\u2029]"}}},"required":["kind","account_id","segment_id","revision","state","target_device_id","text"]},"FocusReport":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"focus_report"},"account_id":{"$ref":"#/$defs/Identifier"},"device_id":{"$ref":"#/$defs/Identifier"},"text_field_focused":{"type":"boolean"},"last_activity_at":{"$ref":"#/$defs/Timestamp"}},"required":["kind","account_id","device_id","text_field_focused","last_activity_at"]},"DeviceInfo":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"device_info"},"account_id":{"$ref":"#/$defs/Identifier"},"device_id":{"$ref":"#/$defs/Identifier"},"display_name":{"type":"string","minLength":1,"maxLength":128},"platform":{"type":"string","enum":["ios","windows","linux","remote"]},"role":{"type":"string","enum":["text_receiver","agent","both","capture"]},"capabilities":{"type":"array","items":{"$ref":"#/$defs/Capability"},"maxItems":256}},"required":["kind","account_id","device_id","display_name","platform","role","capabilities"]},"Revoke":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"revoke"},"account_id":{"$ref":"#/$defs/Identifier"},"device_id":{"$ref":"#/$defs/Identifier"},"command_id":{"$ref":"#/$defs/Identifier"},"idempotency_key":{"$ref":"#/$defs/Identifier"},"revoked_at":{"$ref":"#/$defs/Timestamp"}},"required":["kind","account_id","device_id","command_id","idempotency_key","revoked_at"]},"TaskStatus":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"task_status"},"account_id":{"$ref":"#/$defs/Identifier"},"command_id":{"$ref":"#/$defs/Identifier"},"execution_state":{"$ref":"#/$defs/ExecutionState"},"updated_at":{"$ref":"#/$defs/Timestamp"},"outcome":{"type":"string","enum":["ok","denied","unavailable","error"]}},"required":["kind","account_id","command_id","execution_state","updated_at"]},"CaptureSegment":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"capture_segment"},"account_id":{"$ref":"#/$defs/Identifier"},"capture_session_id":{"$ref":"#/$defs/Identifier"},"source_id":{"$ref":"#/$defs/Identifier"},"source_type":{"type":"string","enum":["iphone","airpods","desktop","remote"]},"source_clock":{"$ref":"#/$defs/Counter"},"receive_timestamp":{"$ref":"#/$defs/Timestamp"},"partial_revision":{"$ref":"#/$defs/Counter"},"committed_segment_id":{"$ref":"#/$defs/Identifier"},"speaker_evidence":{"type":"string","enum":["unknown","matched","ambiguous"]},"recording_consent_state":{"type":"string","enum":["unknown","granted","denied"]},"segment_text":{"type":"string","maxLength":16384}},"required":["kind","account_id","capture_session_id","source_id","source_type","source_clock","receive_timestamp","partial_revision","committed_segment_id","speaker_evidence","recording_consent_state","segment_text"]},"CandidateAction":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"candidate_action"},"account_id":{"$ref":"#/$defs/Identifier"},"candidate_id":{"$ref":"#/$defs/Identifier"},"parent_capture_session":{"$ref":"#/$defs/Identifier"},"segment_span_ids":{"type":"array","items":{"$ref":"#/$defs/Identifier"},"maxItems":256},"proposed_task_kind":{"$ref":"#/$defs/Capability"},"proposed_task":{"$ref":"#/$defs/ToolCall"},"proposed_payload_hash":{"$ref":"#/$defs/PayloadHash"},"destination_hint":{"$ref":"#/$defs/Identifier"},"origin_confidence":{"type":"number","minimum":0,"maximum":1},"proposed_risk_class":{"$ref":"#/$defs/RiskClass"},"suggestion_expiry":{"$ref":"#/$defs/Timestamp"},"card_visibility":{"type":"string","enum":["visible","muted"]},"candidate_state":{"$ref":"#/$defs/CandidateState"}},"required":["kind","account_id","candidate_id","parent_capture_session","segment_span_ids","proposed_task_kind","proposed_task","proposed_payload_hash","origin_confidence","proposed_risk_class","suggestion_expiry","card_visibility","candidate_state"]},"AuthorizedCommand":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"authorized_command"},"account_id":{"$ref":"#/$defs/Identifier"},"command_id":{"$ref":"#/$defs/Identifier"},"candidate_id":{"$ref":"#/$defs/Identifier"},"immutable_task_payload":{"$ref":"#/$defs/ToolCall"},"payload_hash":{"$ref":"#/$defs/PayloadHash"},"source_tier":{"type":"string","enum":["inferred","explicit"]},"activation_kind":{"$ref":"#/$defs/ActivationKind"},"authenticated_actor":{"$ref":"#/$defs/Identifier"},"approval_credential_class":{"$ref":"#/$defs/ApprovalCredentialClass"},"approval_event_id":{"$ref":"#/$defs/Identifier"},"risk_class":{"$ref":"#/$defs/RiskClass"},"policy_version":{"$ref":"#/$defs/Identifier"},"granted_scope_id":{"$ref":"#/$defs/Identifier"},"destination_id":{"$ref":"#/$defs/Identifier"},"provider_session_id":{"$ref":"#/$defs/Identifier"},"idempotency_key":{"$ref":"#/$defs/Identifier"},"execution_state":{"$ref":"#/$defs/ExecutionState"},"outcome":{"type":"string","enum":["ok","denied","unavailable","error"]},"created_at":{"$ref":"#/$defs/Timestamp"},"updated_at":{"$ref":"#/$defs/Timestamp"}},"required":["kind","account_id","command_id","candidate_id","immutable_task_payload","payload_hash","source_tier","activation_kind","authenticated_actor","approval_credential_class","risk_class","policy_version","granted_scope_id","destination_id","idempotency_key","execution_state","created_at","updated_at"],"allOf":[{"if":{"properties":{"source_tier":{"const":"inferred"}}},"then":{"required":["approval_event_id"],"properties":{"activation_kind":{"const":"approval_tap"},"approval_credential_class":{"type":"string","enum":["user_presence","biometric","passcode"]}}}},{"if":{"properties":{"activation_kind":{"const":"approval_tap"}}},"then":{"required":["approval_event_id"],"properties":{"approval_credential_class":{"type":"string","enum":["user_presence","biometric","passcode"]}}}},{"if":{"properties":{"risk_class":{"const":"sensitive"}}},"then":{"required":["approval_event_id"],"properties":{"approval_credential_class":{"type":"string","enum":["biometric","passcode"]}}}}]},"AuditEntry":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"audit_entry"},"account_id":{"$ref":"#/$defs/Identifier"},"audit_id":{"$ref":"#/$defs/Identifier"},"command_id":{"$ref":"#/$defs/Identifier"},"authenticated_actor":{"$ref":"#/$defs/Identifier"},"event":{"type":"string","enum":["approved","denied","queued","dispatched","running","succeeded","failed","cancelled","revoked"]},"payload_hash":{"$ref":"#/$defs/PayloadHash"},"policy_version":{"$ref":"#/$defs/Identifier"},"recorded_at":{"$ref":"#/$defs/Timestamp"},"approval_event_id":{"$ref":"#/$defs/Identifier"}},"required":["kind","account_id","audit_id","command_id","authenticated_actor","event","payload_hash","policy_version","recorded_at"]},"Grant":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"grant"},"account_id":{"$ref":"#/$defs/Identifier"},"grant_id":{"$ref":"#/$defs/Identifier"},"authenticated_actor":{"$ref":"#/$defs/Identifier"},"device_id":{"$ref":"#/$defs/Identifier"},"project_id":{"$ref":"#/$defs/Identifier"},"capability":{"$ref":"#/$defs/Capability"},"risk_class":{"$ref":"#/$defs/RiskClass"},"expires_at":{"$ref":"#/$defs/Timestamp"}},"required":["kind","account_id","grant_id","authenticated_actor","device_id","project_id","capability","risk_class","expires_at"]},"ModeState":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"mode"},"account_id":{"$ref":"#/$defs/Identifier"},"device_id":{"$ref":"#/$defs/Identifier"},"mode":{"$ref":"#/$defs/Mode"}},"required":["kind","account_id","device_id","mode"]},"CaptureStateReport":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"capture_state"},"account_id":{"$ref":"#/$defs/Identifier"},"device_id":{"$ref":"#/$defs/Identifier"},"capture_state":{"$ref":"#/$defs/CaptureState"}},"required":["kind","account_id","device_id","capture_state"]},"InnerMessage":{"oneOf":[{"$ref":"#/$defs/DictationText"},{"$ref":"#/$defs/FocusReport"},{"$ref":"#/$defs/DeviceInfo"},{"$ref":"#/$defs/Revoke"},{"$ref":"#/$defs/TaskStatus"},{"$ref":"#/$defs/CaptureSegment"},{"$ref":"#/$defs/CandidateAction"},{"$ref":"#/$defs/AuthorizedCommand"},{"$ref":"#/$defs/AuditEntry"},{"$ref":"#/$defs/Grant"},{"$ref":"#/$defs/ModeState"},{"$ref":"#/$defs/CaptureStateReport"}]},"PairingToken":{"type":"string","minLength":44,"maxLength":44,"pattern":"^[A-Za-z0-9+/]{43}=$","not":{"pattern":"[^A-Za-z0-9+/=]"},"description":"32-byte single-use bootstrap token; not a lasting credential."},"PairingExpiry":{"type":"integer","minimum":1,"maximum":9007199254740991,"description":"Positive Unix epoch milliseconds. Enrollment additionally checks now < expires_at <= now + 120000 using trusted time."}}}
+{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"https://voiceremote.invalid/bundle/v1","$defs":{"SelectTargetTool":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"select_target"},"account_id":{"$ref":"#/$defs/Identifier"},"device_id":{"$ref":"#/$defs/Identifier"}},"required":["kind","account_id","device_id"]},"OpenResourceTool":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"open_resource"},"account_id":{"$ref":"#/$defs/Identifier"},"device_id":{"$ref":"#/$defs/Identifier"},"resource_uri":{"type":"string","minLength":1,"maxLength":2048}},"required":["kind","account_id","device_id","resource_uri"]},"DelegateTaskTool":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"delegate_task"},"account_id":{"$ref":"#/$defs/Identifier"},"device_id":{"$ref":"#/$defs/Identifier"},"project_id":{"$ref":"#/$defs/Identifier"},"provider_session_id":{"$ref":"#/$defs/Identifier"},"instruction":{"type":"string","minLength":1,"maxLength":16384}},"required":["kind","account_id","device_id","project_id","instruction"]},"CancelTaskTool":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"cancel_task"},"account_id":{"$ref":"#/$defs/Identifier"},"command_id":{"$ref":"#/$defs/Identifier"}},"required":["kind","account_id","command_id"]},"PrepareSendTool":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"prepare_send"},"account_id":{"$ref":"#/$defs/Identifier"},"device_id":{"$ref":"#/$defs/Identifier"},"recipient":{"type":"string","minLength":1,"maxLength":512},"content":{"type":"string","minLength":1,"maxLength":16384}},"required":["kind","account_id","device_id","recipient","content"]},"ToolCall":{"oneOf":[{"$ref":"#/$defs/SelectTargetTool"},{"$ref":"#/$defs/OpenResourceTool"},{"$ref":"#/$defs/DelegateTaskTool"},{"$ref":"#/$defs/CancelTaskTool"},{"$ref":"#/$defs/PrepareSendTool"}]},"Identifier":{"type":"string","minLength":1,"maxLength":128},"Timestamp":{"type":"integer","minimum":0,"maximum":9007199254740991,"description":"Unix epoch milliseconds; safe in JavaScript."},"Counter":{"type":"integer","minimum":0,"maximum":9007199254740991},"Base64":{"type":"string","minLength":4,"maxLength":1048576,"pattern":"^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$","not":{"pattern":"[^A-Za-z0-9+/=]"}},"PayloadHash":{"type":"string","minLength":64,"maxLength":64,"pattern":"^[0-9a-f]+$","not":{"pattern":"[^0-9a-f]"},"description":"SHA-256 of the immutable UTF-8 task preview bytes retained by trusted policy; JSON serialization is not canonicalized by this contract."},"Mode":{"type":"string","enum":["dictation","ai_control"]},"CaptureState":{"type":"string","enum":["off","hold","continuous"]},"RiskClass":{"type":"string","enum":["read_display","workspace_modify","sensitive"]},"Capability":{"type":"string","enum":["receive_text","open_resource","delegate_task","cancel_task","external_send"]},"ExecutionState":{"type":"string","enum":["queued","dispatched","running","succeeded","failed","cancelled"]},"CandidateState":{"type":"string","enum":["suggested","edited","approved","dismissed","expired"]},"ActivationKind":{"type":"string","enum":["ptt","wake_word","approval_tap"]},"ApprovalCredentialClass":{"type":"string","enum":["scoped_grant","user_presence","biometric","passcode"]},"RelayCiphertext":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"ciphertext"},"account_id":{"$ref":"#/$defs/Identifier"},"room_id":{"$ref":"#/$defs/Identifier"},"sender_device_id":{"$ref":"#/$defs/Identifier"},"ciphertext":{"$ref":"#/$defs/Base64"}},"required":["kind","account_id","room_id","sender_device_id","ciphertext"]},"RelayPresence":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"presence"},"account_id":{"$ref":"#/$defs/Identifier"},"room_id":{"$ref":"#/$defs/Identifier"},"sender_device_id":{"$ref":"#/$defs/Identifier"},"state":{"type":"string","enum":["online","offline"]}},"required":["kind","account_id","room_id","sender_device_id","state"]},"RelayWakeRegistration":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"wake_registration"},"account_id":{"$ref":"#/$defs/Identifier"},"room_id":{"$ref":"#/$defs/Identifier"},"sender_device_id":{"$ref":"#/$defs/Identifier"},"apns_wake_token":{"$ref":"#/$defs/Base64"},"environment":{"type":"string","enum":["sandbox","production"]}},"required":["kind","account_id","room_id","sender_device_id","apns_wake_token","environment"]},"RelayFrame":{"oneOf":[{"$ref":"#/$defs/RelayCiphertext"},{"$ref":"#/$defs/RelayPresence"},{"$ref":"#/$defs/RelayWakeRegistration"}]},"PairingPayload":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"pairing"},"account_id":{"$ref":"#/$defs/Identifier"},"desktop_public_key":{"$ref":"#/$defs/Base64"},"one_use_token":{"$ref":"#/$defs/PairingToken"},"expires_at":{"$ref":"#/$defs/PairingExpiry"},"relay_room_id":{"$ref":"#/$defs/Identifier"}},"required":["kind","account_id","desktop_public_key","one_use_token","expires_at","relay_room_id"]},"DictationText":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"dictation_text"},"account_id":{"$ref":"#/$defs/Identifier"},"segment_id":{"$ref":"#/$defs/Identifier"},"revision":{"$ref":"#/$defs/Counter"},"state":{"type":"string","enum":["partial","committed"]},"target_device_id":{"$ref":"#/$defs/Identifier"},"text":{"type":"string","maxLength":16384,"not":{"pattern":"[\\u0000-\\u001F\\u007F-\\u009F\\u2028\\u2029]"}},"preparation_id":{"$ref":"#/$defs/Identifier"}},"required":["kind","account_id","segment_id","revision","state","target_device_id","text"]},"FocusReport":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"focus_report"},"account_id":{"$ref":"#/$defs/Identifier"},"device_id":{"$ref":"#/$defs/Identifier"},"text_field_focused":{"type":"boolean"},"last_activity_at":{"$ref":"#/$defs/Timestamp"},"activity_age_ms":{"$ref":"#/$defs/Counter"}},"required":["kind","account_id","device_id","text_field_focused","last_activity_at"]},"DeviceInfo":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"device_info"},"account_id":{"$ref":"#/$defs/Identifier"},"device_id":{"$ref":"#/$defs/Identifier"},"display_name":{"type":"string","minLength":1,"maxLength":128},"platform":{"type":"string","enum":["ios","windows","linux","remote"]},"role":{"type":"string","enum":["text_receiver","agent","both","capture"]},"capabilities":{"type":"array","items":{"$ref":"#/$defs/Capability"},"maxItems":256}},"required":["kind","account_id","device_id","display_name","platform","role","capabilities"]},"Revoke":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"revoke"},"account_id":{"$ref":"#/$defs/Identifier"},"device_id":{"$ref":"#/$defs/Identifier"},"command_id":{"$ref":"#/$defs/Identifier"},"idempotency_key":{"$ref":"#/$defs/Identifier"},"revoked_at":{"$ref":"#/$defs/Timestamp"}},"required":["kind","account_id","device_id","command_id","idempotency_key","revoked_at"]},"TaskStatus":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"task_status"},"account_id":{"$ref":"#/$defs/Identifier"},"command_id":{"$ref":"#/$defs/Identifier"},"execution_state":{"$ref":"#/$defs/ExecutionState"},"updated_at":{"$ref":"#/$defs/Timestamp"},"outcome":{"type":"string","enum":["ok","denied","unavailable","error","dispatched"]},"app_reply":{"type":"string","maxLength":4096}},"required":["kind","account_id","command_id","execution_state","updated_at"]},"CaptureSegment":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"capture_segment"},"account_id":{"$ref":"#/$defs/Identifier"},"capture_session_id":{"$ref":"#/$defs/Identifier"},"source_id":{"$ref":"#/$defs/Identifier"},"source_type":{"type":"string","enum":["iphone","airpods","desktop","remote"]},"source_clock":{"$ref":"#/$defs/Counter"},"receive_timestamp":{"$ref":"#/$defs/Timestamp"},"partial_revision":{"$ref":"#/$defs/Counter"},"committed_segment_id":{"$ref":"#/$defs/Identifier"},"speaker_evidence":{"type":"string","enum":["unknown","matched","ambiguous"]},"recording_consent_state":{"type":"string","enum":["unknown","granted","denied"]},"segment_text":{"type":"string","maxLength":16384}},"required":["kind","account_id","capture_session_id","source_id","source_type","source_clock","receive_timestamp","partial_revision","committed_segment_id","speaker_evidence","recording_consent_state","segment_text"]},"CandidateAction":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"candidate_action"},"account_id":{"$ref":"#/$defs/Identifier"},"candidate_id":{"$ref":"#/$defs/Identifier"},"parent_capture_session":{"$ref":"#/$defs/Identifier"},"segment_span_ids":{"type":"array","items":{"$ref":"#/$defs/Identifier"},"maxItems":256},"proposed_task_kind":{"$ref":"#/$defs/Capability"},"proposed_task":{"$ref":"#/$defs/ToolCall"},"proposed_payload_hash":{"$ref":"#/$defs/PayloadHash"},"destination_hint":{"$ref":"#/$defs/Identifier"},"origin_confidence":{"type":"number","minimum":0,"maximum":1},"proposed_risk_class":{"$ref":"#/$defs/RiskClass"},"suggestion_expiry":{"$ref":"#/$defs/Timestamp"},"card_visibility":{"type":"string","enum":["visible","muted"]},"candidate_state":{"$ref":"#/$defs/CandidateState"}},"required":["kind","account_id","candidate_id","parent_capture_session","segment_span_ids","proposed_task_kind","proposed_task","proposed_payload_hash","origin_confidence","proposed_risk_class","suggestion_expiry","card_visibility","candidate_state"]},"AuthorizedCommand":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"authorized_command"},"account_id":{"$ref":"#/$defs/Identifier"},"command_id":{"$ref":"#/$defs/Identifier"},"candidate_id":{"$ref":"#/$defs/Identifier"},"immutable_task_payload":{"$ref":"#/$defs/ToolCall"},"payload_hash":{"$ref":"#/$defs/PayloadHash"},"source_tier":{"type":"string","enum":["inferred","explicit"]},"activation_kind":{"$ref":"#/$defs/ActivationKind"},"authenticated_actor":{"$ref":"#/$defs/Identifier"},"approval_credential_class":{"$ref":"#/$defs/ApprovalCredentialClass"},"approval_event_id":{"$ref":"#/$defs/Identifier"},"risk_class":{"$ref":"#/$defs/RiskClass"},"policy_version":{"$ref":"#/$defs/Identifier"},"granted_scope_id":{"$ref":"#/$defs/Identifier"},"destination_id":{"$ref":"#/$defs/Identifier"},"provider_session_id":{"$ref":"#/$defs/Identifier"},"idempotency_key":{"$ref":"#/$defs/Identifier"},"execution_state":{"$ref":"#/$defs/ExecutionState"},"outcome":{"type":"string","enum":["ok","denied","unavailable","error"]},"created_at":{"$ref":"#/$defs/Timestamp"},"updated_at":{"$ref":"#/$defs/Timestamp"}},"required":["kind","account_id","command_id","candidate_id","immutable_task_payload","payload_hash","source_tier","activation_kind","authenticated_actor","approval_credential_class","risk_class","policy_version","granted_scope_id","destination_id","idempotency_key","execution_state","created_at","updated_at"],"allOf":[{"if":{"properties":{"source_tier":{"const":"inferred"}}},"then":{"required":["approval_event_id"],"properties":{"activation_kind":{"const":"approval_tap"},"approval_credential_class":{"type":"string","enum":["user_presence","biometric","passcode"]}}}},{"if":{"properties":{"activation_kind":{"const":"approval_tap"}}},"then":{"required":["approval_event_id"],"properties":{"approval_credential_class":{"type":"string","enum":["user_presence","biometric","passcode"]}}}},{"if":{"properties":{"risk_class":{"const":"sensitive"}}},"then":{"required":["approval_event_id"],"properties":{"approval_credential_class":{"type":"string","enum":["biometric","passcode"]}}}}]},"AuditEntry":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"audit_entry"},"account_id":{"$ref":"#/$defs/Identifier"},"audit_id":{"$ref":"#/$defs/Identifier"},"command_id":{"$ref":"#/$defs/Identifier"},"authenticated_actor":{"$ref":"#/$defs/Identifier"},"event":{"type":"string","enum":["approved","denied","queued","dispatched","running","succeeded","failed","cancelled","revoked"]},"payload_hash":{"$ref":"#/$defs/PayloadHash"},"policy_version":{"$ref":"#/$defs/Identifier"},"recorded_at":{"$ref":"#/$defs/Timestamp"},"approval_event_id":{"$ref":"#/$defs/Identifier"}},"required":["kind","account_id","audit_id","command_id","authenticated_actor","event","payload_hash","policy_version","recorded_at"]},"Grant":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"grant"},"account_id":{"$ref":"#/$defs/Identifier"},"grant_id":{"$ref":"#/$defs/Identifier"},"authenticated_actor":{"$ref":"#/$defs/Identifier"},"device_id":{"$ref":"#/$defs/Identifier"},"project_id":{"$ref":"#/$defs/Identifier"},"capability":{"$ref":"#/$defs/Capability"},"risk_class":{"$ref":"#/$defs/RiskClass"},"expires_at":{"$ref":"#/$defs/Timestamp"}},"required":["kind","account_id","grant_id","authenticated_actor","device_id","project_id","capability","risk_class","expires_at"]},"ModeState":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"mode"},"account_id":{"$ref":"#/$defs/Identifier"},"device_id":{"$ref":"#/$defs/Identifier"},"mode":{"$ref":"#/$defs/Mode"}},"required":["kind","account_id","device_id","mode"]},"CaptureStateReport":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"capture_state"},"account_id":{"$ref":"#/$defs/Identifier"},"device_id":{"$ref":"#/$defs/Identifier"},"capture_state":{"$ref":"#/$defs/CaptureState"},"listening":{"type":"boolean"}},"required":["kind","account_id","device_id","capture_state"]},"InnerMessage":{"oneOf":[{"$ref":"#/$defs/DictationText"},{"$ref":"#/$defs/FocusReport"},{"$ref":"#/$defs/DeviceInfo"},{"$ref":"#/$defs/Revoke"},{"$ref":"#/$defs/TaskStatus"},{"$ref":"#/$defs/CaptureSegment"},{"$ref":"#/$defs/CandidateAction"},{"$ref":"#/$defs/AuthorizedCommand"},{"$ref":"#/$defs/AuditEntry"},{"$ref":"#/$defs/Grant"},{"$ref":"#/$defs/ModeState"},{"$ref":"#/$defs/CaptureStateReport"},{"$ref":"#/$defs/TargetPrepare"},{"$ref":"#/$defs/TargetReady"},{"$ref":"#/$defs/DictationOutcome"},{"$ref":"#/$defs/DictationQuery"},{"$ref":"#/$defs/CaptureControl"},{"$ref":"#/$defs/CaptureControlResult"},{"$ref":"#/$defs/AgentInventoryRequest"},{"$ref":"#/$defs/AgentInventory"},{"$ref":"#/$defs/AgentDispatch"},{"$ref":"#/$defs/AgentTaskQuery"}]},"PairingToken":{"type":"string","minLength":44,"maxLength":44,"pattern":"^[A-Za-z0-9+/]{43}=$","not":{"pattern":"[^A-Za-z0-9+/=]"},"description":"32-byte single-use bootstrap token; not a lasting credential."},"PairingExpiry":{"type":"integer","minimum":1,"maximum":9007199254740991,"description":"Positive Unix epoch milliseconds. Enrollment additionally checks now < expires_at <= now + 120000 using trusted time."},"TargetPrepare":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"target_prepare"},"account_id":{"$ref":"#/$defs/Identifier"},"request_id":{"$ref":"#/$defs/Identifier"},"target_device_id":{"$ref":"#/$defs/Identifier"}},"required":["kind","account_id","request_id","target_device_id"]},"TargetReady":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"target_ready"},"account_id":{"$ref":"#/$defs/Identifier"},"request_id":{"$ref":"#/$defs/Identifier"},"target_device_id":{"$ref":"#/$defs/Identifier"},"ready":{"type":"boolean"}},"required":["kind","account_id","request_id","target_device_id","ready"]},"DictationOutcome":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"dictation_outcome"},"account_id":{"$ref":"#/$defs/Identifier"},"segment_id":{"$ref":"#/$defs/Identifier"},"target_device_id":{"$ref":"#/$defs/Identifier"},"outcome":{"type":"string","enum":["inserted","unavailable","unconfirmed"]}},"required":["kind","account_id","segment_id","target_device_id","outcome"]},"DictationQuery":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"dictation_query"},"account_id":{"$ref":"#/$defs/Identifier"},"segment_id":{"$ref":"#/$defs/Identifier"},"target_device_id":{"$ref":"#/$defs/Identifier"}},"required":["kind","account_id","segment_id","target_device_id"]},"CaptureControl":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"capture_control"},"account_id":{"$ref":"#/$defs/Identifier"},"request_id":{"$ref":"#/$defs/Identifier"},"target_device_id":{"$ref":"#/$defs/Identifier"},"capture_state":{"$ref":"#/$defs/CaptureState"},"ttl_ms":{"type":"integer","minimum":1,"maximum":2000},"request_sequence":{"$ref":"#/$defs/Counter"},"expires_at":{"$ref":"#/$defs/Timestamp"}},"required":["kind","account_id","request_id","target_device_id","capture_state","ttl_ms","request_sequence","expires_at"]},"CaptureControlResult":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"capture_control_result"},"account_id":{"$ref":"#/$defs/Identifier"},"request_id":{"$ref":"#/$defs/Identifier"},"device_id":{"$ref":"#/$defs/Identifier"},"capture_state":{"$ref":"#/$defs/CaptureState"},"outcome":{"type":"string","enum":["applied","unavailable","expired","cancelled"]}},"required":["kind","account_id","request_id","device_id","capture_state","outcome"]},"AuditArchiveBlock":{"type":"object","properties":{"account_id":{"$ref":"#/$defs/Identifier"},"room_id":{"$ref":"#/$defs/Identifier"},"sequence":{"$ref":"#/$defs/Counter"},"previous_hash":{"type":"string","minLength":64,"maxLength":64,"pattern":"^[0-9a-f]+$","not":{"pattern":"[^0-9a-f]"}},"ciphertext":{"type":"string","minLength":40,"maxLength":1500000,"pattern":"^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$","not":{"pattern":"[^A-Za-z0-9+/=]"}},"block_hash":{"type":"string","minLength":64,"maxLength":64,"pattern":"^[0-9a-f]+$","not":{"pattern":"[^0-9a-f]"}},"epoch":{"$ref":"#/$defs/Counter"}},"required":["account_id","room_id","sequence","previous_hash","ciphertext","block_hash"],"additionalProperties":false},"AuditArchiveRead":{"type":"object","properties":{"account_id":{"$ref":"#/$defs/Identifier"},"room_id":{"$ref":"#/$defs/Identifier"},"sequence":{"$ref":"#/$defs/Counter"},"epoch":{"$ref":"#/$defs/Counter"}},"required":["account_id","room_id","sequence"],"additionalProperties":false},"AuditArchivePage":{"type":"object","properties":{"account_id":{"$ref":"#/$defs/Identifier"},"room_id":{"$ref":"#/$defs/Identifier"},"blocks":{"type":"array","items":{"$ref":"#/$defs/AuditArchiveBlock"},"minItems":0,"maxItems":8},"epoch":{"$ref":"#/$defs/Counter"}},"required":["account_id","room_id","blocks"],"additionalProperties":false},"AuditArchiveWriter":{"type":"object","properties":{"account_id":{"$ref":"#/$defs/Identifier"},"room_id":{"$ref":"#/$defs/Identifier"},"device_id":{"$ref":"#/$defs/Identifier"},"public_key":{"$ref":"#/$defs/Base64"},"old_signature":{"$ref":"#/$defs/Base64"},"revision":{"$ref":"#/$defs/Counter"}},"required":["account_id","room_id","device_id","public_key","old_signature","revision"],"additionalProperties":false},"AgentSession":{"type":"object","additionalProperties":false,"properties":{"account_id":{"$ref":"#/$defs/Identifier"},"device_id":{"$ref":"#/$defs/Identifier"},"project_id":{"$ref":"#/$defs/Identifier"},"workspace":{"type":"string","minLength":1,"maxLength":4096},"provider":{"type":"string","enum":["claude","codex","cloud"]},"provider_session_id":{"$ref":"#/$defs/Identifier"},"capability_profile":{"type":"string","enum":["read_only","workspace_write"]},"capabilities":{"type":"array","items":{"$ref":"#/$defs/Capability"},"maxItems":16}},"required":["account_id","device_id","project_id","workspace","provider","provider_session_id","capability_profile","capabilities"]},"AgentInventoryRequest":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"agent_inventory_request"},"account_id":{"$ref":"#/$defs/Identifier"},"request_id":{"$ref":"#/$defs/Identifier"}},"required":["kind","account_id","request_id"]},"AgentInventory":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"agent_inventory"},"account_id":{"$ref":"#/$defs/Identifier"},"device_id":{"$ref":"#/$defs/Identifier"},"request_id":{"$ref":"#/$defs/Identifier"},"authenticated_actor":{"$ref":"#/$defs/Identifier"},"sessions":{"type":"array","items":{"$ref":"#/$defs/AgentSession"},"maxItems":256}},"required":["kind","account_id","device_id","request_id","authenticated_actor","sessions"]},"AgentDispatch":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"agent_dispatch"},"account_id":{"$ref":"#/$defs/Identifier"},"command":{"$ref":"#/$defs/AuthorizedCommand"},"session":{"$ref":"#/$defs/AgentSession"},"immutable_preview":{"$ref":"#/$defs/Base64"},"expires_at":{"$ref":"#/$defs/Timestamp"}},"required":["kind","account_id","command","session","immutable_preview","expires_at"]},"AgentTaskQuery":{"type":"object","additionalProperties":false,"properties":{"kind":{"const":"agent_task_query"},"account_id":{"$ref":"#/$defs/Identifier"},"command_id":{"$ref":"#/$defs/Identifier"}},"required":["kind","account_id","command_id"]}}}
 """#.utf8))
     static func validate(_ name: String, _ value: JSONValue, nonIntegers: Set<String> = []) throws {
         let schema = document["$defs"][name]
@@ -1105,10 +1614,42 @@ enum Schema {
         }
         if let text = v.string {
             if !bounds(s, Double(text.unicodeScalars.count), "minLength", "maxLength") { return false }
-            if let pattern = s["pattern"].string, text.range(of: pattern, options: .regularExpression) == nil { return false }
+            if let pattern = s["pattern"].string, !patternMatches(pattern, text) { return false }
         }
         if let n = v.number, !bounds(s, n, "minimum", "maximum") { return false }
         return true
+    }
+    // The generator accepts only these reviewed patterns. Match scalars directly:
+    // CRLF is one Swift Character, and Foundation regex ranges can split graphemes
+    // or give platform-dependent end-anchor behavior. No regex participates here.
+    static func patternMatches(_ pattern: String, _ text: String) -> Bool {
+        let points = text.unicodeScalars.map(\.value)
+        func base64(_ point: UInt32) -> Bool {
+            (0x41...0x5a).contains(point) || (0x61...0x7a).contains(point)
+                || (0x30...0x39).contains(point) || point == 0x2b || point == 0x2f
+        }
+        func hex(_ point: UInt32) -> Bool {
+            (0x30...0x39).contains(point) || (0x61...0x66).contains(point)
+        }
+        switch pattern {
+        case #"[\u0000-\u001F\u007F-\u009F\u2028\u2029]"#:
+            return points.contains { $0 <= 0x1f || (0x7f...0x9f).contains($0) || $0 == 0x2028 || $0 == 0x2029 }
+        case #"[^A-Za-z0-9+/=]"#:
+            return points.contains { !base64($0) && $0 != 0x3d }
+        case #"^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"#:
+            guard points.count % 4 == 0 else { return false }
+            var end = points.count
+            while end > 0 && points[end - 1] == 0x3d { end -= 1 }
+            return points.count - end <= 2 && points[..<end].allSatisfy(base64)
+        case #"^[A-Za-z0-9+/]{43}=$"#:
+            return points.count == 44 && points.last == 0x3d && points.dropLast().allSatisfy(base64)
+        case #"^[0-9a-f]+$"#:
+            return !points.isEmpty && points.allSatisfy(hex)
+        case #"[^0-9a-f]"#:
+            return points.contains { !hex($0) }
+        default:
+            return false // A new pattern needs generator dialect review and scalar implementation.
+        }
     }
     static func bounds(_ s: JSONValue, _ n: Double, _ min: String, _ max: String) -> Bool {
         (s[min].number.map { n >= $0 } ?? true) && (s[max].number.map { n <= $0 } ?? true)

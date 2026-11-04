@@ -91,3 +91,13 @@ def gate(candidate, baseline, threshold):
     if candidate["term_errors"] >= baseline["term_errors"] or reduction + 1e-12 < threshold:
         return f"FAIL: term error reduction {reduction:.1%}"
     return f"PASS: term error reduction {reduction:.1%}"
+
+
+def stage_timing(results, start, end):
+    """Only paired measured offsets contribute; never substitute missing acknowledgement."""
+    rows = []
+    for result in results:
+        stages = result.get("stages", {})
+        if end in stages and (start is None or start in stages):
+            rows.append({"duration": stages[end] - (stages[start] if start else 0)})
+    return timing(rows, "duration")

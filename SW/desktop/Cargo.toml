@@ -1,5 +1,6 @@
 [workspace]
-members = ["crates/protocol"]
+members = ["crates/protocol", "crates/core", "crates/app", "crates/inject-windows", "crates/agents", "crates/inject-linux", "crates/tray"]
+default-members = ["crates/protocol", "crates/core", "crates/app", "crates/inject-windows", "crates/agents", "crates/inject-linux"]
 resolver = "2"
 
 [workspace.package]

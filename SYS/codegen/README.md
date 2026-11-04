@@ -13,7 +13,7 @@ flowchart LR
 |---|---|---|
 | [generate.py](generate.py) | Python stdlib generator; deterministic in-memory stale check | ✅ |
 | [templates/](templates/) | Runtime validators and wire codecs, emitted beside generated types | ✅ |
-| [test_contract.py](test_contract.py) | Transitive authority, relay, dictation, account and stale-output tests | ✅ |
+| [test_contract.py](test_contract.py) | Authority/relay/dictation, complete scalar-pattern coverage and stale-output tests | ✅ |
 | [probe_regressions.py](probe_regressions.py) | Temporarily remove TS control/duplicate rules; prove every new regression vector fails | ✅ |
 | [dialect.md](dialect.md) | Supported schema subset and maintenance boundaries | ✅ |
 | [../Makefile](../Makefile) | Sequential checks, four-worker builds | ✅ Linux |
@@ -38,3 +38,5 @@ Trace: [REQ-59](../requirements.md#extensibility), [REQ-61](../requirements.md#e
 [REQ-16](../requirements.md#dictation-delivery-and-targets) and
 [REQ-28–33](../requirements.md#authorization-and-policy). Local contract checks
 are evidence for the schema only; see [runtime obligations](../protocol/wire-contract.md).
+
+The dictation field allowlist now includes only the opaque preparation identifier for display-ready binding; mutation checks still reject Send/Enter and structured actions.

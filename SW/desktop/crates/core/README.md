@@ -1,0 +1,27 @@
+```mermaid
+flowchart LR
+    relay[Ed25519 relay auth] --> transport
+    receiver --> pairing & session
+    pairing --> session --> Injector[TextInjector]
+    pairing --> storage
+    session --> storage
+    pairing & session --> transport
+    protocol[../protocol] --> pairing & session & transport
+```
+
+| Path | What it is | Status |
+|---|---|---|
+| [src/](src/) | Enrollment, storage, Noise session and TCP/WS implementations | ✅ synthetic tests |
+| [tests/](tests/) | Security/lifecycle behavior, strict signed relay fake, token mutations, published vectors | ✅ |
+| [Cargo.toml](Cargo.toml) | `os-keychain` opt-in; platform TLS backends | ✅ compile checks |
+
+Start with [pairing.rs](src/pairing.rs), [tests](tests/security.rs) and the
+[Noise profile](../../../../SYS/protocol/noise.md). REQ-16/22–25/27/34/60/61.
+The real local [E2E gate](../../../../SYS/tests/e2e/README.md) verifies the merged Worker with Swift over WebSocket and LAN. OS injection, deployed WAN relay and physical iPhone remain **unverified**.
+Embedders hold `ReceiverLease` for receiver lifetime, clone one `Registry`, and
+close the transport after a receive/pairing error. `deliver` never executes tools.
+Insertion failures are non-fatal: `TaskStatus.command_id = segment_id` with
+`failed/unavailable` permits retry after a certified pre-input failure;
+`failed/error` is uncertain and retains its durable claim across reconnects.
+Existing injectors keep their synchronous method; an optional async method lets
+Windows isolate blocking providers without changing the Linux adapter.
