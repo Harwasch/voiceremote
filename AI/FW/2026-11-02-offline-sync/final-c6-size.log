@@ -1,0 +1,31 @@
+Executing action: size
+Running ninja in directory /home/harrison/Documents/Projects/voiceremote/.claude/worktrees/codex-feat-fw-stopwatch/FW/build-c6
+Executing "ninja all"...
+[1/4] cd /home/harrison/Documents/Projects/voiceremote/.claude/worktrees/codex-feat-fw-stopwatch/FW/build-c6/esp-idf/esptool_py && /home/harrison/hw-tools/espressif/python_env/idf5.5_py3.12_env/bin/python /home/harrison/hw-tools/esp-idf/components/partition_table/check_sizes.py --offset 0x8000 partition --type app /home/harrison/Documents/Projects/voiceremote/.claude/worktrees/codex-feat-fw-stopwatch/FW/build-c6/partition_table/partition-table.bin /home/harrison/Documents/Projects/voiceremote/.claude/worktrees/codex-feat-fw-stopwatch/FW/build-c6/voice_remote.bin
+voice_remote.bin binary size 0x12f090 bytes. Smallest app partition is 0x177000 bytes. 0x47f70 bytes (19%) free.
+[2/4] Performing build step for 'bootloader'
+[1/1] cd /home/harrison/Documents/Projects/voiceremote/.claude/worktrees/codex-feat-fw-stopwatch/FW/build-c6/bootloader/esp-idf/esptool_py && /home/harrison/hw-tools/espressif/python_env/idf5.5_py3.12_env/bin/python /home/harrison/hw-tools/esp-idf/components/partition_table/check_sizes.py --offset 0x8000 bootloader 0x0 /home/harrison/Documents/Projects/voiceremote/.claude/worktrees/codex-feat-fw-stopwatch/FW/build-c6/bootloader/bootloader.bin
+Bootloader binary size 0x5540 bytes. 0x2ac0 bytes (33%) free.
+[3/4] No install step for 'bootloader'
+[4/4] Completed 'bootloader'
+Running ninja in directory /home/harrison/Documents/Projects/voiceremote/.claude/worktrees/codex-feat-fw-stopwatch/FW/build-c6
+Executing "ninja size"...
+[0/1] cd /home/harrison/Documents/Projects/voiceremote/.claude/worktrees/codex-feat-fw-stopwatch/FW/build-c6 && /home/harrison/hw-tools/cuttle-venv/lib/python3.12/site-packages/cmake/data/bin/cmake -D "IDF_SIZE_TOOL=/home/harrison/hw-tools/espressif/python_env/idf5.5_py3.12_env/bin/python;-m;esp_idf_size" -D MAP_FILE=/home/harrison/Documents/Projects/voiceremote/.claude/worktrees/codex-feat-fw-stopwatch/FW/build-c6/voice_remote.map -D OUTPUT_JSON= -P /home/harrison/hw-tools/esp-idf/tools/cmake/run_size_tool.cmake
+                            Memory Type Usage Summary                             
+┏━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┓
+┃ Memory Type/Section ┃ Used [bytes] ┃ Used [%] ┃ Remain [bytes] ┃ Total [bytes] ┃
+┡━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━┩
+│ Flash Code          │      1144622 │          │                │               │
+│    .text            │       932602 │          │                │               │
+│    .rodata          │       211528 │          │                │               │
+│    .appdesc         │          256 │          │                │               │
+│    .init_array      │          236 │          │                │               │
+│ DIRAM               │       157604 │    34.86 │         294508 │        452112 │
+│    .text            │        86928 │    19.23 │                │               │
+│    .bss             │        61096 │    13.51 │                │               │
+│    .data            │         9580 │     2.12 │                │               │
+│ LP SRAM             │           24 │     0.15 │          16360 │         16384 │
+│    .rtc_reserved    │           24 │     0.15 │                │               │
+└─────────────────────┴──────────────┴──────────┴────────────────┴───────────────┘
+Total image size: 1240894 bytes (.bin may be padded larger)
+Note: The reported total sizes may be smaller than those in the technical reference manual due to reserved memory and application configuration. The total flash size available for the application is not included by default, as it cannot be reliably determined due to the presence of other data like the bootloader, partition table, and application partition size.

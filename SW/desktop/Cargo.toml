@@ -1,0 +1,10 @@
+[workspace]
+members = ["crates/protocol", "crates/core", "crates/app", "crates/inject-windows", "crates/agents", "crates/inject-linux", "crates/tray"]
+default-members = ["crates/protocol", "crates/core", "crates/app", "crates/inject-windows", "crates/agents", "crates/inject-linux"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+

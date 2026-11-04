@@ -1,0 +1,672 @@
+//! Trusted UI adapter around core pairing/registry and the shared desktop driver.
+use crate::{
+    control, desktop_receiver as receiver,
+    desktop_transport::LanListener,
+    model::{QrView, RotatingOffer},
+};
+use anyhow::{Result, ensure};
+use serde::{Deserialize, Serialize};
+use std::{
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex},
+    time::Duration,
+};
+use tokio::sync::{oneshot, watch};
+use voiceremote_core::{
+    pairing::{self, Clock, Offer, SystemClock},
+    protocol::*,
+    relay::{RelayClient, RelayIdentity},
+    storage::{Identity, KeyStore, ReceiverLease, Registry},
+    transport::{RelayRoute, Transport},
+};
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct Settings {
+    pub account: String,
+    pub device: String,
+    pub relay: Option<String>,
+    pub role: DeviceInfoRole,
+    #[serde(default)]
+    pub agents_config: Option<PathBuf>,
+}
+impl Settings {
+    fn info(&self) -> Result<DeviceInfo> {
+        let mut info = crate::info(&self.account, &self.device);
+        info.role = self.role.clone();
+        if self.role == DeviceInfoRole::Agent {
+            info.capabilities.clear();
+        }
+        if let Some(path) = &self.agents_config {
+            ensure!(
+                matches!(self.role, DeviceInfoRole::Agent | DeviceInfoRole::Both),
+                "choose agent role explicitly"
+            );
+            let config = voiceremote_agents::Allowlist::load(path)?;
+            ensure!(
+                config.account == self.account && config.host == self.device,
+                "agent configuration identity mismatch"
+            );
+            info.capabilities.extend([
+                Capability::DelegateTask,
+                Capability::CancelTask,
+                Capability::OpenResource,
+            ]);
+        }
+        encode(&info).map_err(anyhow::Error::msg)?;
+        Ok(info)
+    }
+}
+#[derive(Clone, Serialize)]
+pub struct Device {
+    pub id: String,
+    pub name: String,
+    pub role: DeviceInfoRole,
+}
+#[derive(Clone, Default, Serialize)]
+pub struct View {
+    pub qr: Option<QrView>,
+    pub phrase: Option<String>,
+    pub pairing: bool,
+    pub message: String,
+}
+#[derive(Serialize)]
+pub struct Snapshot {
+    pub view: View,
+    pub status: control::Status,
+    pub devices: Vec<Device>,
+    pub settings: Option<Settings>,
+}
+struct Worker {
+    stop: watch::Sender<bool>,
+    task: tokio::task::JoinHandle<()>,
+}
+impl Drop for Worker {
+    fn drop(&mut self) {
+        let _ = self.stop.send(true);
+        self.task.abort();
+    }
+}
+/// Cleanup also runs when the pairing worker is cancelled/aborted. The client
+/// contains only the room's signing identity; no provisioning secret is retained.
+struct PairingRoomCleanup {
+    client: Option<RelayClient>,
+    peer: Arc<Mutex<Option<String>>>,
+}
+impl Drop for PairingRoomCleanup {
+    fn drop(&mut self) {
+        if let Some(client) = self.client.take() {
+            let peer = self.peer.lock().unwrap().clone();
+            tokio::spawn(async move {
+                if let Some(peer) = peer {
+                    let _ = client.revoke(&peer).await;
+                }
+                let _ = client.revoke(&client.route.sender).await;
+            });
+        }
+    }
+}
+pub struct Backend {
+    pub root: PathBuf,
+    keys: Arc<dyn KeyStore>,
+    registry: Registry,
+    identity: Arc<Identity>,
+    _lease: ReceiverLease,
+    settings: Mutex<Option<Settings>>,
+    view: Mutex<View>,
+    confirmation: Mutex<Option<oneshot::Sender<String>>>,
+    workers: Mutex<Vec<Worker>>,
+    injectors: receiver::InjectorFactory,
+}
+impl Backend {
+    pub fn open(root: PathBuf) -> Result<Arc<Self>> {
+        let lease = ReceiverLease::acquire(&root)?;
+        #[cfg(all(windows, feature = "os-keychain"))]
+        let keys: Arc<dyn KeyStore> = Arc::new(voiceremote_core::storage::OsKeyStore {
+            service: "voiceremote-desktop".into(),
+        });
+        #[cfg(not(all(windows, feature = "os-keychain")))]
+        let keys: Arc<dyn KeyStore> =
+            Arc::new(voiceremote_core::storage::FileKeyStore::new(&root)?);
+        let registry = Registry::new(keys.clone());
+        let identity = Arc::new(Identity::load_or_create(keys.as_ref())?);
+        let settings = keys
+            .get("tray-settings")?
+            .map(|s| serde_json::from_slice(&s))
+            .transpose()?;
+        let injectors = injectors(&root);
+        Ok(Arc::new(Self {
+            root,
+            keys,
+            registry,
+            identity,
+            _lease: lease,
+            settings: Mutex::new(settings),
+            view: Mutex::new(View::default()),
+            confirmation: Mutex::new(None),
+            workers: Mutex::new(Vec::new()),
+            injectors,
+        }))
+    }
+    pub fn snapshot(&self) -> Result<Snapshot> {
+        Ok(Snapshot {
+            view: self.view.lock().unwrap().clone(),
+            status: control::hub().lock().unwrap().snapshot(),
+            settings: self.settings.lock().unwrap().clone(),
+            devices: self
+                .registry
+                .devices()?
+                .into_iter()
+                .map(|p| Device {
+                    id: p.id,
+                    name: p.info.display_name,
+                    role: p.info.role,
+                })
+                .collect(),
+        })
+    }
+    fn client(&self, settings: &Settings, room: String) -> Result<RelayClient> {
+        RelayClient::new(
+            settings
+                .relay
+                .as_deref()
+                .ok_or_else(|| anyhow::anyhow!("relay missing"))?,
+            RelayRoute {
+                account: settings.account.clone(),
+                room,
+                sender: settings.device.clone(),
+            },
+            RelayIdentity::load_or_create(self.keys.as_ref())?,
+        )
+    }
+    fn message(&self, message: &str) {
+        self.view.lock().unwrap().message = message.into();
+    }
+    pub fn start(self: &Arc<Self>) {
+        control::hub().lock().unwrap().presentation_required = true;
+        let backend = self.clone();
+        tokio::spawn(async move {
+            if control::serve(&backend.root, control::hub().clone())
+                .await
+                .is_err()
+            {
+                backend.message("Local hotkey control unavailable");
+            }
+        });
+        self.resume();
+    }
+    fn resume(self: &Arc<Self>) {
+        self.resume_except(None);
+    }
+    fn resume_except(self: &Arc<Self>, exclude: Option<&str>) {
+        let Some(settings) = self.settings.lock().unwrap().clone() else {
+            return;
+        };
+        let Ok(peers) = self.registry.devices() else {
+            self.message("Cannot load paired devices");
+            return;
+        };
+        for peer in peers
+            .into_iter()
+            .filter(|p| p.info.account_id == settings.account && exclude != Some(p.id.as_str()))
+        {
+            let backend = self.clone();
+            let settings = settings.clone();
+            let (send, stop) = watch::channel(false);
+            let task = tokio::spawn(async move {
+                let result: Result<()> = async {
+                    if let Some(path) = &settings.agents_config {
+                        let node = voiceremote_agents::AgentNode::new(
+                            voiceremote_agents::Allowlist::load(path)?,
+                            voiceremote_agents::CliAdapter::default(),
+                            backend.keys.clone(),
+                        )?;
+                        let mut listener =
+                            voiceremote_agents::transport::Listener::bind_auto().await?;
+                        listener.advertise(&peer.room)?;
+                        let lan = voiceremote_agents::receiver::run_lan(
+                            node.clone(),
+                            listener,
+                            backend.identity.clone(),
+                            backend.registry.clone(),
+                            peer.clone(),
+                            settings.device.clone(),
+                            backend.injectors.clone(),
+                            stop.clone(),
+                        );
+                        let relay = async {
+                            if settings.relay.is_some() {
+                                voiceremote_agents::receiver::run_relay(
+                                    node,
+                                    backend.client(&settings, peer.room.clone())?,
+                                    backend.identity.clone(),
+                                    backend.registry.clone(),
+                                    peer.clone(),
+                                    settings.device.clone(),
+                                    backend.injectors.clone(),
+                                    stop.clone(),
+                                )
+                                .await
+                            } else {
+                                std::future::pending::<Result<()>>().await
+                            }
+                        };
+                        return tokio::select! { result = lan => result, result = relay => result };
+                    }
+                    let listener = match LanListener::bind_auto().await {
+                        Ok(mut listener) => {
+                            listener.advertise(&peer.room)?;
+                            Some(listener)
+                        }
+                        Err(error) if settings.relay.is_none() => return Err(error),
+                        Err(_) => None,
+                    };
+                    let client = if settings.relay.is_some() {
+                        Some(backend.client(&settings, peer.room.clone())?)
+                    } else {
+                        None
+                    };
+                    receiver::run_paths(
+                        listener,
+                        client,
+                        backend.identity.clone(),
+                        backend.registry.clone(),
+                        peer,
+                        settings.device,
+                        backend.injectors.clone(),
+                        stop,
+                        None,
+                        false,
+                    )
+                    .await
+                }
+                .await;
+                if result.is_err() {
+                    backend
+                        .message("Receiver unavailable; check network and restart Voice Receiver");
+                }
+            });
+            self.workers
+                .lock()
+                .unwrap()
+                .push(Worker { stop: send, task });
+        }
+    }
+    pub fn pair(
+        self: &Arc<Self>,
+        mut settings: Settings,
+        provisioning_secret: Option<String>,
+    ) -> Result<()> {
+        settings.relay = settings.relay.filter(|s| !s.trim().is_empty());
+        settings.info()?;
+        if let Some(local) = self.registry.local_info()? {
+            ensure!(
+                local.device_id == settings.device && local.account_id == settings.account,
+                "existing desktop identity must be retained"
+            );
+        }
+        {
+            let mut view = self.view.lock().unwrap();
+            ensure!(!view.pairing, "pairing already active");
+            *view = View {
+                pairing: true,
+                message: "Preparing pairing…".into(),
+                ..View::default()
+            };
+        }
+        self.workers.lock().unwrap().clear();
+        let backend = self.clone();
+        let (send, stop) = watch::channel(false);
+        let secret = provisioning_secret.map(zeroize::Zeroizing::new);
+        let task = tokio::spawn(async move {
+            let result = backend.pair_loop(settings, stop, secret).await;
+            backend.confirmation.lock().unwrap().take();
+            *backend.view.lock().unwrap() = View {
+                message: if result.is_ok() {
+                    "Phone paired"
+                } else {
+                    "Pairing ended; compare both phrases and try again"
+                }
+                .into(),
+                ..View::default()
+            };
+            if result.is_err() {
+                backend.resume();
+            }
+        });
+        self.workers
+            .lock()
+            .unwrap()
+            .push(Worker { stop: send, task });
+        Ok(())
+    }
+    async fn pair_loop(
+        self: &Arc<Self>,
+        settings: Settings,
+        stop: watch::Receiver<bool>,
+        provisioning_secret: Option<zeroize::Zeroizing<String>>,
+    ) -> Result<()> {
+        let client = if settings.relay.is_some() {
+            let client = self.client(&settings, voiceremote_core::relay::new_room_id())?;
+            client
+                .create(provisioning_secret.as_ref().map(|s| s.as_str()))
+                .await?;
+            Some(client)
+        } else {
+            None
+        };
+        let mut cleanup = PairingRoomCleanup {
+            client: client.clone(),
+            peer: Arc::new(Mutex::new(None)),
+        };
+        let room = client
+            .as_ref()
+            .map(|c| c.route.room.clone())
+            .unwrap_or_else(voiceremote_core::relay::new_room_id);
+        drop(provisioning_secret); // Never persisted or returned in snapshots/logs.
+        let listener = match LanListener::bind_auto().await {
+            Ok(mut listener) => {
+                listener.advertise(&room)?;
+                Some(listener)
+            }
+            Err(error) if client.is_none() => return Err(error),
+            Err(_) => None,
+        };
+        loop {
+            let mut qr = if let Some(client) = &client {
+                let invite = client.invite().await?;
+                RotatingOffer::from_offer(Offer::from_relay_invite(
+                    &self.identity,
+                    settings.account.clone(),
+                    room.clone(),
+                    invite.one_use_token,
+                    invite.expires_at,
+                    &SystemClock,
+                )?)?
+            } else {
+                RotatingOffer::new(
+                    &self.identity,
+                    settings.account.clone(),
+                    room.clone(),
+                    &SystemClock,
+                )?
+            };
+            {
+                let mut view = self.view.lock().unwrap();
+                view.qr = Some(qr.view());
+                view.phrase = None;
+                view.message = "Scan on your phone, then compare the four words".into();
+            }
+            let deadline = Duration::from_millis(
+                qr.offer
+                    .payload
+                    .expires_at
+                    .saturating_sub(SystemClock.now_ms()?),
+            );
+            let accepted: Result<(pairing::PendingPair, Box<dyn Transport>, bool)> = tokio::select! {
+                _=receiver::stopped(stop.clone())=>anyhow::bail!("pairing cancelled"),
+                result=tokio::time::timeout(deadline, async {
+                    let (mut transport, via_relay) = crate::desktop_transport::accept_pairing(listener.as_ref(), client.as_ref()).await?;
+                    let pending = pairing::accept(transport.as_mut(), &self.identity, &mut qr.offer, &SystemClock).await?;
+                    Ok((pending, transport, via_relay))
+                })=>match result { Ok(result)=>result, Err(_)=>continue },
+            };
+            let Ok((mut pending, mut transport, via_relay)) = accepted else {
+                continue;
+            };
+            // Token is consumed. Remove QR immediately; never reuse it after abort.
+            let (send, receive) = oneshot::channel();
+            *self.confirmation.lock().unwrap() = Some(send);
+            {
+                let mut view = self.view.lock().unwrap();
+                view.qr = None;
+                view.phrase = Some(pending.phrase());
+                view.message =
+                    "Compare on both displays. Enter all four words to confirm here.".into();
+            }
+            let completion: Result<_> = tokio::select! {
+                _=receiver::stopped(stop.clone())=>anyhow::bail!("pairing cancelled"),
+                result=tokio::time::timeout(Duration::from_secs(120), async {
+                    let entered = receive.await?;
+                    pending.confirm_local(transport.as_mut(), &entered, settings.info()?).await?;
+                    pending.receive_confirmation(transport.as_mut()).await?;
+                    *cleanup.peer.lock().unwrap() = pending.remote_info().map(|info| info.device_id.clone());
+                    let session = pending.finish(self.registry.clone())?;
+                    if self.keys.put("tray-settings", &serde_json::to_vec(&settings)?).is_err() {
+                        self.registry.revoke(&session.peer().id)?;
+                        let _ = transport.close().await;
+                        anyhow::bail!("settings could not be persisted");
+                    }
+                    *self.settings.lock().unwrap() = Some(settings.clone());
+                    Ok(session)
+                })=>result?,
+            };
+            let session = completion?;
+            cleanup.client = None; // Completed enrollment now owns room lifecycle.
+            *self.view.lock().unwrap() = View {
+                message: "Phone paired; waiting for phone state".into(),
+                ..View::default()
+            };
+            if settings.agents_config.is_some() {
+                // Transfer from the pairing transport to the bounded agent pump on
+                // fresh resume. Dropping the old listener prevents duplicate room consumers.
+                let _ = transport.close().await;
+                drop(listener);
+                drop(client);
+                self.resume();
+                return Ok(());
+            }
+            // Keep the freshly enrolled session instead of requiring a reconnect.
+            let backend = self.clone();
+            let (send, session_stop) = watch::channel(false);
+            let peer = session.peer().clone();
+            let paired_id = peer.id.clone();
+            let task = tokio::spawn(async move {
+                let _ = receiver::run_paths(
+                    listener,
+                    client,
+                    backend.identity.clone(),
+                    backend.registry.clone(),
+                    peer,
+                    settings.device,
+                    backend.injectors.clone(),
+                    session_stop,
+                    Some((session, transport)),
+                    via_relay,
+                )
+                .await;
+            });
+            self.workers
+                .lock()
+                .unwrap()
+                .push(Worker { stop: send, task });
+            self.resume_except(Some(&paired_id));
+            return Ok(());
+        }
+    }
+    pub fn confirm(&self, phrase: String) -> Result<()> {
+        let send = self
+            .confirmation
+            .lock()
+            .unwrap()
+            .take()
+            .ok_or_else(|| anyhow::anyhow!("no confirmation pending"))?;
+        send.send(phrase)
+            .map_err(|_| anyhow::anyhow!("pairing expired"))?;
+        let mut view = self.view.lock().unwrap();
+        view.phrase = None;
+        view.message = "Waiting for confirmation on your phone".into();
+        Ok(())
+    }
+    pub fn cancel(self: &Arc<Self>) {
+        self.workers.lock().unwrap().clear();
+        self.confirmation.lock().unwrap().take();
+        *self.view.lock().unwrap() = View {
+            message: "Pairing cancelled".into(),
+            ..View::default()
+        };
+        self.resume();
+    }
+    pub async fn revoke(&self, id: &str) -> Result<()> {
+        let peer = self.registry.resolve(id)?;
+        let _ = control::notify_revocation(control::hub(), &peer.info.device_id).await;
+        self.registry.revoke(&peer.id)?;
+        let settings = self.settings.lock().unwrap().clone();
+        if let Some(settings) = settings.filter(|s| s.relay.is_some()) {
+            let client = self.client(&settings, peer.room)?;
+            let peer_removed = client.revoke(&peer.info.device_id).await;
+            let self_removed = client.revoke(&settings.device).await;
+            if peer_removed.is_err() || self_removed.is_err() {
+                self.message("Revoked locally; relay room cleanup failed");
+                anyhow::bail!("revoked locally; relay cleanup failed");
+            }
+        }
+        self.message("Device revoked");
+        Ok(())
+    }
+}
+fn injectors(root: &Path) -> receiver::InjectorFactory {
+    #[cfg(target_os = "linux")]
+    {
+        let injector = voiceremote_inject_linux::LinuxInjector::new(root.to_owned());
+        let sampler = injector.clone();
+        receiver::set_focus_sampler(Arc::new(move || {
+            let focus = sampler.focus_snapshot();
+            (
+                focus.text_field_focused,
+                focus.last_activity_at,
+                focus.activity_age_ms,
+            )
+        }));
+        Arc::new(move || Box::new(injector.clone()))
+    }
+    #[cfg(windows)]
+    {
+        let _ = root;
+        receiver::set_focus_sampler(Arc::new(|| {
+            let focus = voiceremote_inject_windows::focus_snapshot();
+            (
+                focus.text_field_focused,
+                focus.last_activity_at,
+                focus.activity_age_ms,
+            )
+        }));
+        Arc::new(|| {
+            Box::new(voiceremote_inject_windows::WindowsInjector)
+                as Box<dyn voiceremote_core::TextInjector>
+        })
+    }
+}
+/// Deliberately accepts only a fixed enum; no content or error strings enter logs.
+pub enum LogEvent {
+    Started,
+    PairRequested,
+    Confirmed,
+    Revoked,
+    AutostartChanged,
+    Stopped,
+}
+pub fn log(root: &Path, event: LogEvent) -> Result<()> {
+    use std::io::Write;
+    let name = match event {
+        LogEvent::Started => "started",
+        LogEvent::PairRequested => "pair-requested",
+        LogEvent::Confirmed => "confirmed",
+        LogEvent::Revoked => "revoked",
+        LogEvent::AutostartChanged => "autostart-changed",
+        LogEvent::Stopped => "stopped",
+    };
+    let path = root.join("tray.log");
+    if let Ok(meta) = std::fs::symlink_metadata(&path) {
+        ensure!(
+            meta.is_file() && !meta.file_type().is_symlink(),
+            "unsafe log path"
+        );
+        if meta.len() > 64 * 1024 {
+            std::fs::remove_file(&path)?;
+        }
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options.create(true).append(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    writeln!(options.open(path)?, "{} {name}", SystemClock.now_ms()?)?;
+    Ok(())
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn persisted_devices_reopen_and_revoke_through_the_core_registry() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        let state = dir.path().join("state");
+        let backend = Backend::open(state.clone())?;
+        assert!(
+            Backend::open(state.clone()).is_err(),
+            "one receiver per state directory"
+        );
+        let settings = Settings {
+            account: "synthetic-account".into(),
+            device: "desktop".into(),
+            relay: None,
+            role: DeviceInfoRole::TextReceiver,
+            agents_config: None,
+        };
+        backend.registry.remember_local(&settings.info()?)?;
+        backend
+            .keys
+            .put("tray-settings", &serde_json::to_vec(&settings)?)?;
+        let peer = backend.registry.enroll(
+            Identity::generate()?.public,
+            "synthetic-room".into(),
+            crate::info("synthetic-account", "phone"),
+        )?;
+        assert!(backend.confirm("unrequested phrase".into()).is_err());
+        assert_eq!(backend.snapshot()?.devices.len(), 1);
+        drop(backend);
+        let reopened = Backend::open(state)?;
+        assert_eq!(reopened.snapshot()?.settings.unwrap().device, "desktop");
+        reopened.revoke(&peer.id).await?;
+        assert!(reopened.snapshot()?.devices.is_empty());
+        assert!(reopened.registry.require(&peer).is_err());
+        Ok(())
+    }
+    #[test]
+    fn log_contains_fixed_events_only() -> Result<()> {
+        let dir = tempfile::tempdir()?;
+        log(dir.path(), LogEvent::PairRequested)?;
+        let text = std::fs::read_to_string(dir.path().join("tray.log"))?;
+        assert!(text.lines().all(|line| {
+            line.split_once(' ').is_some_and(|(time, event)| {
+                time.parse::<u64>().is_ok() && event == "pair-requested"
+            })
+        }));
+        Ok(())
+    }
+    #[test]
+    fn role_never_adds_execution_capabilities() -> Result<()> {
+        for role in [
+            DeviceInfoRole::TextReceiver,
+            DeviceInfoRole::Agent,
+            DeviceInfoRole::Both,
+        ] {
+            let info = Settings {
+                account: "test".into(),
+                device: "desktop".into(),
+                relay: None,
+                role,
+                agents_config: None,
+            }
+            .info()?;
+            assert!(
+                info.capabilities
+                    .iter()
+                    .all(|c| *c == Capability::ReceiveText)
+            );
+        }
+        Ok(())
+    }
+}

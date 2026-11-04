@@ -1,0 +1,2 @@
+m5: ELF firmware=0.3.0 board=1 caps=0xbf offline=True type_bytes={'vr_store_t': 49232, 'job_t': 544}
+c6: ELF firmware=0.3.0 board=2 caps=0x00 offline=False type_bytes={'vr_store_t': 49232, 'job_t': 544}

@@ -1,0 +1,14 @@
+// swift-tools-version: 6.0
+import PackageDescription
+
+let package = Package(
+    name: "Brain",
+    platforms: [.iOS("26.0"), .macOS("26.0")],
+    products: [.library(name: "Brain", targets: ["Brain"])],
+    dependencies: [.package(path: "../Protocol"), .package(path: "../Pairing")],
+    targets: [
+        .target(name: "Brain", dependencies: ["Pairing", .product(name: "VoiceRemoteProtocol", package: "Protocol")],
+                path: "Sources", exclude: ["README.md", "Resources/README.md"], resources: [.process("Resources")]),
+        .testTarget(name: "BrainTests", dependencies: ["Brain"], path: "Tests", exclude: ["README.md"])
+    ]
+)

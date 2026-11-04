@@ -1,0 +1,33 @@
+Purpose: verify BLE client 1.1 controls, deferred sync and durable copy behavior.
+Inputs: FW/tools/ble_client synthetic fixtures; installed locked Opus binding; no hardware.
+Verification: command exit status and unittest output below; verified host-only.
+Command: TMPDIR=$PWD/AI/scratch/compiler-tmp heavy FW/tools/ble_client/.venv/bin/python -m unittest discover -s FW/tools/ble_client -p test_*.py -v
+test_client_ack_rearm_and_recovery (test_audio.AudioTests.test_client_ack_rearm_and_recovery) ... ok
+test_duplicates_and_end (test_audio.AudioTests.test_duplicates_and_end) ... ok
+test_firmware_to_python_round_trip (test_audio.AudioTests.test_firmware_to_python_round_trip) ... ok
+test_missing_fragments_frames_and_conflicts (test_audio.AudioTests.test_missing_fragments_frames_and_conflicts) ... ok
+test_missing_start_watchdog (test_audio.AudioTests.test_missing_start_watchdog) ... ok
+test_real_opus_firmware_framing_to_wav (test_audio.AudioTests.test_real_opus_firmware_framing_to_wav) ... ok
+test_segment_ids_never_skip_or_reuse (test_audio.AudioTests.test_segment_ids_never_skip_or_reuse) ... ok
+test_watchdog_and_interrupted_wav (test_audio.AudioTests.test_watchdog_and_interrupted_wav) ... ok
+test_wrong_decoded_duration (test_audio.AudioTests.test_wrong_decoded_duration) ... ok
+test_assembly_gaps_replacement_bounds (test_offline.OfflineTests.test_assembly_gaps_replacement_bounds) ... ok
+test_contract_hex_round_trips (test_offline.OfflineTests.test_contract_hex_round_trips) ... ok
+test_minor_compatibility_reserved_fields (test_offline.OfflineTests.test_minor_compatibility_reserved_fields) ... ok
+test_off_blocks_fetch_and_busy_reply_is_retryable (test_offline.OfflineTests.test_off_blocks_fetch_and_busy_reply_is_retryable) ... ok
+test_real_opus_offline_wav_and_durable_id_conflict (test_offline.OfflineTests.test_real_opus_offline_wav_and_durable_id_conflict) ... ok
+test_resume_decode_sidecar_and_capture_preemption (test_offline.OfflineTests.test_resume_decode_sidecar_and_capture_preemption) ... ok
+test_resume_metadata_change_repeated_bytes_and_identity (test_offline.OfflineTests.test_resume_metadata_change_repeated_bytes_and_identity) ... ok
+test_short_discard_and_lost_confirm_idempotence (test_offline.OfflineTests.test_short_discard_and_lost_confirm_idempotence) ... ok
+test_transport_capture_cancels_assembly_and_ignores_late_reply (test_offline.OfflineTests.test_transport_capture_cancels_assembly_and_ignores_late_reply) ... ok
+test_verify_all_dimensions_and_torn_packet (test_offline.OfflineTests.test_verify_all_dimensions_and_torn_packet) ... ok
+test_bounds (test_wire.WireTests.test_bounds) ... ok
+test_contract_phone_example (test_wire.WireTests.test_contract_phone_example) ... ok
+test_info (test_wire.WireTests.test_info) ... ok
+test_inputs (test_wire.WireTests.test_inputs) ... ok
+
+----------------------------------------------------------------------
+Ran 23 tests in 0.221s
+
+OK
+segment=1 frames=0 gaps=1 opus_Bps=0.0 wire_Bps=0.0 public_MTU=23 audio_MTU_at_least=23 duration=0.000s status=interrupted reason=bad decoder wav=disabled

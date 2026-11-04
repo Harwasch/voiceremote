@@ -1,0 +1,151 @@
+name: iOS
+
+on:
+  push:
+    tags: ['ios-ci-*', 'ios-v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Verified against actions/runner-images/images/macos/macos-26-Readme.md.
+  DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+  HOMEBREW_NO_AUTO_UPDATE: '1'
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      release: ${{ steps.release.outputs.enabled }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Test CI guards
+        run: python3 -m unittest discover -s SW/ios/ci -p 'test_*.py'
+      - name: Validate release version
+        run: python3 SW/ios/ci/checks.py version "$GITHUB_REF_NAME"
+      - name: Require release commit accepted on main
+        if: startsWith(github.ref, 'refs/tags/ios-v')
+        run: |
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          python3 SW/ios/ci/checks.py accepted-main "$GITHUB_REF_NAME" "$GITHUB_SHA"
+      - name: Check release credentials without exposing them
+        id: release
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/ios-v* && -n "$APPLE_TEAM_ID" && -n "$ASC_KEY_ID" && -n "$ASC_ISSUER_ID" && -n "$ASC_KEY_P8" ]]; then
+            echo 'enabled=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'enabled=false' >> "$GITHUB_OUTPUT"
+            echo 'TestFlight skipped: requires an ios-v tag and all four signing secrets.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  simulator:
+    needs: preflight
+    runs-on: macos-26
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: SW/ios
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show selected toolchain
+        run: xcodebuild -version
+      - name: Cache Swift package downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/org.swift.swiftpm
+          key: ios-spm-macos26-xcode26.6-${{ hashFiles('SW/ios/Packages/**/Package.swift', 'SW/ios/Packages/**/Package.resolved') }}
+          restore-keys: ios-spm-macos26-xcode26.6-
+      - name: Install XcodeGen and generate project
+        run: |
+          brew install xcodegen
+          python3 Configuration/generate_icon.py
+          xcodegen generate
+      - name: Discover an available iPhone simulator
+        id: device
+        run: |
+          device_id=$(xcrun simctl list devices available --json | python3 ci/checks.py simulator)
+          echo "id=$device_id" >> "$GITHUB_OUTPUT"
+      - name: Test packages
+        run: |
+          for p in Protocol Core Stt Brain Policy Pairing Router KeyboardBridge AppModel; do
+            swift test --jobs 4 --package-path "Packages/$p"
+          done
+      - name: Build app and extensions and run app unit tests unsigned
+        env:
+          SIMULATOR_ID: ${{ steps.device.outputs.id }}
+        run: |
+          xcodebuild test -project VoiceRemote.xcodeproj -scheme VoiceRemote \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_ID" -destination-timeout 180 \
+            -derivedDataPath DerivedData -resultBundlePath build/Tests.xcresult \
+            -parallel-testing-enabled NO -jobs 4 CODE_SIGNING_ALLOWED=NO
+      - name: Preserve test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-test-results
+          path: SW/ios/build/Tests.xcresult
+          if-no-files-found: ignore
+          retention-days: 7
+
+  testflight:
+    needs: [preflight, simulator]
+    if: startsWith(github.ref, 'refs/tags/ios-v') && needs.preflight.outputs.release == 'true'
+    runs-on: macos-26
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: SW/ios
+    env:
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify release version again
+        run: python3 ci/checks.py version "$GITHUB_REF_NAME"
+      - name: Install XcodeGen and generate project
+        run: |
+          brew install xcodegen
+          python3 Configuration/generate_icon.py
+          xcodegen generate
+      - name: Archive and upload with automatic provisioning
+        run: |
+          set -euo pipefail
+          umask 077
+          key_path="$RUNNER_TEMP/AuthKey.p8"
+          trap 'rm -f "$key_path" "$RUNNER_TEMP/ExportOptions.plist"' EXIT
+          printf '%s' "$ASC_KEY_P8" > "$key_path"
+          auth=(-allowProvisioningUpdates -authenticationKeyPath "$key_path" -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID")
+          # A rerun receives a new build number; the marketing version remains in project.yml.
+          build_number="$GITHUB_RUN_NUMBER.$GITHUB_RUN_ATTEMPT"
+          xcodebuild archive -project VoiceRemote.xcodeproj -scheme VoiceRemote \
+            -configuration Release -destination 'generic/platform=iOS' \
+            -archivePath build/VoiceRemote.xcarchive -jobs 4 \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" CURRENT_PROJECT_VERSION="$build_number" "${auth[@]}"
+          python3 - <<'PY'
+          import os, plistlib
+          from pathlib import Path
+          options = {
+              'method': 'app-store-connect', 'destination': 'upload',
+              'teamID': os.environ['APPLE_TEAM_ID'], 'signingStyle': 'automatic',
+              'manageAppVersionAndBuildNumber': False,
+          }
+          path = Path(os.environ['RUNNER_TEMP']) / 'ExportOptions.plist'
+          path.write_bytes(plistlib.dumps(options))
+          PY
+          xcodebuild -exportArchive -archivePath build/VoiceRemote.xcarchive \
+            -exportPath build/export -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" "${auth[@]}"

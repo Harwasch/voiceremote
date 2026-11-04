@@ -1,0 +1,18 @@
+[1/10] Performing build step for 'bootloader'
+[1/1] cd /home/harrison/Documents/Projects/voiceremote/.claude/worktrees/codex-feat-fw-stopwatch/FW/build-c6/bootloader/esp-idf/esptool_py && /home/harrison/hw-tools/espressif/python_env/idf5.5_py3.12_env/bin/python /home/harrison/hw-tools/esp-idf/components/partition_table/check_sizes.py --offset 0x8000 bootloader 0x0 /home/harrison/Documents/Projects/voiceremote/.claude/worktrees/codex-feat-fw-stopwatch/FW/build-c6/bootloader/bootloader.bin
+Bootloader binary size 0x5540 bytes. 0x2ac0 bytes (33%) free.
+[2/10] No install step for 'bootloader'
+[3/10] Building C object esp-idf/app/CMakeFiles/__idf_app.dir/offline_runtime.c.obj
+[4/10] Completed 'bootloader'
+[5/10] Building C object esp-idf/app/CMakeFiles/__idf_app.dir/offline_store.c.obj
+[6/10] Linking C static library esp-idf/app/libapp.a
+[7/10] Generating esp-idf/esp_system/ld/sections.ld
+[8/10] Linking CXX executable voice_remote.elf
+[9/10] Generating binary image from built executable
+esptool.py v4.12.0
+Creating esp32c6 image...
+Merged 3 ELF sections
+Successfully created esp32c6 image.
+Generated /home/harrison/Documents/Projects/voiceremote/.claude/worktrees/codex-feat-fw-stopwatch/FW/build-c6/voice_remote.bin
+[10/10] cd /home/harrison/Documents/Projects/voiceremote/.claude/worktrees/codex-feat-fw-stopwatch/FW/build-c6/esp-idf/esptool_py && /home/harrison/hw-tools/espressif/python_env/idf5.5_py3.12_env/bin/python /home/harrison/hw-tools/esp-idf/components/partition_table/check_sizes.py --offset 0x8000 partition --type app /home/harrison/Documents/Projects/voiceremote/.claude/worktrees/codex-feat-fw-stopwatch/FW/build-c6/partition_table/partition-table.bin /home/harrison/Documents/Projects/voiceremote/.claude/worktrees/codex-feat-fw-stopwatch/FW/build-c6/voice_remote.bin
+voice_remote.bin binary size 0x12f090 bytes. Smallest app partition is 0x177000 bytes. 0x47f70 bytes (19%) free.

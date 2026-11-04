@@ -1,0 +1,29 @@
+{
+  "name": "voiceremote-relay",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-07-01",
+  "workers_dev": false,
+  "preview_urls": false,
+  "durable_objects": {
+    "bindings": [
+      { "name": "ROOMS", "class_name": "Room" },
+      { "name": "ADMISSION", "class_name": "Admission" },
+      { "name": "WAKE", "class_name": "WakeProvider" },
+      { "name": "CLOUD_BUDGET", "class_name": "CloudBudget" }
+    ]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room", "Admission", "WakeProvider"] },
+    { "tag": "v2-cloud", "new_sqlite_classes": ["CloudBudget"] }],
+  // TBC: all spend/size/concurrency values need owner calibration before enabling.
+  // Zero values deliberately disable cloud access; provider keys are Worker secrets.
+  "vars": {
+    "CLOUD_DEVICE_DAILY_MICROUSD": "0", "CLOUD_GLOBAL_DAILY_MICROUSD": "0",
+    "CLOUD_DEVICE_CONCURRENT": "0", "CLOUD_GLOBAL_CONCURRENT": "0",
+    "CLOUD_SPEECH_RESERVATION_MICROUSD": "0", "CLOUD_ANTHROPIC_RESERVATION_MICROUSD": "0",
+    "CLOUD_MAX_BODY_BYTES": "0", "CLOUD_MAX_FRAME_BYTES": "0", "CLOUD_MAX_STREAM_BYTES": "0",
+    "CLOUD_MAX_DURATION_MS": "0", "CLOUD_MAX_OUTPUT_TOKENS": "0",
+    "CLOUD_ANTHROPIC_MODEL": "", "CLOUD_ANTHROPIC_VERSION": ""
+  },
+  "observability": { "enabled": false },
+  "send_metrics": false
+}

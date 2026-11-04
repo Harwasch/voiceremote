@@ -1,0 +1,38 @@
+```mermaid
+flowchart LR
+    Golden[golden.json: synthetic values] --> Swift[Swift typed round trips]
+    Golden --> Rust[Rust typed round trips]
+    Golden --> TS[TypeScript codecs + original-schema Ajv oracle]
+```
+
+| File | What it is | Status |
+|---|---|---|
+| [golden.json](golden.json) | Shared positive/negative values, encrypted archive epoch/block/read/page/writer round trips and `raw_invalid` JSON strings | ✅ |
+| [.gitattributes](.gitattributes) | Disable Git text conversion recursively; deterministic Noise fixture remains byte-exact on Windows | ✅ `git check-attr text` reports unset |
+| [noise/](noise/) | Byte-exact synthetic XX/confirmation/application fixture | ✅ Linux reproduction; Windows CI rerun pending |
+
+Start with `golden.json`. All text is synthetic; base64 strings are fixture
+markers, not usable keys or credentials. Zero-filled hashes are shape fixtures,
+not computed approvals. No transcripts, contacts, private keys or audio.
+
+All suites compare decoded/encoded JSON values, ignoring object key order and
+real-number spelling; byte-identical serialization is not required. An optional
+valid `json` fixture preserves escapes and real exponents; integer fields require
+literal integer tokens. `raw_invalid` records have `name`, `schema`, and `json`,
+without a parsed `value`, so duplicates, malformed Unicode and lossy numbers
+reach each public decoder intact. Every record,
+union arm, model tool, mode and capture state is exercised. Negative values also
+run through the typed codecs. Each forbidden control code point and keypad Enter
+has a fixture. `python3 SYS/codegen/probe_regressions.py` proves every new control
+and duplicate case fails when its TS guard is removed. Run `make -C SYS check`
+after any edit. Trace: [REQ-59](../../requirements.md#extensibility),
+[REQ-16](../../requirements.md#dictation-delivery-and-targets),
+[REQ-22](../../requirements.md#pairing-and-transport) and
+[REQ-28–33](../../requirements.md#authorization-and-policy). Transport and policy integration
+remain **unverified**.
+
+Delivery vectors include prepared dictation, all outcome/control-result variants, actual listening independent of selection, invalid capture TTL, required request sequence/absolute expiry and out-of-range activity age.
+
+AgentSession, AgentInventoryRequest, AgentInventory, AgentDispatch and AgentTaskQuery have typed valid vectors and closed-object rejection vectors across all three codecs.
+
+TaskStatus vectors cover a clean dispatched refusal reply and reject oversized app replies; generated Swift/Rust/TypeScript round trips share these fixtures.
