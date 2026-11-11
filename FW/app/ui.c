@@ -42,7 +42,8 @@ static uint32_t error_since, pulse_at, frame_at;
 static vr_ui_press_t press;
 static vr_phone_t barrier_phone;
 static uint32_t barrier_id, barrier_done;
-enum { PHONE_RENDER_WAIT_MS=400 };
+/* Measured: 344 ms worst redraw on the C6 while streaming; the phone write waits, audio doesn't. */
+enum { PHONE_RENDER_WAIT_MS=1000 };
 static bool barrier_active, barrier_ok;
 #ifndef UI_PREVIEW
 static SemaphoreHandle_t barrier_signal;
@@ -606,7 +607,7 @@ void ui_tick(void)
     flush_ok=true; frame_flushed=false;
     invalidate_changes(job!=0);
     uint32_t now=remote_now();
-    if(!view.overlay && listening() && now-pulse_at>=200) { pulse_at=now; invalidate_pulse(); }
+    if(board_info()->animate && !view.overlay && listening() && now-pulse_at>=200) { pulse_at=now; invalidate_pulse(); }
     /* Explicit refresh: no LVGL input/timer can call state or I2C while drawing. */
     lv_refr_now(display);
     if(flush_ok) { drawn=view; drawn_valid=true; } else drawn_valid=false;

@@ -21,7 +21,7 @@
 
 /* Swap only this constant if the physical colours are reversed. */
 static const gpio_num_t BUTTON_GPIOS[2]={GPIO_NUM_2,GPIO_NUM_1}; /* yellow PTT, blue cycle */
-static const board_info_t info={1,466,466,0xbf,true,true,true};
+static const board_info_t info={1,466,466,0xbf,true,true,true,true};
 static i2c_master_dev_handle_t ioe, pm, touch, codec;
 static i2c_master_bus_handle_t bus;
 static esp_lcd_panel_handle_t panel;

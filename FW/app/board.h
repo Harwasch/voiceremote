@@ -8,6 +8,7 @@ typedef struct {
     uint16_t id, width, height, capabilities;
     bool round, operational;
     bool virtual_sliders; /* false: board owns physical capture/mode sliders */
+    bool animate; /* false: slower single-core boards keep the listening orb still to protect audio */
 } board_info_t;
 const board_info_t *board_info(void);
 esp_err_t board_init(void);

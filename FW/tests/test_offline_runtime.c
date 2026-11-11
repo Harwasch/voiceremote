@@ -40,6 +40,7 @@ void *heap_caps_calloc(size_t n,size_t size,unsigned caps) { (void)caps; return 
 void *board_audio_alloc(size_t bytes) { return calloc(1,bytes); }
 int64_t esp_timer_get_time(void) { return (int64_t)(fake_ms*1000); }
 uint32_t remote_now(void) { return (uint32_t)fake_ms; }
+void vTaskDelay(TickType_t ticks) { (void)ticks; }
 void remote_lock(void) { assert(!lock_depth); ++lock_depth; }
 void remote_unlock(void) { assert(lock_depth==1); --lock_depth; }
 void ui_refresh(void) { ++ui_updates; }

@@ -39,14 +39,29 @@ static bool progress_dirty=true;
 static uint64_t now64(void) { return (uint64_t)(esp_timer_get_time()/1000); }
 static uint64_t get64(const uint8_t *p) { return vr_get32(p)|(uint64_t)vr_get32(p+4)<<32; }
 static void put64(uint8_t *p,uint64_t v) { vr_put32(p,v); vr_put32(p+4,v>>32); }
-static bool rd(void *ctx,uint32_t at,void *p,size_t n) { return esp_partition_read(ctx,at,p,n)==ESP_OK; }
+/* The boot scan reads all of storage; yield every 256 KiB so the watchdog's idle task runs. */
+static bool rd(void *ctx,uint32_t at,void *p,size_t n)
+{
+    static size_t since_yield;
+    bool ok=esp_partition_read(ctx,at,p,n)==ESP_OK;
+    since_yield+=n;
+    if(since_yield>=256*1024) { since_yield=0; vTaskDelay(1); }
+    return ok;
+}
 static bool wr(void *ctx,uint32_t at,const void *p,size_t n)
 {
     int64_t started=esp_timer_get_time(); bool ok=esp_partition_write(ctx,at,p,n)==ESP_OK;
     uint32_t elapsed=(uint32_t)(esp_timer_get_time()-started); if(elapsed>flash_max_us) flash_max_us=elapsed;
     return ok;
 }
-static bool er(void *ctx,uint32_t at,size_t n) { return esp_partition_erase_range(ctx,at,n)==ESP_OK; }
+/* First-boot formatting erases hundreds of sectors; yield after each so the idle
+ * task and the watchdog run (the C6 tripped it on a factory-data first boot). */
+static bool er(void *ctx,uint32_t at,size_t n)
+{
+    bool ok=esp_partition_erase_range(ctx,at,n)==ESP_OK;
+    vTaskDelay(1);
+    return ok;
+}
 static bool capturing(void) { return policy.wanted || writing || opening || remote_state.input.streaming || vr_capture_gate(&remote_state); }
 static void changed(void)
 {

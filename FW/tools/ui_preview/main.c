@@ -15,7 +15,7 @@
 #include <string.h>
 
 vr_state_t remote_state;
-static board_info_t info={1,466,466,0,true,true,true};
+static board_info_t info={1,466,466,0,true,true,true,true};
 static uint8_t pixels[466*466*4];
 static uint32_t now=450;
 static bool touched, fail_flush, fail_touch;
@@ -293,7 +293,7 @@ static void check(void)
 static void check_c6(bool physical)
 {
     extern void ui_physical_controls(uint8_t capture,uint8_t mode);
-    info=(board_info_t){2,240,280,0xbf,false,true,!physical};
+    info=(board_info_t){2,240,280,0xbf,false,true,!physical,false};
     fixture(); ui_init();
     assert(phone(&remote_state.phone));
     if(physical) {
@@ -354,7 +354,7 @@ int main(int argc,char **argv)
     else if(!strcmp(state,"recordings-waiting")) { remote_state.input.capture=VR_OFF;remote_state.input.waiting=1; }
     else if(!strcmp(state,"syncing")) { remote_state.input.waiting=1;remote_state.input.syncing=1; }
     else if(!strcmp(state,"pairing-number") || !strcmp(state,"forget-confirm")) {}
-    else if(!strcmp(state,"rectangular")) { info=(board_info_t){2,240,280,0,false,true,false};remote_state.phone.active=0; }
+    else if(!strcmp(state,"rectangular")) { info=(board_info_t){2,240,280,0,false,true,false,false};remote_state.phone.active=0; }
     else if(!strncmp(state,"c6-",3)) {
         if(strstr(state,"offline")) { remote_state.input.offline=1; remote_state.input.waiting=1; }
         if(strstr(state,"pairing")) {} /* modal applied below */
@@ -362,7 +362,7 @@ int main(int argc,char **argv)
     else { fprintf(stderr,"Unknown state: %s\n",state);return 2; }
     if(!strncmp(state,"c6-",3)) {
         bool physical=strstr(state,"physical")!=NULL;
-        info=(board_info_t){2,240,280,0xbf,false,true,!physical};
+        info=(board_info_t){2,240,280,0xbf,false,true,!physical,false};
     }
     ui_init();
     if(remote_state.has_phone) assert(phone(&remote_state.phone));

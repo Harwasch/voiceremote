@@ -19,7 +19,7 @@
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 
-static board_info_t info={2,240,280,0xbf,false,true,true}; /* all v1 controls, offline; no hw cut */
+static board_info_t info={2,240,280,0xbf,false,true,true,false}; /* all v1 controls, offline; no hw cut */
 static i2c_master_bus_handle_t bus;
 static i2c_master_dev_handle_t touch,codec,ioe;
 static esp_lcd_panel_handle_t panel;
