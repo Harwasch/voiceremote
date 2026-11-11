@@ -45,9 +45,28 @@ def main():
         assert table['nvs'] == (1, 2, 0x9000, 0x6000), (board, table['nvs'])
         assert table['nvs'][2:] == old['nvs'], (board, table['nvs'], old['nvs'])
         assert table['phy_init'][2:] == old['phy_init']
-        assert table['factory'][2:] == old['factory']
+        expected_app = old['factory'] if board == 'm5' else (0x10000, 0x1c0000)
+        assert table['factory'] == (0, 0, *expected_app), (board, table['factory'])
+        assert table['factory'][2] % 0x10000 == 0
+        if board == 'c6':
+            # Headroom means unused fraction of the app partition (stricter than
+            # (partition-image)/image). Check hook too whenever its image exists.
+            for variant in ('c6', 'c6-hook'):
+                image = ROOT / f'FW/build-{variant}/voice_remote.bin'
+                if image.exists():
+                    used = image.stat().st_size
+                    size = table['factory'][3]
+                    assert used * 5 <= size * 4, (variant, used, size)
+                    print(f'{variant}: image={used} app={size} headroom={(size-used)/size:.2%}')
+                else:
+                    # 1,389,696-byte reviewed image needs at least 1,737,120 B.
+                    assert table['factory'][3] >= 1737120
         assert all(off + size <= flash for _, _, off, size in table.values())
-        assert table['offline'] == (1, 0x40, 0x187000, 0xe79000), table
+        offline = (0x187000, 0xe79000) if board == 'm5' else (0x1d0000, 0xe30000)
+        assert table['offline'] == (1, 0x40, *offline), table
+        entries = sorted((off, size) for _, _, off, size in table.values())
+        assert all(off % 0x1000 == 0 and size % 0x1000 == 0 for off, size in entries)
+        assert all(off + size <= next_off for (off, size), (next_off, _) in zip(entries, entries[1:]))
         assert max(off + size for _, _, off, size in table.values()) == flash
         print(f'{board}: generated NVS offset=0x9000 size=0x6000 matches previous table; fits {flash} bytes')
         for name, (_, _, off, size) in table.items(): print(f'  {name}: 0x{off:x} + 0x{size:x}')

@@ -8,6 +8,7 @@ flowchart LR
 
 | Folder | Hardware | Status |
 |---|---|---|
+| `es8311_mic.h` | Shared 16 kHz RX-only register table: DAC powered down, HP disabled, ADC unchanged | ✅ Host register test; analog behavior unverified |
 | [m5stopwatch/](m5stopwatch/) | CO5300, CST820, IOE1/PM1, buttons, ES8311 mic | 🟡 Controls owner-confirmed; audio unverified |
 | [waveshare_c6_169/](waveshare_c6_169/) | ST7789/CST816T, ES8311, optional TCA9554; BOOT/PWR fallback | ✅ Built/host tested; hardware unverified |
 
@@ -31,3 +32,6 @@ StopWatch uses optional PSRAM artwork and a 32-row DMA strip. C6 uses primitives
 a ≤7056-byte A8 glyph and an 8-row strip; no PSRAM. The generic single-core policy
 puts audio above the BLE host, then input, then renderer/writer; dual-core
 priorities remain unchanged. See [C6 scheduling/pins](waveshare_c6_169/README.md).
+
+Phone barriers temporarily boost render priority to C6 20 / S3 3 and draw the
+destination first; ordinary rendering stays priority 1. See [app](../app/README.md).

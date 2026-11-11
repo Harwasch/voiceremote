@@ -3,6 +3,7 @@
  * No Waveshare demo implementation reused. See README for exact pin provenance.
  */
 #include "board.h"
+#include "../es8311_mic.h"
 #include "controls.h"
 #include "storage.h"
 #include "driver/gpio.h"
@@ -97,7 +98,7 @@ esp_err_t board_init(void)
     ESP_LOGW("board","physical_flash_bytes=%lu; offline partition=%s",(unsigned long)physical,p?"found":"missing");
     if(fe || !p || !c6_storage_fits(physical,p->address,p->size)) info.capabilities&=~128u;
     ESP_ERROR_CHECK(mic_init()); /* allocate DMA + configure codec before task startup */
-    ESP_LOGW("board","C6 ready: controls=%s; hw_mic_cut=0; amp CTRL hardwired VSYS, DAC muted",
+    ESP_LOGW("board","C6 ready: controls=%s; hw_mic_cut=0; amp CTRL hardwired VSYS, DAC powered down",
         ioe?"TCA9554":"touch + BOOT PTT + PWR target");
     return ESP_OK;
 }
@@ -184,22 +185,9 @@ static esp_err_t mic_init(void)
     err=i2s_channel_enable(mic_rx); if(err) goto fail;
     /* MCLK must be present during codec reset, as in vendor hal_audio. */
     /* open, sample format/clock, then start: values follow vendor's codec driver.
-       Gain enum 5 = 30 dB (vendor hal_audio). DAC is muted and amp remains off. */
-    static const uint8_t regs[][2]={
-        {0x0d,0xfa},{0x44,0x08},{0x44,0x08},{0x01,0x30},{0x02,0x00},
-        {0x03,0x10},{0x16,0x24},{0x04,0x10},{0x05,0x00},{0x0b,0x00},
-        {0x0c,0x00},{0x10,0x1f},{0x11,0x7f},{0x00,0x80},{0x01,0x3f},
-        {0x06,0x00},{0x13,0x10},{0x1b,0x0a},{0x1c,0x6a},{0x44,0x58},
-        {0x09,0x0c},{0x0a,0x0c}, /* 16-bit Philips */
-        {0x02,0x00},{0x05,0x00},{0x03,0x10},{0x04,0x20},
-        {0x07,0x00},{0x08,0xff},{0x06,0x03}, /* 4.096 MHz/16 kHz */
-        {0x00,0x80},{0x01,0x3f},{0x09,0x0c},{0x0a,0x0c},
-        {0x17,0xbf},{0x0e,0x02},{0x12,0x00},{0x14,0x1a},{0x0d,0x01},
-        {0x15,0x40},{0x37,0x08},{0x45,0x00},{0x16,0x05},
-        {0x31,0x60},{0x32,0x00}, /* mute DAC; no speaker data */
-    };
-    for(unsigned i=0;i<sizeof regs/sizeof regs[0];i++) {
-        err=write_reg(codec,regs[i][0],regs[i][1]); if(err) goto fail;
+       Gain enum 5 = 30 dB (vendor hal_audio). DAC/HP path stays powered down; see shared register table. */
+    for(unsigned i=0;i<sizeof es8311_mic_regs/sizeof es8311_mic_regs[0];i++) {
+        err=write_reg(codec,es8311_mic_regs[i][0],es8311_mic_regs[i][1]); if(err) goto fail;
     }
     uint8_t format;
     err=read_reg(codec,0x0a,&format,1);

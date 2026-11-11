@@ -28,6 +28,7 @@ static void test_poll(void)
 #endif
 vr_state_t remote_state;
 SemaphoreHandle_t remote_mutex;
+TaskHandle_t remote_renderer;
 uint32_t remote_now(void) { return (uint32_t)(esp_timer_get_time()/1000); }
 void remote_event(uint8_t event, uint8_t value, uint32_t sampled)
 {
@@ -71,10 +72,10 @@ void app_main(void)
     ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&hook_config));
 #endif
     /* Single-core: Opus 22 > NimBLE 21 > input 5 > render/writer 1.
-     * Dual-core reference priorities stay unchanged. No lock during drawing. */
+     * Barrier renders temporarily run below Opus (C6 20 / S3 3). No lock during drawing. */
     vTaskPrioritySet(NULL,5);
     if(board_info()->operational)
-        ESP_ERROR_CHECK(xTaskCreate(render_task,"render",8192,NULL,1,NULL)==pdPASS?ESP_OK:ESP_ERR_NO_MEM);
+        ESP_ERROR_CHECK(xTaskCreate(render_task,"render",8192,NULL,1,&remote_renderer)==pdPASS?ESP_OK:ESP_ERR_NO_MEM);
     for(;;) {
         uint64_t loop_start=timing_now_us();
         board_sample_inputs(remote_now()); /* no app/audio mutex across I2C */

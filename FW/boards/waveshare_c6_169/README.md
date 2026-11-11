@@ -46,7 +46,7 @@ net names below are authoritative when demos disagree.
 | I2S MCLK / BCLK | 19 / 20 | `bsp_es8311.c:21–22`; `I2S_MCLK` / `I2S_SCLK` |
 | I2S WS | 22 | `bsp_es8311.c:23`; `I2S_LRCK` |
 | MCU DOUT / DIN | 23 / 21 | `bsp_es8311.c:24–25`; `I2S_DSDIN` / `I2S_ASDOUT`. DOUT intentionally **unassigned** in RX-only driver |
-| Amp enable | **no GPIO** | Schematic U7 NS4150B `CTRL`→R27 10 kΩ→VSYS. Hardware keeps amp powered; firmware mutes DAC and sends no speaker data. Cannot assert amp power OFF |
+| Amp enable | **no GPIO** | Schematic U7 NS4150B `CTRL`→R27 10 kΩ→VSYS. Hardware keeps amp powered; firmware powers down DAC (`0x12=0x02`), clears HP selection (`0x13=0x00`) and sends no speaker data. Cannot assert amp power OFF |
 | PWR / battery latch | 18 active low / 15 high | `bsp_pwr.h:5–6`, `bsp_pwr.c:40–44`; `PWR_KEY` / `BAT_EN`. No blocking wait for PWR release |
 | BOOT | 9, active low | Schematic K1/R17; GPIO table also names `IMU_INT` on 9. IMU stays unconfigured; verify interrupt does not drive this net |
 | USB Serial/JTAG | 12 / 13 | Schematic `USB_N` / `USB_P`; sole console, no UART on pads |
@@ -88,7 +88,7 @@ sequence; its header and existing `DOCS/licences/` notice remain applicable.
 | 0x20 absent today | Virtual ring (`slider=1`) adapted to rectangle: Orb radius 50, sector width 36, target row ≥236. BOOT=PTT, readable PWR=target cycle; no physical slider claim |
 | Audio | Single-core task priority **22**, 32 KiB internal stack; I2S IRAM-safe ISR and 4×320-frame stereo DMA buffers; no I2C in audio read/stop |
 | BLE / input | Default NimBLE host **21**, radio controller **23** (IDF); input **5**. Touch/expander transactions timeout at 2 ms and run outside the audio/state mutex |
-| Render / writer | Both priority **1**. One 8-row **3840-byte** DMA strip; yield one tick after each completed transfer. No app mutex across LVGL/SPI/flash. S3 keeps its existing priorities and 32-row strip |
+| Render / writer | Both normally priority **1**; phone barrier temporarily raises render to **20**, below BLE/audio. One 8-row **3840-byte** DMA strip; yield one tick after each completed transfer. No app mutex across LVGL/SPI/flash. S3 uses barrier priority **3** and keeps its 32-row strip |
 | Artwork | Direct primitives; only a **2500-byte** touch-mode / **7056-byte** physical-mode A8 glyph avoids LVGL small-strip transform clipping. No full artwork cache or PSRAM allocation |
 
 Owner's exact-unit synthetic Opus bench (2026-11-11) measured **11.48 ms mean /
@@ -105,3 +105,20 @@ The [handoff](../../../AI/FW/2026-11-11-c6-port/handoff.md) gives link sizes and
 supplied standalone bench and production timing metrics. Opus uses fixed-point,
 `DISABLE_FLOAT_API`, alloca scratch, `-O2`, VOIP, complexity 0, 24 kbit/s CBR,
 16 kHz mono 20 ms, wideband, DTX/FEC off; no Xtensa optimization on C6.
+
+## App / offline map update
+
+| Name | Offset | Size |
+|---|---|---|
+| NVS | `0x9000` | `0x6000` |
+| PHY | `0xf000` | `0x1000` |
+| factory | `0x10000` | `0x1c0000` |
+| offline | `0x1d0000` | `0xe30000` |
+
+Bonds retain their NVS location. **Offline data on boards flashed before this map
+change will be reformatted: export recordings first, then reformat the relocated
+offline partition during the update.** No migration is implemented; residual old
+record magic can make mount refuse automatic formatting. The physical-flash guard
+still clears offline capability if the partition does not fit.
+Shared [codec table](../es8311_mic.h) and host assertions keep ADC/PGA settings
+unchanged while disabling DAC/HP; speaker noise/current and mic PCM need hardware.

@@ -19,7 +19,7 @@ set(PREVIEW_SOURCES main.c "${FW_ROOT}/app/timing.c" "${FW_ROOT}/app/ui.c" "${FW
     "${FW_ROOT}/app/fonts/lexend_84.c")
 foreach(preview ui_preview ui_preview_hook)
 add_executable(${preview} ${PREVIEW_SOURCES})
-target_include_directories(${preview} PRIVATE . stubs "${FW_ROOT}/app")
+target_include_directories(${preview} PRIVATE . stubs "${FW_ROOT}/tests/offline_stubs" "${FW_ROOT}/app")
 target_compile_definitions(${preview} PRIVATE UI_PREVIEW=1 VR_TIMING=1)
 target_compile_options(${preview} PRIVATE -O2 -Wall -Wextra -Werror -UNDEBUG)
 target_link_libraries(${preview} PRIVATE lvgl::lvgl m)

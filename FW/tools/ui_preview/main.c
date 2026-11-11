@@ -4,6 +4,7 @@
 #include "preview_runtime.h"
 #include "board.h"
 #include "timing.h"
+#include "render_barrier.h"
 #ifdef REMOTE_TEST_HOOK
 #include "test_hook.h"
 #endif
@@ -21,23 +22,40 @@ static uint32_t now=450;
 static bool touched, fail_flush, fail_touch;
 static uint16_t touch_x,touch_y;
 static unsigned haptics,pairs,answers,revokes,events,flushes;
-static bool accepted, skip_render, interrupt_render, modal_during_render, wait_expired;
+static bool accepted, skip_render, interrupt_render, modal_during_render;
 static unsigned mutex_depth, input_during_render;
-static uint32_t flush_delay;
+static uint32_t flush_delay, reacquire_delay;
+static unsigned renderer_priority=1, boosts, restores;
+TaskHandle_t remote_renderer=&renderer_priority;
+UBaseType_t uxTaskPriorityGet(TaskHandle_t task)
+{ assert(task==remote_renderer); return renderer_priority; }
+void vTaskPrioritySet(TaskHandle_t task,UBaseType_t priority)
+{
+    assert(task==remote_renderer);
+    if(priority==VR_RENDER_BARRIER_PRIORITY) { assert(renderer_priority==1); boosts++; }
+    else { assert(priority==1 && renderer_priority==VR_RENDER_BARRIER_PRIORITY); restores++; }
+    renderer_priority=priority;
+}
 static unsigned sent_pixels;
 static int min_x=466,min_y=466,max_x,max_y;
 uint32_t remote_now(void) { return now; }
 void remote_lock(void) { mutex_depth++; }
 void remote_unlock(void) { assert(mutex_depth); mutex_depth--; }
-bool preview_render_wait(void)
+bool preview_render_wait(uint32_t limit_ms)
 {
     assert(!mutex_depth);
-    if(skip_render) return false;
-    ui_tick(); return !wait_expired;
+    assert(limit_ms==400 && renderer_priority==VR_RENDER_BARRIER_PRIORITY);
+    if(skip_render) { now+=limit_ms; return false; }
+    ui_tick();
+    now+=reacquire_delay; reacquire_delay=0; /* on-time DMA, delayed app mutex */
+    return true;
 }
 static bool phone(const vr_phone_t *p)
 {
-    remote_lock(); bool ok=ui_phone(p); remote_unlock(); return ok;
+    unsigned before=boosts;
+    remote_lock(); bool ok=ui_phone(p); remote_unlock();
+    assert(renderer_priority==1 && boosts==restores && boosts<=before+1);
+    return ok;
 }
 void *board_ui_alloc(size_t bytes) { return !info.round || getenv("VR_UI_NO_CACHE")?NULL:malloc(bytes); }
 unsigned board_ui_strip_rows(void) { return info.round?32:8; }
@@ -185,7 +203,10 @@ static void check(void)
     ui_tick(); /* A timed-out request cannot acknowledge on a later frame. */
     before=target_hash();
     flush_delay=175; assert(phone(&remote_state.phone)); /* Measured streaming redraw. */
-    wait_expired=true; flush_delay=450; assert(phone(&remote_state.phone)); wait_expired=false; /* Completed draw wins even after the wait budget. */
+    flush_delay=344; assert(phone(&remote_state.phone)); /* Existing C6 worst draw accepted. */
+    reacquire_delay=100; flush_delay=344; assert(phone(&remote_state.phone));
+    flush_delay=400; assert(phone(&remote_state.phone));
+    flush_delay=401; assert(!phone(&remote_state.phone)); /* Draw completed after the limit. */
     before=target_hash(); ui_tick(); assert(target_hash()==before); /* Successful slow draw stays applied. */
     touched=true; touch_x=233; touch_y=233;
     interrupt_render=true; assert(phone(&candidate));
@@ -216,6 +237,12 @@ static void check(void)
     assert(min_x>=98 && min_y>=98 && max_x<=367 && max_y<=367); /* Includes even/odd alignment. */
     printf("Pulse: %u pixels flushed in 1s, bounded to (%d,%d)-(%d,%d).\n",sent_pixels,min_x,min_y,max_x,max_y);
     for(unsigned phase=0;phase<10;phase++) { now+=200; ui_tick(); partial_matches_full(); }
+    remote_state.input.mode=1; ui_refresh(); now+=200;
+    min_x=min_y=466; max_x=max_y=sent_pixels=0;
+    assert(phone(&remote_state.phone));
+    assert(min_y>=356 && max_y<=451 && sent_pixels<=466*96);
+    ui_tick(); partial_matches_full();
+    remote_state.input.mode=0; ui_refresh(); advance(100);
     remote_state.input.ptt=0; ui_refresh(); advance(100);
     sent_pixels=0; advance(1000); assert(sent_pixels>0); /* Producer is the sole source. */
     remote_state.input.streaming=0; ui_refresh(); advance(100);
@@ -296,6 +323,20 @@ static void check_c6(bool physical)
     info=(board_info_t){2,240,280,0xbf,false,true,!physical,false};
     fixture(); ui_init();
     assert(phone(&remote_state.phone));
+    /* A static listening Orb must differ from armed, with no pulse invalidation. */
+    assert(!info.animate);
+    uint8_t armed[sizeof pixels]; memcpy(armed,pixels,sizeof pixels);
+    remote_state.input.streaming=1; ui_refresh(); ui_tick();
+    assert(memcmp(armed,pixels,sizeof pixels));
+    unsigned still=flushes; advance(1000); assert(flushes==still);
+    /* A pending mode/stream transition must wait until after destination DMA. */
+    remote_state.input.mode=1; remote_state.input.streaming=0; ui_refresh();
+    min_x=min_y=466; max_x=max_y=sent_pixels=0;
+    flush_delay=344; assert(phone(&remote_state.phone));
+    assert(min_y>=212 && max_y<=279 && sent_pixels<=240*68);
+    ui_tick(); partial_matches_full();
+    flush_delay=401; assert(!phone(&remote_state.phone)); ui_tick();
+    remote_state.input.mode=0; ui_refresh(); ui_tick();
     if(physical) {
         remote_lock(); ui_physical_controls(VR_REC,1); remote_unlock(); advance(30);
         assert(remote_state.input.capture==VR_REC && remote_state.input.mode==1);
@@ -314,6 +355,7 @@ static void check_c6(bool physical)
         touched=false; advance(50);
     }
     remote_state.input.offline=1; remote_state.input.waiting=1; ui_refresh(); ui_tick();
+    still=flushes; advance(1000); assert(flushes==still); /* Static offline listening too. */
     partial_matches_full();
     ui_pair_number(123456); ui_tick();
     tap(65,222); assert(answers==1 && !accepted);

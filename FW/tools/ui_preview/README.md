@@ -49,10 +49,10 @@ Everything generated goes into ignored `FW/build-preview/`.
 
 `run.sh` first executes `ui_preview --check`: production touch sampling, immediate preview before release/debounce, preview rollback, OFF committing on touch-down before release/debounce, PTT/REC release
 selection, mode/target events, cancelled/recognised 3-second holds (forget recognition commits OFF), haptics,
-pair accept/reject, both modal display guards, failed/successful flush barriers, 175 ms realistic draw / 450 ms completed draw despite wait expiry, modal cancellation
+pair accept/reject, both modal display guards, failed/successful flush barriers, 175/344/400 ms completed draws, 401 ms rejected, on-time completion despite late mutex reacquisition, modal cancellation
 during DMA, lock-free flushes with interleaved input sampling, partial redraws
 matching forced full redraws, destination-only flush bounds,
-error expiry and pulse invalidation bounds. A held PTT with streaming=0 never
+error expiry and pulse invalidation bounds; boost/restore on success, missing renderer tick, DMA failure, modal rejection and cancellation. A held PTT with streaming=0 never
 pulses; streaming=1 pulses independently of the held level, and clearing the bit
 stops it. Offline recording pulses with no link and retains its Bluetooth-off
 target after reconnect until local capture ends. Full/waiting remain visible
@@ -78,3 +78,10 @@ partial/full equality at 8 rows. The AI glyph clipping regression failed before
 pre-scaling its small A8 mask; there is no Orb/sector cache or PSRAM dependency.
 [Base comparison script](../../../AI/FW/2026-11-11-c6-port/verify_reference.py)
 rebuilds all 17 original fixtures from the task base and compares PNG bytes.
+
+Both C6 layouts explicitly compare `animate=false` armed/listening pixels and
+assert zero pulse flushes during a one-second hold. Round and rectangular checks
+queue Orb changes (and a due pulse on StopWatch) before a phone barrier: only the
+destination strip flushes first; the next ordinary frame catches up and matches
+a forced full redraw. The native priority guard uses the same code as firmware;
+separate host targets compile its S3/C6 priorities. RTOS latency remains unverified.

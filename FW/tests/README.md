@@ -20,9 +20,11 @@ flowchart LR
 | `test.c` | I, E0–E5, P, A0–A2 round trips; malformed UTF-8/flags/enums/lengths, all split offsets, overflow, atomicity, transaction/input wrap, arm/OFF, debounce, scaled Orb sectors/disc/target/modals/dead zones, live/offline listening truth table, failed-touch-read hold/timeout/rearm/wrap, UTF-8 fallback, immediate preview/rollback and controls changing during a display wait | ✅ Host tested |
 | `test_offline_store.c` | Factory-used partition initialization, damaged-magic preservation, corrupt List traversal/Fetch/Confirm errors, fake-flash power loss at every script write boundary across two data sectors, torn writes/erases/final frame, prefix recovery, full, resume, metadata/CRC, delete retry, ID/boot persistence, corruption and journal rotation | ✅ Host tested |
 | `test_offline_capture.c` | Mode taps cannot restart paused/full/failed REC; fresh triggers, disconnect/reconnect, stored mode, OFF, owner/incompatibility/pause gates | ✅ Host tested |
-| `check_partitions.py` | Generated StopWatch/C6 tables against original NVS offset/size and flash bounds | ✅ Build outputs required |
+| `check_partitions.py` | Generated maps, unchanged NVS, alignment/non-overlap, C6 app ≥20% unused with built normal/hook image sizes | ✅ Build outputs required |
 | `../tools/ble_client/test_offline.py` | Contract offline hex/fragments, resume/integrity, durable copy and clock behavior | ✅ Host tested |
 | `test_config.py` | Rejects hook for explicit release and GitHub/GitLab firmware-tag signals before IDF setup | ✅ Host tested |
+| `test_es8311.c` | Actual shared init writes: DAC/HP off throughout, ADC/PGA/mic route/gain/format unchanged | ✅ Host tested |
+| `test_render_priority.c` | Production priority guard compiled for S3 and C6; boost below audio, restore original priority | ✅ Host tested |
 | `test_hook.c` | All serial commands, unknown input and held/released PTT decoder | ✅ Host tested |
 | `../tools/hil/test_run_offline.py` | Entire unattended procedure using fake serial/BLE, durable fetch interruption/resume, failure and PTY serial collector | ✅ Host tested |
 | `test_audio.c` | Production queue/framer with fake encoder: MTU 23/247, START/END/LAST, MTU changes, OFF discard, arm/hold gate, overflow and sequence/segment exhaustion; binary fixture mode | ✅ Host tested |
@@ -108,3 +110,9 @@ latched at CONNECT and retained until DISCONNECT/reset, independent of its timeo
 The C6 small-strip AI glyph regression failed partial/full equality before the
 bounded A8 glyph fix. Pin wiring, ISR deadlines, flash cache stalls, stack/heap
 headroom and live/offline audio quality still need the coordinator's hardware run.
+
+C6 fix-round regressions: runtime scan/format counts real `vTaskDelay(1)` calls at
+256 KiB reads / each erased sector, including remount; native preview compares
+static listening versus armed pixels and checks zero pulse flushes, 344/400 ms
+accepted versus 401 ms rejected, delayed mutex reacquisition, priority restoration
+on every result, and target-only barrier bounds with pending Orb/pulse work.

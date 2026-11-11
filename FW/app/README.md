@@ -4,7 +4,7 @@
 flowchart LR
     Board[board.h] --> Main[main.c sampling]
     Touch[5 ms task: touch hit test + preview] --> UI[ui.c mailbox]
-    UI --> Render[Priority 1: LVGL + panel DMA]
+    UI --> Render[LVGL + DMA: priority 1, boosted for barrier]
     Main & UI --> State[state.c]
     State <--> BLE[ble.c: NimBLE]
     Board --> Worker[audio_runtime.c: bounded encoder task]
@@ -32,6 +32,7 @@ flowchart LR
 | `main.c`, `runtime.h` | Priority 5 input/transport, priority 4 encoder, priority 1 renderer; short mailbox lock | 🟡 Hardware unverified |
 | `ble.c` | Secure Connections, explicit Numeric Comparison, bonding/revoke | 🟡 Hardware unverified |
 | `ui.c`, `ui_input.h` | Snapshot renderer, partial invalidation, immediate selection preview + gesture rollback; same Orb/modals | ✅ Native rendered; hardware unverified |
+| `render_barrier.h`, `scheduling.h` | 400 ms completion deadline and render priority guard: C6 20 / S3 3, restored after wait | ✅ Native guard/barrier tests; device timing TBC |
 | `timing.[ch]` | Compile-time scheduling aggregates every five seconds, default ON | 🟡 Hardware timing unverified |
 | [fonts/](fonts/), [icons/](icons/) | Lexend subsets and A8 sparkle; other icons are LVGL primitives | ✅ Native/IDF built |
 
@@ -107,8 +108,16 @@ recovery after a failed flush redraw the whole screen.
 
 `ui_phone` is called with the app mutex at depth one and releases it for a
 maximum 400 ms semaphore wait (`PHONE_RENDER_WAIT_MS`). Success checks matching
-completed DMA and no modal once, after reacquiring the mutex; elapsed wall time
-or a timeout racing completed rendering cannot reject an already drawn update.
+completed DMA **within the 400 ms deadline** and no modal once, after reacquiring
+the mutex. A 344 ms draw succeeds; 401 ms fails. On-time DMA remains accepted if
+mutex reacquisition is late. Only the destination strip is invalidated during a
+barrier with a valid baseline; pending Orb/sector/pulse work waits for the next
+ordinary tick. Failed/overlay baseline recovery still redraws fully. The renderer
+is boosted to C6 20 / S3 3 while waiting, then restored on every result path.
+`ble_audio_ready` permits only one pending Audio notification (plus reserved END);
+a blocked host stalls completion/backpressure rather than queuing 50 unchecked
+Audio notifications. Its 200 ms pending timeout and eight-frame queue still make
+short barriers necessary; sustained behavior remains **unverified on hardware**.
 Failure restores the authoritative mailbox asynchronously. BLE rechecks security, then applies the existing ack/control-epoch
 arm checks. Notifications still run once per main-loop pass; see
 [handoff](../../AI/FW/2026-11-02-offline-handoff.md) for NimBLE callback source evidence and hardware limits.

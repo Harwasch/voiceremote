@@ -14,6 +14,7 @@
 #include "test_hook.h"
 #endif
 #include "timing.h"
+#include "render_barrier.h"
 #include "lvgl.h"
 #include "src/draw/sw/lv_draw_sw.h"
 #include <stdio.h>
@@ -41,9 +42,9 @@ static bool drawn_valid, flush_ok=true, frame_flushed, error_visible;
 static uint32_t error_since, pulse_at, frame_at;
 static vr_ui_press_t press;
 static vr_phone_t barrier_phone;
-static uint32_t barrier_id, barrier_done;
-/* Measured: 344 ms worst redraw on the C6 while streaming; the phone write waits, audio doesn't. */
-enum { PHONE_RENDER_WAIT_MS=1000 };
+static uint32_t barrier_id, barrier_done, barrier_started;
+/* 344 ms supplied C6 redraw fits the 400 ms fallback deadline.
+ * Destination-only priority-boosted draws reduce host blockage; measure on device. */
 static bool barrier_active, barrier_ok;
 #ifndef UI_PREVIEW
 static SemaphoreHandle_t barrier_signal;
@@ -466,12 +467,13 @@ void ui_init(void)
 }
 bool ui_phone(const vr_phone_t *p)
 {
-    if(!display || current.overlay || barrier_active) return false;
+    if(!display || !remote_renderer || current.overlay || barrier_active) return false;
     /* Called with remote_mutex taken exactly once by the ATT access callback.
      * Release it while LVGL works. Never wait on the renderer with the app lock.
-     * Measured streaming redraws reach 175 ms. Bound waiting, but accept a
-     * matching completed draw even if lock reacquisition is delayed. */
-    uint32_t started=remote_now();
+     * Bound completion time, but accept an on-time completed draw even if
+     * lock reacquisition is delayed. Boost also accelerates an in-flight frame. */
+    uint32_t started=barrier_started=remote_now();
+    UBaseType_t saved_priority=vr_render_boost(remote_renderer);
     barrier_phone=*p; barrier_active=true; barrier_ok=false;
     if(!++barrier_id) barrier_id++;
     uint32_t id=barrier_id;
@@ -480,13 +482,14 @@ bool ui_phone(const vr_phone_t *p)
 #endif
     unlock();
 #ifdef UI_PREVIEW
-    (void)preview_render_wait();
+    (void)preview_render_wait(PHONE_RENDER_WAIT_MS);
 #else
     (void)xSemaphoreTake(barrier_signal,pdMS_TO_TICKS(PHONE_RENDER_WAIT_MS));
 #endif
     lock();
     bool ok=barrier_done==id && barrier_ok && barrier_active && !current.overlay;
     cancel_barrier();
+    vr_render_restore(remote_renderer,saved_priority);
     if(ok) {
         current.phone=*p; current.valid=true;
         error_visible=p->error[0]!=0; error_since=remote_now(); current.error=error_visible;
@@ -605,16 +608,24 @@ void ui_tick(void)
     uint64_t start=timing_now_us();
     bool touch_changed=!view.overlay && (view.capture!=drawn.capture || view.mode!=drawn.mode);
     flush_ok=true; frame_flushed=false;
-    invalidate_changes(job!=0);
+    /* REQ-18 needs the destination DMA completed before the ATT response.
+     * Defer mailbox Orb/sector changes and pulse work until the host is free.
+     * Do not mark those deferred regions as drawn. An invalid/overlay baseline
+     * still requires a full recovery draw. Existing LVGL damage is retained. */
+    if(job && drawn_valid && !drawn.overlay) target();
+    else invalidate_changes(job!=0);
     uint32_t now=remote_now();
-    if(board_info()->animate && !view.overlay && listening() && now-pulse_at>=200) { pulse_at=now; invalidate_pulse(); }
+    if(!job && board_info()->animate && !view.overlay && listening() && now-pulse_at>=200) { pulse_at=now; invalidate_pulse(); }
     /* Explicit refresh: no LVGL input/timer can call state or I2C while drawing. */
     lv_refr_now(display);
-    if(flush_ok) { drawn=view; drawn_valid=true; } else drawn_valid=false;
+    if(!flush_ok) drawn_valid=false;
+    else if(!job) { drawn=view; drawn_valid=true; }
+    uint32_t completed=remote_now(); /* DMA completion, before mutex reacquisition. */
     timing_redraw(start,frame_flushed,flush_ok,touch_changed?view.touch_id:0,view.touch_at);
     lock();
     if(job && barrier_active && barrier_id==job && !current.overlay) {
-        barrier_done=job; barrier_ok=flush_ok;
+        barrier_done=job;
+        barrier_ok=flush_ok && (uint32_t)(completed-barrier_started)<=PHONE_RENDER_WAIT_MS;
 #ifndef UI_PREVIEW
         xSemaphoreGive(barrier_signal);
 #endif

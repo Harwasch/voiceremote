@@ -5,7 +5,7 @@ flowchart LR
     M5[StopWatch: ES8311 + display + controls] --> Board[board.h]
     C6[C6: ST7789 + CST816T + ES8311 + optional TCA9554] --> Board
     Board --> UI[Input task: immediate preview + debounced controls]
-    UI --> Render[Lower-priority LVGL / DMA task]
+    UI --> Render[LVGL / DMA: priority 1, boosted for phone barrier]
     UI --> State[Pure protocol + state]
     Board --> Encoder[16 kHz mono / 20 ms Opus]
     Encoder --> Queue[8 packets / MTU fragmentation]
@@ -79,8 +79,12 @@ Both modes were built on S3; final S3/C6 builds use ON. Runtime timing, queue
 headroom and the power effect of vendor-supported 80 MHz QSPI need hardware to tell.
 Both targets use `CONFIG_COMPILER_OPTIMIZATION_PERF=y` (`-O2`). StopWatch alone
 uses **240 MHz**; C6 stays **160 MHz**, without PSRAM. I2C stays 100 kHz.
-The phone barrier waits up to **400 ms**, with one matching-completed-DMA check:
-a draw completed before mutex reacquisition succeeds even after the wait expires.
+The phone barrier waits up to **400 ms** and accepts only matching DMA completed
+within that deadline (344 ms accepted); delayed mutex reacquisition does not reject
+an on-time completion. Destination-only draws defer Orb/sector updates and pulse
+work. Renderer priority temporarily rises from 1 to **20 on C6 / 3 on S3**, below
+Opus, and is restored on success, timeout, DMA failure or modal cancellation.
+This reduces host blockage; sustained audio/TX completion latency remains hardware **TBC**.
 See [evidence](../AI/FW/2026-11-02-hardware-fixes/README.md) for sizes, native
 render timings and limits; press-to-pixel below 50 ms is **unverified on hardware**.
 
@@ -90,6 +94,9 @@ Test hook build (separate ignored directory, never a release):
 heavy idf.py -C FW -B FW/build-m5-hook -DIDF_TARGET=esp32s3 -DREMOTE_TIMING=ON -DREMOTE_TEST_HOOK=ON -DREMOTE_RELEASE=OFF reconfigure
 heavy cmake --build FW/build-m5-hook -j 4
 heavy idf.py -C FW -B FW/build-m5-hook build
+heavy idf.py -C FW -B FW/build-c6-hook -DREMOTE_BOARD=waveshare_c6_169 -DIDF_TARGET=esp32c6 -DREMOTE_TIMING=ON -DREMOTE_TEST_HOOK=ON -DREMOTE_RELEASE=OFF reconfigure
+heavy cmake --build FW/build-c6-hook -j 4
+heavy idf.py -C FW -B FW/build-c6-hook -DREMOTE_BOARD=waveshare_c6_169 build
 # Expected configure failure, before any IDF/toolchain work:
 heavy cmake -S FW -B FW/build-hook-release-reject -DREMOTE_TEST_HOOK=ON -DREMOTE_RELEASE=ON
 ```
@@ -109,6 +116,13 @@ boards select separate `partitions-stopwatch.csv` / `partitions-c6.csv` tables, 
 for measured 16 MiB units; C6 checks its physical flash before enabling offline storage. `python3 FW/tests/check_partitions.py` checks both generated tables and
 compares NVS against fixed historical values and IDF's old table. NVS
 stays at **0x9000 / 0x6000**, so this update does not relocate bonds.
+C6 factory is now **0x10000 / 0x1c0000**; offline is **0x1d0000 / 0xe30000**.
+The checker requires at least **20% of the app partition unused**, using normal
+and hook image sizes when present. **Offline data on C6 boards flashed before this
+map change will be reformatted; export retained recordings before updating and
+reformat the relocated offline partition during the update.** Old data is not
+migrated; surviving journal/record magic can make automatic mount fail closed, so
+flashing the new app alone does not guarantee automatic reformat. NVS stays intact.
 The source manifests use normal registry dependencies. For offline builds, set
 the supplied mirror/cache environment variables in the shell only.
 
@@ -146,10 +160,10 @@ verified; see [app](app/README.md) and [tests](tests/README.md).
 
 C6 [pin sources and scheduling](boards/waveshare_c6_169/README.md): no PSRAM,
 8-row DMA strip, primitive Orb drawing with a ≤7056-byte A8 glyph, Opus priority 22 /
-32 KiB stack, BLE host 21, input 5, render/writer 1. Boot probes 0x20: physical
+32 KiB stack, BLE host 21, input 5, render/writer 1 (barrier render 20). Boot probes 0x20: physical
 Rev G selectors/buttons when fitted; otherwise rectangle Orb ring, BOOT PTT and
 PWR target. Touch/expander I2C runs outside the audio mutex. Ordinary flash-cache
-stalls remain hardware TBC. The NS4150B CTRL net is hardwired to VSYS; only the
-codec DAC can be muted. No firmware claim of amplifier power OFF.
+stalls remain hardware TBC. The NS4150B CTRL net is hardwired to VSYS; the shared codec setup powers down the DAC (`0x12=0x02`) and clears HP drive
+selection (`0x13=0x00`), retaining ADC power. See [register source](boards/es8311_mic.h). No firmware claim of amplifier power OFF.
 The optional `REMOTE_ENCODE_BENCH` was omitted; use the owner's standalone bench
 and production timing estimates. No new registry dependencies were introduced.
