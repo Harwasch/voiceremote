@@ -36,7 +36,7 @@ def main():
         old[name] = (offset, number(size))
         previous_end = offset + number(size)
     assert old['nvs'] == (0x9000, 0x6000), old
-    for board, flash in [('m5', 16 * 1024**2), ('c6', 4 * 1024**2)]:
+    for board, flash in [('m5', 16 * 1024**2), ('c6', 16 * 1024**2)]:
         path = ROOT / f'FW/build-{board}/partition_table/partition-table.bin'
         if not path.exists():
             raise RuntimeError(f'build {board} first: {path}')
@@ -47,10 +47,8 @@ def main():
         assert table['phy_init'][2:] == old['phy_init']
         assert table['factory'][2:] == old['factory']
         assert all(off + size <= flash for _, _, off, size in table.values())
-        if board == 'm5':
-            assert table['offline'] == (1, 0x40, 0x187000, 0xe79000), table
-        else:
-            assert 'offline' not in table
+        assert table['offline'] == (1, 0x40, 0x187000, 0xe79000), table
+        assert max(off + size for _, _, off, size in table.values()) == flash
         print(f'{board}: generated NVS offset=0x9000 size=0x6000 matches previous table; fits {flash} bytes')
         for name, (_, _, off, size) in table.items(): print(f'  {name}: 0x{off:x} + 0x{size:x}')
 if __name__ == '__main__': main()

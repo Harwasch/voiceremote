@@ -14,7 +14,7 @@ flowchart LR
 | `main.c` | Runtime/board stubs, synthetic fixtures, PNG writer and interaction checks | ✅ Native verified |
 | `preview_runtime.h`, `stubs/` | ESP-free UI runtime boundary | ✅ No board access |
 | `lv_conf.h` | LVGL software renderer and lodepng; no GPU/window system | ✅ Native verified |
-| `../../build-preview/*.png` | Sixteen round states and one 240×280 physical-slider state | ✅ Generated; ignored |
+| `../../build-preview/*.png` | Sixteen round states, original rectangular fixture and six C6 fixtures | ✅ Generated; ignored |
 
 Purpose: inspect the actual firmware UI without a panel. Inputs: bundled Lexend
 subsets and `FW/managed_components/lvgl__lvgl`; no separate mock renderer.
@@ -39,6 +39,9 @@ Everything generated goes into ignored `FW/build-preview/`.
 | `offline-recording.png`, `offline-waiting.png` | Same filled/pulsed Orb offline, Bluetooth-off target, optional waiting icon |
 | `storage-full.png`, `recordings-waiting.png` | Small red full / grey saved-record icons in existing pip row, including OFF |
 | `syncing.png` | Small opposite-arrow transfer icon beside waiting icon |
+| `c6-touch.png`, `c6-physical.png` | 240×280 rectangle ring / large status Orb, 8-row strips, no artwork cache |
+| `c6-{touch,physical}-offline.png` | Offline listening and waiting icon in each mode |
+| `c6-{touch,physical}-pairing.png` | Numeric comparison in each mode |
 | `rectangular.png` | 240×280 physical-slider layout; no capture ring |
 
 ![Orb preview](../../build-preview/ptt-armed.png)
@@ -68,3 +71,10 @@ physical touch/barrier latency. No-PSRAM fallback is selected by `VR_UI_NO_CACHE
 The long-name fixture now fits the protocol's 32-byte field (the prior 33-byte
 fixture overflow became visible at `-O2`); its rendered ellipsis is unchanged.
 See [evidence](../../../AI/FW/2026-11-02-hardware-fixes/README.md).
+
+C6 checks exercise actual touch selectors, OFF on DOWN, physical-mode ownership,
+unchanged selector fields, pairing zones, target enrollment, render barriers and
+partial/full equality at 8 rows. The AI glyph clipping regression failed before
+pre-scaling its small A8 mask; there is no Orb/sector cache or PSRAM dependency.
+[Base comparison script](../../../AI/FW/2026-11-11-c6-port/verify_reference.py)
+rebuilds all 17 original fixtures from the task base and compares PNG bytes.

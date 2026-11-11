@@ -39,8 +39,8 @@ static bool phone(const vr_phone_t *p)
 {
     remote_lock(); bool ok=ui_phone(p); remote_unlock(); return ok;
 }
-void *board_ui_alloc(size_t bytes) { return getenv("VR_UI_NO_CACHE")?NULL:malloc(bytes); }
-unsigned board_ui_strip_rows(void) { return 32; }
+void *board_ui_alloc(size_t bytes) { return !info.round || getenv("VR_UI_NO_CACHE")?NULL:malloc(bytes); }
+unsigned board_ui_strip_rows(void) { return info.round?32:8; }
 const board_info_t *board_info(void) { return &info; }
 esp_err_t board_init(void) { return ESP_OK; }
 bool board_button(unsigned button) { (void)button; return false; }
@@ -125,7 +125,7 @@ static void partial_matches_full(void)
     static unsigned comparison; comparison++;
     if(memcmp(partial,pixels,sizeof pixels)) {
         int x1=466,y1=466,x2=0,y2=0;
-        for(int y=0;y<466;y++) for(int x=0;x<466;x++) if(memcmp(partial+(y*466+x)*4,pixels+(y*466+x)*4,4)) {
+        for(int y=0;y<info.height;y++) for(int x=0;x<info.width;x++) if(memcmp(partial+(y*info.width+x)*4,pixels+(y*info.width+x)*4,4)) {
             if(x<x1) x1=x;
             if(x>x2) x2=x;
             if(y<y1) y1=y;
@@ -290,8 +290,43 @@ static void check(void)
     timing_report();
     printf("Preview interaction checks passed: touch, direct selection, modals, haptics, render/flush barrier.\n");
 }
+static void check_c6(bool physical)
+{
+    extern void ui_physical_controls(uint8_t capture,uint8_t mode);
+    info=(board_info_t){2,240,280,0xbf,false,true,!physical};
+    fixture(); ui_init();
+    assert(phone(&remote_state.phone));
+    if(physical) {
+        remote_lock(); ui_physical_controls(VR_REC,1); remote_unlock(); advance(30);
+        assert(remote_state.input.capture==VR_REC && remote_state.input.mode==1);
+        unsigned n=events; tap(120,112); assert(events==n); /* mode slider owns Orb */
+        remote_lock(); ui_physical_controls(VR_OFF,0); remote_unlock(); advance(50);
+        assert(remote_state.input.capture==VR_OFF && remote_state.input.mode==0);
+        remote_lock(); ui_physical_controls(UINT8_MAX,1); remote_unlock(); advance(30);
+        assert(remote_state.input.capture==VR_OFF && remote_state.input.mode==1);
+    } else {
+        tap(26,100); assert(remote_state.input.capture==VR_OFF);
+        tap(120,18); assert(remote_state.input.capture==VR_PTT);
+        tap(214,100); assert(remote_state.input.capture==VR_REC);
+        tap(120,112); assert(remote_state.input.mode==1);
+        touched=true; touch_x=26; touch_y=100; advance(5);
+        assert(remote_state.input.capture==VR_OFF);
+        touched=false; advance(50);
+    }
+    remote_state.input.offline=1; remote_state.input.waiting=1; ui_refresh(); ui_tick();
+    partial_matches_full();
+    ui_pair_number(123456); ui_tick();
+    tap(65,222); assert(answers==1 && !accepted);
+    ui_pair_number(123456); ui_tick();
+    tap(175,222); assert(answers==2 && accepted);
+    remote_state.secure=false; remote_state.has_phone=false; ui_refresh();
+    tap(120,258); assert(pairs==1);
+    printf("C6 %s controls, modals, offline UI and render barrier pass.\n",physical?"physical":"on-screen");
+}
 int main(int argc,char **argv)
 {
+    if(argc==2 && !strcmp(argv[1],"--check-c6-touch")) { check_c6(false); return 0; }
+    if(argc==2 && !strcmp(argv[1],"--check-c6-physical")) { check_c6(true); return 0; }
     if(argc==2 && !strcmp(argv[1],"--timing")) {
         fixture(); ui_init(); timing_report();
         for(unsigned i=0;i<100;i++) { tap(42,210); tap(233,40); tap(424,210); tap(233,233); }
@@ -320,10 +355,18 @@ int main(int argc,char **argv)
     else if(!strcmp(state,"syncing")) { remote_state.input.waiting=1;remote_state.input.syncing=1; }
     else if(!strcmp(state,"pairing-number") || !strcmp(state,"forget-confirm")) {}
     else if(!strcmp(state,"rectangular")) { info=(board_info_t){2,240,280,0,false,true,false};remote_state.phone.active=0; }
+    else if(!strncmp(state,"c6-",3)) {
+        if(strstr(state,"offline")) { remote_state.input.offline=1; remote_state.input.waiting=1; }
+        if(strstr(state,"pairing")) {} /* modal applied below */
+    }
     else { fprintf(stderr,"Unknown state: %s\n",state);return 2; }
+    if(!strncmp(state,"c6-",3)) {
+        bool physical=strstr(state,"physical")!=NULL;
+        info=(board_info_t){2,240,280,0xbf,false,true,!physical};
+    }
     ui_init();
     if(remote_state.has_phone) assert(phone(&remote_state.phone));
-    if(!strcmp(state,"pairing-number")) ui_pair_number(90417);
+    if(!strcmp(state,"pairing-number") || strstr(state,"pairing")) ui_pair_number(90417);
     if(!strcmp(state,"forget-confirm")) {
         touched=true; touch_x=233;touch_y=407;advance(3100);touched=false;advance(50);
     }

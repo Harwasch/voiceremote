@@ -20,6 +20,11 @@ board_touch_t board_touch(uint16_t *x, uint16_t *y);
 bool board_button(unsigned button);
 void board_haptic(uint32_t now_ms);
 void board_poll(uint32_t now_ms);
+/* Sample board I2C outside the app/audio mutex; cached reads inside it. */
+void board_sample_inputs(uint32_t now_ms);
+/* Debounced physical selectors only; false means no change / virtual controls.
+ * UINT8_MAX in either output leaves that selector unchanged. */
+bool board_physical_controls(uint8_t *capture, uint8_t *mode);
 
 /* Mic calls serialized by remote_mutex. Reads never wait for samples; OFF disables
  * DMA immediately. No storage/logging. Allocation policy belongs to each board. */

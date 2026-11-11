@@ -87,3 +87,8 @@ does not prove 20 ms timing. See [storage](../../app/offline-storage.md).
 same primitives. No internal-memory fallback for optional artwork. Strip growth
 costs up to 14,912 additional internal heap bytes (falls back to 16 rows if
 allocation fails); cache sizing is in the linked evidence.
+
+The C6 port adds no-op `board_sample_inputs`/`board_physical_controls` adapters here;
+StopWatch retains its original input I2C, priorities, 48 KiB Opus stack, artwork
+cache and 32-row strip. The C6 evidence includes a base-commit PNG comparison for
+all existing fixtures and normal/hook StopWatch builds.

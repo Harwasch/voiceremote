@@ -76,3 +76,17 @@ add_test(NAME offline_broken_mount COMMAND offline_runtime_tests mount)
 add_test(NAME offline_header_body COMMAND offline_store_tests headers)
 add_test(NAME offline_sparse_format COMMAND offline_store_tests sparse)
 add_test(NAME ble_enrollment_scope COMMAND ble_tests enrollment)
+
+add_executable(c6_controls_tests test_c6_controls.c ../boards/waveshare_c6_169/controls.c)
+target_include_directories(c6_controls_tests PRIVATE ../boards/waveshare_c6_169)
+target_compile_options(c6_controls_tests PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+add_test(NAME c6_controls COMMAND c6_controls_tests)
+
+add_test(NAME c6_ui_touch COMMAND ui_preview --check-c6-touch)
+add_test(NAME c6_ui_physical COMMAND ui_preview --check-c6-physical)
+
+add_executable(audio_single_core_tests test_audio_runtime.c ../app/audio.c ../app/protocol.c ../app/state.c)
+target_include_directories(audio_single_core_tests PRIVATE offline_stubs ../app)
+target_compile_definitions(audio_single_core_tests PRIVATE CONFIG_FREERTOS_UNICORE=1)
+target_compile_options(audio_single_core_tests PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+add_test(NAME audio_single_core COMMAND audio_single_core_tests)

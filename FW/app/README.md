@@ -50,9 +50,9 @@ and `state.h`; [REQ-8], [REQ-18], [REQ-49–53] traceability only.
 | Pair/forget | X/check lower zones, dead centre seam; both block phone display acknowledgments | ✅ Pointer tested |
 | Error | Red target slot for 5 seconds or until a clearing phone update | ✅ Expiry tested |
 | Offline / storage | Bluetooth-off target while locally recording; small full, waiting and sync icons use the existing pip row; full/waiting survive OFF | ✅ Native rendered |
-| Physical-slider layout | Orb (120,112), radius 84; pips 222, name baseline 264 | ✅ 240×280 native rendered; C6 remains stub |
+| Physical-slider layout | Orb (120,112), radius 84; pips 222, name baseline 264 | ✅ 240×280 native rendered; physical mode is status-only Orb |
 
-`virtual_sliders` comes from `board.h`: M5 shows the ring; C6 metadata omits it.
+`virtual_sliders` comes from `board.h`: M5 shows the round ring; C6 shows a compact rectangle ring only when its optional physical I/O board is absent. Physical mode keeps the larger status Orb.
 Layout scales and centres from board resolution. Pips and unassigned pixels do
 nothing. OFF commits on touch-down with a light haptic through `remote_event`; other touch selections keep release acceptance. Physical buttons keep their flow.
 PTT/REC and Orb previews use their existing selected styles on touch-down; leaving
@@ -68,7 +68,7 @@ toggle the producer bit; runtime/UI timing still needs hardware verification.
 | Audio policy | Implementation |
 |---|---|
 | Codec | `78/esp-opus` 1.0.5, fixed-point, mono 16 kHz / 320 samples; raw 20 ms packets, no DTX/FEC; 24,000 bit/s starting constant `VR_AUDIO_BITRATE`, complexity 0, CBR |
-| Memory | Board allocates encoder state; 48 KiB internal task stack for alloca scratch; four encoded packets, each bounded to 512 bytes; board DMA also bounded |
+| Memory | Board allocates encoder state; 48 KiB dual-core / 32 KiB single-core internal task stack for alloca scratch; four encoded packets, each bounded to 512 bytes; board DMA also bounded |
 | Gate | Fresh authenticated session + subscriptions/info/snapshot + complete current-ack arm; local OFF always wins; local or phone hold requires PTT; tap-lock disabled |
 | OFF | Disable RX DMA, suspend in-flight computation, invalidate its generation, discard queues; only END then stopped Input; no data flush |
 | Stop/loss | END follows the last notification sent; entirely unsent queued tail consumes no wire sequence. A partially sent packet still reports interruption. Overflow/notify failure latches stop until snapshot resync and release/repress PTT or fresh REC selection |
@@ -83,7 +83,7 @@ The pulse runs at 5 Hz in conservative horizontal bands outside the filled disc.
 Sector arcs/icons and six static Orb styles rasterize once into optional board-
 allocated opaque RGB565 tiles. StopWatch permits PSRAM cache allocation and a
 32-row internal DMA strip; allocation failure uses the identical primitives.
-C6 requires no PSRAM and keeps 16 rows. All 17 PNGs match the original pixels;
+C6 requires no PSRAM and keeps 8 rows. Its ≤7056-byte pre-scaled A8 glyph fixes a small-strip transformed-image clipping regression; sectors/Orbs remain primitives. All 17 PNGs match the original pixels;
 [hardware-fix evidence](../../AI/FW/2026-11-02-hardware-fixes/README.md) records
 native timing and RAM. Sub-50 ms control latency remains **hardware-unverified**.
 
@@ -98,7 +98,7 @@ up before rearming. Invalid reads cannot recognize the target long hold.
 PTT/REC and mode previews never change capture/arm/streaming state; OFF is an
 immediate authoritative transition. PTT→OFF still goes directly to OFF.
 
-`ui_poll` owns touch/I2C and gesture/debounce state in the input task. `ui_tick`
+`ui_poll` owns gesture/debounce state in the input task. C6 samples touch/expander I2C outside the app mutex via `board_sample_inputs`, then reads cached state; StopWatch keeps its original serialized sampling. `ui_tick`
 reads a mailbox snapshot under the recursive app mutex, then owns all LVGL and
 panel SPI/DMA work outside it. No core affinity or shared PSRAM dependency.
 Capture invalidates the old/new sectors; mode/streaming invalidate the Orb;
@@ -155,3 +155,13 @@ ownership requires an authenticated SC bond with a 16-byte LTK. Local NimBLE sou
 selects Just Works for NoIO even with MITM requested (`ble_sm_sc.c:174–192`), and
 persists keys before the encryption callback (`ble_sm.c:1272–1288`). Host BLE events
 cover cleanup, deletion failure and reboot ownership; real pairing remains unverified.
+
+| Added boundary | Behavior / evidence |
+|---|---|
+| `scheduling.h` | Single core: Opus 22/32 KiB, writer 1; dual core unchanged at Opus 4/48 KiB, writer 2. Native lifecycle tests run both policies |
+| Physical selector mailbox | Debounced board values bypass virtual debounce, unchanged fields use UINT8_MAX. OFF stops immediately, mode precedes fresh REC; no touch override of physical mode. Native C6 integration tests |
+| Rectangle virtual controls | Same sector/icon/Orb design, ring radius 94/width 36, Orb radius 50; large target row. Native touch/modal/partial redraw checks |
+| Timing | Encode mean/max and five-second wall-time load estimate (includes preemption); timing tag enabled on single-core builds when REMOTE_TIMING is ON. Logs execute in renderer outside app mutex |
+
+The [C6 handoff](../../AI/FW/2026-11-11-c6-port/handoff.md) records flash guards,
+RAM estimates and the device checklist. The BLE contract and wire layouts are unchanged.

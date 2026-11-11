@@ -10,6 +10,7 @@
 #include "nvs.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
+#include "scheduling.h"
 #include <string.h>
 #include <limits.h>
 /* Only this task performs storage IO; the app mutex is NEVER held across flash.
@@ -150,7 +151,7 @@ void offline_init(void)
         remote_state.input.full=1; ui_refresh(); ESP_LOGE("offline","mount failed; offline disabled, records retained"); return;
     }
     jobs=xQueueCreate(18,sizeof(job_t));
-    if(!jobs || xTaskCreate(writer,"flash_writer",6144,NULL,2,NULL)!=pdPASS) { remote_state.input.full=1; ui_refresh(); return; }
+    if(!jobs || xTaskCreate(writer,"flash_writer",6144,NULL,VR_WRITER_PRIORITY,NULL)!=pdPASS) { remote_state.input.full=1; ui_refresh(); return; }
     ready=true; snapshot_store(); ui_refresh();
     ESP_LOGI("offline","ready boot=%lu waiting=%lu free=%llu total=%llu queue_frames=16 store_ram=%u",
         (unsigned long)boot_id,(unsigned long)waiting,(unsigned long long)free_bytes,(unsigned long long)total_bytes,(unsigned)sizeof *store);

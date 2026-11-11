@@ -37,7 +37,7 @@ BaseType_t xSemaphoreTakeRecursive(SemaphoreHandle_t mutex,TickType_t timeout)
 BaseType_t xSemaphoreGiveRecursive(SemaphoreHandle_t mutex)
 { (void)mutex; assert(lock_depth==1); --lock_depth; return pdTRUE; }
 BaseType_t xTaskCreate(TaskFunction_t fn,const char *name,uint32_t stack,void *arg,UBaseType_t priority,TaskHandle_t *handle)
-{ (void)fn; (void)name; (void)stack; (void)arg; (void)priority; if(handle) *handle=fake_worker; return pdPASS; }
+{ assert(priority==VR_AUDIO_PRIORITY && stack==VR_AUDIO_STACK); (void)fn; (void)name; (void)arg; if(handle) *handle=fake_worker; return pdPASS; }
 TaskHandle_t xTaskGetCurrentTaskHandle(void) { return in_worker?fake_worker:NULL; }
 void vTaskSuspend(TaskHandle_t handle) { assert(handle==fake_worker); ++suspends; }
 void vTaskResume(TaskHandle_t handle) { assert(handle==fake_worker); ++resumes; }
@@ -128,6 +128,7 @@ static void live_reset_changes_generation(void)
 }
 int main(void)
 {
+    reset(); audio_init(); assert(encoder && worker==fake_worker); free(encoder); encoder=NULL;
     reconnect_preserves_local_encoder(); off_stops_local_immediately();
     off_discards_inflight_encoder(); live_reset_changes_generation(); stop_edge_precedes_snapshot(); recent_live_expiry();
     puts("audio runtime: offline codec survives BLE resets, OFF stops/suspends and discards in-flight encoding, live reset passes");

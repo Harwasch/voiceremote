@@ -40,15 +40,18 @@ removed the target header. This is transient recovery state, not a tombstone lis
 Counter persistence assumes firmware updates preserve the data partition. A full
 flash erase destroys continuity and needs explicit re-enrollment with a new identity.
 
-| StopWatch partition | Offset | Size |
+| Both board partitions | Offset | Size |
 |---|---:|---:|
 | NVS (unchanged) | `0x9000` | `0x6000` |
 | PHY (unchanged) | `0xf000` | `0x1000` |
 | Factory app (unchanged) | `0x10000` | `0x177000` |
 | Offline data | `0x187000` | `0xe79000` = 15,175,680 bytes |
 
-The StopWatch-only CSV fills 16 MiB exactly. The C6 keeps its 4 MiB-compatible
-single-app table and does not advertise bit 7. `tests/check_partitions.py` compares
+The separate StopWatch and C6 CSVs fill 16 MiB exactly with the same offsets.
+C6 uses the owner-measured 16 MiB unit; before offline initialization it checks
+`esp_flash_get_physical_size` against the partition end. Missing/out-of-bounds
+storage clears bit 7 and skips the store. C6 allocates internal RAM only;
+see the [C6 memory evidence](../../AI/FW/2026-11-11-c6-port/handoff.md). `tests/check_partitions.py` compares
 generated NVS offset/size against ESP-IDF's original single-app-large CSV and checks
 both generated board tables. Preserving offsets permits existing NVS bonds to
 survive an ordinary firmware/partition-table update; it is not a hardware bond test.
@@ -70,7 +73,7 @@ export capacity is 12,856,816 bytes. Additional partly filled final sectors,
 No throughput, commit-latency or power-loss-tail bound is measured.
 
 A writer task does **not** make SPI1 flash operations nonblocking: ESP32 flash
-writes/erases can disable caches and stall code on both CPUs, including the
+writes/erases can disable caches and stall flash code on either target, including the
 flash-resident encoder, BLE host and display/input work. The 16-frame queue
 absorbs writer scheduling delays only while the producer can execute. Runtime erases are
 restricted to confirmed deletion while capture is idle; a trigger can race an

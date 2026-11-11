@@ -264,3 +264,8 @@ void *board_ui_alloc(size_t bytes)
     return heap_caps_malloc(bytes,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
 }
 unsigned board_ui_strip_rows(void) { return 32; }
+
+/* StopWatch retains its original serialized I2C/input behavior. */
+void board_sample_inputs(uint32_t now) { (void)now; }
+bool board_physical_controls(uint8_t *capture,uint8_t *mode)
+{ (void)capture; (void)mode; return false; }
