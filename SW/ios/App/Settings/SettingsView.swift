@@ -14,17 +14,15 @@ struct SettingsView: View {
     @State private var localProviders = ProviderOrderDraft()
     @State private var cloudProviders = ProviderOrderDraft()
     @State private var showingInfo = false
+    @State private var showingSimulatorDetails = false
+    @Environment(\.dynamicTypeSize) private var typeSize
     @State private var retentionWarnings: [HistoryEntry] = []
     var body: some View {
         @Bindable var model = host.model
         Form {
             Section("Speech") {
-                Picker("Speech engine", selection: $model.settings.speechEngine) {
-                    Text("Automatic").tag("automatic"); Text("Apple SpeechAnalyzer").tag("apple")
-                    Text("WhisperKit small.en").tag("whisperkit")
-                    if ArgmaxBuild.engine != nil { Text("Argmax Pro (licensed, loaded)").tag("argmax") }
-                    Text("ElevenLabs Scribe").tag("elevenlabs-scribe"); Text("AssemblyAI").tag("assemblyai")
-                }
+                if typeSize.isAccessibilitySize { speechEnginePicker.pickerStyle(.inline) }
+                else { speechEnginePicker.pickerStyle(.navigationLink) }
                 if ArgmaxBuild.engine == nil { Text("Argmax unavailable — requires a licence and a loaded host adapter.").font(.footnote) }
                 Toggle("Allow cloud processing", isOn: $model.settings.cloudConsent).accessibilityIdentifier("cloud-consent")
                 Toggle("Maximum accuracy", isOn: $model.settings.maxAccuracy).accessibilityIdentifier("maximum-accuracy")
@@ -84,10 +82,13 @@ struct SettingsView: View {
             Section { NavigationLink("Benchmark recorder") { RecorderView(host: host) }.accessibilityIdentifier("benchmark-recorder") }
             #if DEBUG
             if host.demo != nil {
-                DisclosureGroup("Simulator details") {
+                Button("Simulator details") { showingSimulatorDetails.toggle() }
+                    .frame(minHeight: 44).accessibilityIdentifier("settings-demo-details")
+                    .accessibilityValue(showingSimulatorDetails ? "Expanded" : "Collapsed")
+                if showingSimulatorDetails {
                     Text("Cloud processing: " + (model.settings.cloudConsent ? "On" : "Off") + "; saved: " + (host.savedCloudConsentForDemo.map { $0 ? "On" : "Off" } ?? "Not saved"))
-                        .accessibilityIdentifier("consent-state")
-                }.accessibilityIdentifier("settings-demo-details")
+                        .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("consent-state")
+                }
             }
             #endif
         }.navigationTitle("Settings")
@@ -103,6 +104,14 @@ struct SettingsView: View {
                 await refreshRetention()
                 do { try await Task.sleep(for: .seconds(30)) } catch { return }
             }
+        }
+    }
+    private var speechEnginePicker: some View {
+        Picker("Speech engine", selection: Binding(get: { host.model.settings.speechEngine }, set: { host.model.settings.speechEngine = $0 })) {
+            Text("Automatic").tag("automatic"); Text("Apple SpeechAnalyzer").fixedSize(horizontal: false, vertical: true).tag("apple")
+            Text("WhisperKit small.en").fixedSize(horizontal: false, vertical: true).tag("whisperkit")
+            if ArgmaxBuild.engine != nil { Text("Argmax Pro (licensed, loaded)").tag("argmax") }
+            Text("ElevenLabs Scribe").fixedSize(horizontal: false, vertical: true).tag("elevenlabs-scribe"); Text("AssemblyAI").tag("assemblyai")
         }
     }
     private func refreshRetention() async {

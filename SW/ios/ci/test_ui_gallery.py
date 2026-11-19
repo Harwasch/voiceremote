@@ -111,6 +111,9 @@ class GalleryTests(unittest.TestCase):
         self.assertIn("type: bundle.ui-testing", spec)
         self.assertRegex(spec, r"VoiceRemoteUI:\n[\s\S]*targets: \[VoiceRemoteUITests\]")
         self.assertIn("targets: [VoiceRemoteTests]", spec)
+        gallery = (IOS / "UITests/VoiceRemoteUITests.swift").read_text()
+        self.assertNotIn("--ui-dark", gallery, "Routine CI must not repeat the gallery in dark mode")
+        self.assertIn("testLargestDynamicTypeMainScreens", gallery)
 
 
 if __name__ == "__main__":

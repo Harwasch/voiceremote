@@ -75,3 +75,6 @@ value descriptions out of the UI. Their exhaustive switches and Home visibility
 matrix are covered by [PresentationTests](Tests/PresentationTests.swift), together
 with real on/off cloud consent persistence. These change presentation only;
 Policy, authorization inputs, routing and dictation/Brain separation are unchanged.
+
+Home’s presentation matrix now includes Stop during preparation. The regression
+failed before the fix and passes locally; capture/Policy behavior is unchanged.

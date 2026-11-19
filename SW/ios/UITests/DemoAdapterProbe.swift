@@ -29,6 +29,28 @@ import Router
         try await demo.seed(model, history: history, registry: registry, agents: agents)
         print("seed: devices=\(model.devices.count), history=\(model.history.count), suggestions=\(model.suggestions.count), grants=\(model.grants.count), sessions=\(agents.destinations.count)")
         precondition(model.suggestions.count == 1 && model.grants.count == 1 && model.tasks.isEmpty)
+        if demo.arguments.contains("--ui-stop-probe") {
+            model.setCapture(.continuous)
+            let expected: ListeningState = demo.arguments.contains("--ui-slow-prepare") ? .preparing :
+                demo.arguments.contains("--ui-capture-failure") ? .failed :
+                demo.arguments.contains("--ui-interrupt") ? .interrupted : .listening
+            for _ in 0..<500 where model.listening != expected { try await Task.sleep(for: .milliseconds(10)) }
+            precondition(model.listening == expected)
+            for _ in 0..<500 where !demo.destinationBeforeCapture { try await Task.sleep(for: .milliseconds(10)) }
+            precondition(demo.destinationBeforeCapture)
+            if demo.arguments.contains("--ui-slow-finish") {
+                model.finishUtterance()
+                precondition(model.listening == .finishing)
+            }
+            model.stop()
+            precondition(model.controls.capture == .off && model.listening == .idle && model.partial.isEmpty)
+            try await Task.sleep(for: .milliseconds(100))
+            await model.refresh()
+            precondition(model.history.count == 2 && model.partial.isEmpty && model.listening == .idle)
+            precondition(demo.destinationBeforeCapture)
+            print("synthetic stop probe: state reached, destination precedes capture, Stop cancels without unfinished history")
+            return
+        }
         await model.review(model.suggestions[0]); precondition(model.approval?.preview.risk == .sensitive)
         await model.approve()
         if demo.biometric.refuse {

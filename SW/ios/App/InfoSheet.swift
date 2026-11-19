@@ -16,5 +16,8 @@ struct InfoSheet: View {
             }.navigationTitle(title).navigationBarTitleDisplayMode(.inline)
                 .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
         }.presentationDragIndicator(.visible)
+        #if DEBUG
+        .modifier(UIDemoPresentation())
+        #endif
     }
 }

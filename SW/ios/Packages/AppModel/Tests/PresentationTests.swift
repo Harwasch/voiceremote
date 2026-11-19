@@ -46,7 +46,7 @@ import VoiceRemoteProtocol
     for capture in [CaptureState.off, .hold, .continuous] {
         for state in [ListeningState.idle, .preparing, .listening, .finishing, .interrupted, .failed] {
             let presentation = HomePresentation(capture: capture, listening: state)
-            #expect(presentation.showsStop == (state == .listening || state == .finishing))
+            #expect(presentation.showsStop == ([.preparing, .listening, .finishing].contains(state)))
             #expect(presentation.showsFinish == (state == .listening))
             #expect(presentation.showsStartContinuous == (capture == .continuous && [.idle, .interrupted, .failed].contains(state)))
             #expect(presentation.showsHold == (capture == .hold && state != .preparing && state != .finishing))

@@ -46,3 +46,8 @@ cloud setting and the runtime’s successfully saved value through a debug-only
 disclosure. Portable tests independently reopen the real settings file for both
 consent choices. The new iOS 26 interaction and saved-value UI assertions remain
 **unverified** until CI; no alternate consent-setting path was added.
+
+UI2: Simulator details uses an explicitly identified expansion button and an
+independent saved-consent label. At accessibility sizes the speech-engine picker
+uses native inline rows with wrapping names; default size uses navigation selection.
+The real setting/save path is unchanged. New Apple layout **unverified**.

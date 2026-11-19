@@ -19,7 +19,7 @@ struct DevicesView: View {
                 if let notice = host.link.notice { Text(notice) }
                 ForEach(host.model.devices, id: \.device_id) { device in
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(device.display_name).font(.headline).accessibilityIdentifier("device-" + device.device_id)
+                        Text(device.display_name).font(.headline).fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("device-" + device.device_id)
                         Text(device.role.displayLabel).font(.subheadline)
                         Text(connectionStatus(device.device_id)).font(.subheadline)
                         if host.link.suspendedIDs.contains(device.device_id) {
@@ -147,7 +147,11 @@ private struct PairComputerView: View {
                 }
             }.navigationTitle("Pair computer").navigationBarTitleDisplayMode(.inline)
                 .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { Task { await pairing.cancel(); dismiss() } }.accessibilityIdentifier("pairing-cancel") } }
-        }.presentationDetents([.large]).presentationDragIndicator(.visible).interactiveDismissDisabled(pairing.busy)
+        }
+        #if DEBUG
+        .modifier(UIDemoPresentation())
+        #endif
+        .presentationDetents([.large]).presentationDragIndicator(.visible).interactiveDismissDisabled(pairing.busy)
         .sheet(isPresented: $scan) { scanner }
     }
     private var scanner: some View {

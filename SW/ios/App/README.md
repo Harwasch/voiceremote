@@ -61,7 +61,7 @@ ambiguous failures require Retry. Offline text never invokes Brain or inserts.
 ComputerLink uses the shared production PhoneConnection for readiness, correlated insertion outcomes, state reports and read-only reconciliation. New connections try every discovered same-room private LAN candidate with pinned Noise, then signed relay. Browser timeout is not task cancellation. Authenticated remote capture is stop-only: microphone starts are refused with actual state, and sequence/deadline checks reject delayed requests. Keyboard delivery waits for a post-insertion shared receipt. Apple adapters/display timing remain **unverified**.
 
 Privacy (REQ-56): one installation account is pinned in ThisDeviceOnly Keychain before stores open; Settings cannot switch accounts. Legacy files stay in place. History exposes expired held text as a required Settings review; Keep renews seven days, Delete removes it. `RetainedTaskStore` expires on-disk payloads/previews at seven days and keeps replay hashes; audit checkpoints and key metadata remain. Portable tests cover the rules; SwiftUI/Keychain execution remains **unverified**.
-AI Control is wired through AppRuntime → AgentControl → Router → ComputerLink/PhoneConnection. Devices has explicit agent-access enrollment; Suggestions has exact session selection, status/cancel, restored-task review and scoped target-selection permission/revoke controls. Ambiguous wake never creates identity or tier 2 authority. Apple SDK/device verification remains **unverified**.
+AI Control is wired through AppRuntime → AgentControl → Router → ComputerLink/PhoneConnection. Devices has explicit agent-access enrollment; Agents has exact session selection, status/cancel, restored-task review and target-selection permission/revoke controls. Ambiguous wake never creates identity or tier 2 authority. Apple SDK/device verification remains **unverified**.
 
 Rebase integration: AI Control shares the account-pinned `RetainedTaskStore`, original history expiry/review rules and audit/checkpoints; it does not open a separate raw task store.
 
@@ -94,15 +94,18 @@ The recorder marks demo runs synthetic. OS prompts, actual audit restoration and
 
 Native iOS 26 revamp: Home, Devices, History, Suggestions and Agents are the five
 tabs; Settings is the Home gear. Home keeps transcript content off glass, groups
-capture/mode/destination controls in a native glass container, and morphs the
-primary talk state with motion disabled under Reduce Motion. Native bars and
+capture/mode controls in a native glass container within the scroll layout. One
+tappable destination sits beside the heading. The primary talk control retains
+the same rounded shape and minimum size; state changes do not animate layout. Native bars and
 button styles adapt to system preferences; the custom Hold fallback is opaque
-under Reduce Transparency. An emergency toolbar Stop stays reachable while a
-long transcript scrolls. Off cancels preparation and failed/interrupted states.
+under Reduce Transparency. Preparing retains a disabled control/spinner and a separate Stop; active
+recording/finishing exposes Stop in the talk area. The ambiguous toolbar square
+is removed. Off cancels failed/interrupted states as well.
 
 Pairing is a sheet with invitation and four-word confirmation steps; account/phone
 IDs are in Phone details. History has one primary action and a More menu. Exact
 approval still calls the real Policy/Face ID path. Plain labels and tool sentences
 come from [portable formatters](../Packages/AppModel/Sources/Presentation.swift).
 [Research, source URLs and audit triage](../../../AI/SW/2026-11-04-liquid-glass-research.md).
-New SDK compilation, glass, haptics, layout and accessibility results are **unverified**.
+The coordinator compiled/launched the revamp. These UI2 layout, sheet-size and
+diagnostic fixes remain **unverified** on Apple SDKs until the next run.

@@ -92,9 +92,15 @@ struct ContentView: View {
         .environment(\.defaultMinListRowHeight, 52)
         .sheet(isPresented: Binding(get: { host.model.approval != nil }, set: { if !$0 { host.model.dismissApproval() } })) {
             ApprovalView(model: host.model)
+                #if DEBUG
+                .modifier(UIDemoPresentation())
+                #endif
         }
         .sheet(isPresented: Binding(get: { host.model.completion != nil }, set: { if !$0 { host.model.dismissTaskCompletion() } })) {
             TaskCompletionView(model: host.model)
+                #if DEBUG
+                .modifier(UIDemoPresentation())
+                #endif
         }
         .alert("Voice Remote", isPresented: Binding(get: { host.error != nil }, set: { if !$0 { host.error = nil } })) {
             Button("OK") { host.error = nil }
@@ -112,6 +118,7 @@ private struct HomeView: View {
     @State private var triggerTimer: Task<Void, Never>?
     @State private var showingInfo = false
     @State private var permissionStep = false
+    @State private var showingSimulatorDetails = false
     private var model: VoiceAppModel { host.model }
     private var tick: Int64 { Int64(ProcessInfo.processInfo.systemUptime * 1000) }
     private var destinationDisplay: String {
@@ -135,8 +142,12 @@ private struct HomeView: View {
                                 .font(.subheadline.weight(.semibold))
                             Text(host.recorder.recording ? "Benchmark recording" : model.listening.displayLabel).font(.largeTitle.bold())
                                 .accessibilityIdentifier("listening-state")
-                            Text("To " + (destinationDisplay))
-                                .font(.title3).accessibilityIdentifier("destination-status")
+                            NavigationLink { TargetPickerView(model: model) } label: {
+                                Label("To " + destinationDisplay, systemImage: "arrow.up.right")
+                                    .font(.title3).fixedSize(horizontal: false, vertical: true)
+                                    .frame(minHeight: 44, alignment: .leading)
+                            }.buttonStyle(.glass).accessibilityIdentifier("destination-link")
+                                .disabled(host.recorder.recording)
                         }
                         if !model.partial.isEmpty {
                             Text(model.partial).font(.largeTitle.weight(.medium))
@@ -150,33 +161,35 @@ private struct HomeView: View {
                             Text("Your words, where you need them.").font(.title2)
                         }
                         talkControls
+                        captureControls
                         LabeledContent("Microphone", value: host.activeSourceDisplay)
                             .font(.subheadline).accessibilityIdentifier("microphone-source")
                         if model.cloudInUse || host.brainCloudInUse { Label("Cloud in use", systemImage: "cloud.fill") }
                         if let message = model.message { Text(message).fixedSize(horizontal: false, vertical: true) }
                         #if DEBUG
                         if let demo = host.demo {
-                            DisclosureGroup("Simulator details") {
+                            Button {
+                                showingSimulatorDetails.toggle()
+                            } label: {
+                                Label("Simulator details", systemImage: showingSimulatorDetails ? "chevron.down" : "chevron.right")
+                                    .font(.caption).frame(minHeight: 44)
+                            }.accessibilityIdentifier("demo-disclosure")
+                                .accessibilityValue(showingSimulatorDetails ? "Expanded" : "Collapsed")
+                            if showingSimulatorDetails {
                                 Text(model.listening.displayLabel + " · " + model.controls.capture.displayLabel).accessibilityIdentifier("demo-state")
                                 Text("Destination before capture: " + (demo.destinationBeforeCapture ? "Yes" : "No")).accessibilityIdentifier("demo-order")
                                 Text("Tasks: " + String(model.tasks.count)).accessibilityIdentifier("demo-tasks")
-                            }.font(.caption).accessibilityIdentifier("demo-disclosure")
+                            }
                         }
                         #endif
                     }.frame(maxWidth: .infinity, alignment: .leading).padding(24)
                 }
                 .scrollEdgeEffectStyle(.soft, for: .all)
-                .safeAreaBar(edge: .bottom) { captureControls.padding(.horizontal, 20).padding(.vertical, 12) }
             }
         }
         .background(Color(uiColor: .systemBackground))
         .navigationTitle(ContentView.title).navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            if presentation.showsStop {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("Stop", systemImage: "stop.fill", role: .destructive) { stop() }.accessibilityIdentifier("emergency-stop")
-                }
-            }
             ToolbarItem(placement: .topBarTrailing) {
                 Button("About recording", systemImage: "info.circle") { showingInfo = true }
             }
@@ -201,8 +214,6 @@ private struct HomeView: View {
             #endif
         }
         .transaction { if reduceMotion { $0.animation = nil; $0.disablesAnimations = true } }
-        .animation(reduceMotion ? nil : .smooth(duration: 0.22), value: model.listening)
-        .animation(reduceMotion ? nil : .smooth(duration: 0.22), value: model.controls.capture)
         .sensoryFeedback(.selection, trigger: held)
         .onChange(of: model.isRecording) { _, recording in
             UIImpactFeedbackGenerator(style: recording ? .light : .medium).impactOccurred()
@@ -233,75 +244,101 @@ private struct HomeView: View {
         GlassEffectContainer(spacing: 12) {
             VStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Capture").font(.caption.weight(.semibold))
+                    Text("Capture").font(.caption.weight(.semibold)).accessibilityIdentifier("capture-label")
                     Picker("Capture", selection: Binding(get: { model.controls.capture }, set: { model.setCapture($0) })) {
                         Text("Off").tag(CaptureState.off); Text("Hold").tag(CaptureState.hold); Text("Continuous").tag(CaptureState.continuous)
                     }.pickerStyle(.segmented).labelsHidden().controlSize(.large).frame(minHeight: 44).accessibilityLabel("Capture").accessibilityIdentifier("capture-picker")
                 }
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Mode").font(.caption.weight(.semibold))
+                    Text("Mode").font(.caption.weight(.semibold)).accessibilityIdentifier("mode-label")
                     Picker("Mode", selection: Binding(get: { model.controls.mode }, set: { model.setMode($0) })) {
                         Text("Dictation").tag(Mode.dictation); Text("AI Control").tag(Mode.ai_control)
                     }.pickerStyle(.segmented).labelsHidden().controlSize(.large).frame(minHeight: 44).accessibilityLabel("Mode").accessibilityIdentifier("mode-picker")
                 }
-                NavigationLink { TargetPickerView(model: model) } label: {
-                    Label("To " + (destinationDisplay), systemImage: "arrow.up.right")
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                }.buttonStyle(.glass).accessibilityIdentifier("destination-link")
             }
             .disabled(host.recorder.recording)
         }
     }
+    // One stable control occupies the same layout and glass shape in every state.
+    // No layout transition: inserting/removing controls must never overlap content.
     private var talkControls: some View {
         GlassEffectContainer(spacing: 16) {
             VStack(spacing: 16) {
                 if host.recorder.recording {
                     Text("The benchmark recorder is using the microphone. Finish or discard its recording in Settings.")
-                } else if presentation.showsEnableCapture {
-                    Button { model.setCapture(.hold) } label: { primaryLabel("Turn capture on", symbol: "mic") }
-                        .buttonStyle(.glassProminent).accessibilityIdentifier("enable-capture")
-                        .glassEffectID("talk", in: glassNamespace)
-                } else if presentation.showsStartContinuous {
-                    Button { model.setCapture(.continuous) } label: { primaryLabel("Start listening", symbol: "mic.fill") }
-                        .buttonStyle(.glassProminent).accessibilityIdentifier("start-continuous")
-                        .glassEffectID("talk", in: glassNamespace)
-                } else if presentation.showsHold {
-                    Button {} label: { primaryLabel(held ? "Release to finish" : "Hold to talk", symbol: "mic.fill") }
-                        .buttonStyle(.plain)
-                        .background(opaqueControls ? Color(uiColor: .secondarySystemBackground) : .clear, in: .rect(cornerRadius: 32))
-                        .glassEffect(opaqueControls ? .identity : .regular.tint(.accentColor).interactive(), in: .rect(cornerRadius: 32))
-                        .glassEffectID("talk", in: glassNamespace)
-                        .simultaneousGesture(DragGesture(minimumDistance: 0).updating($touching) { _, state, _ in state = true }.onChanged { _ in
-                            startHold()
-                        }.onEnded { _ in held = false; triggerTimer?.cancel(); model.release(at: tick) })
-                        .accessibilityIdentifier("hold-to-talk")
-                        .accessibilityHint("Hold while speaking and release to finish. VoiceOver users can choose Start recording in Actions.")
-                        .accessibilityAction(named: "Start recording") { model.setCapture(.continuous) }
-                        .accessibilityAction(named: "Finish") { model.finishUtterance() }
-                }
-                if presentation.showsStop {
-                    if presentation.showsHold {
-                        Button("Stop", systemImage: "stop.fill", role: .destructive) { stop() }
-                            .frame(minHeight: 44).buttonStyle(.glass).accessibilityIdentifier("stop-immediately")
-                    } else {
-                        Button(role: .destructive) { stop() } label: { primaryLabel("Stop", symbol: "stop.fill") }
-                            .buttonStyle(.glassProminent).tint(.red).accessibilityIdentifier("stop-immediately")
-                            .glassEffectID("talk", in: glassNamespace)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Group {
+                        if held || (presentation.showsHold && !presentation.showsStop) {
+                            Button {} label: { primaryLabel }
+                                .simultaneousGesture(DragGesture(minimumDistance: 0)
+                                    .updating($touching) { _, state, _ in state = true }
+                                    .onChanged { _ in startHold() }
+                                    .onEnded { _ in
+                                        guard held else { return }
+                                        held = false; triggerTimer?.cancel(); model.release(at: tick)
+                                    })
+                                .accessibilityIdentifier("hold-to-talk")
+                                .accessibilityHint("Hold while speaking and release to finish. VoiceOver users can choose Start recording in Actions.")
+                                .accessibilityAction(named: "Start recording") { model.setCapture(.continuous) }
+                                .accessibilityAction(named: "Finish") {
+                                    guard model.isRecording else { return }
+                                    held = false; triggerTimer?.cancel(); model.finishUtterance()
+                                }
+                        } else {
+                            Button {
+                                if model.listening == .preparing { return }
+                                if presentation.showsEnableCapture { model.setCapture(.hold) }
+                                else if presentation.showsStartContinuous { model.setCapture(.continuous) }
+                                else if presentation.showsStop { stop() }
+                            } label: { primaryLabel }
+                                .disabled(model.listening == .preparing)
+                                .accessibilityIdentifier(primaryIdentifier)
+                        }
                     }
-                    if presentation.showsFinish {
+                    .buttonStyle(.plain).foregroundStyle(.white)
+                    .background(opaqueControls ? primaryTint : .clear, in: .rect(cornerRadius: 32))
+                    .glassEffect(opaqueControls ? .identity : .regular.tint(primaryTint).interactive(), in: .rect(cornerRadius: 32))
+                    .glassEffectID("talk", in: glassNamespace)
+                    if presentation.showsStop && (held || model.listening == .preparing) {
+                        Button("Stop", systemImage: "stop.fill", role: .destructive) { stop() }
+                            .frame(minHeight: 44).buttonStyle(.glass).foregroundStyle(.red)
+                            .accessibilityIdentifier("stop-immediately")
+                    }
+                    if presentation.showsFinish && !held {
                         Button("Finish", systemImage: "checkmark") { model.finishUtterance() }
                             .frame(minHeight: 44).buttonStyle(.glass).accessibilityIdentifier("finish-utterance")
                     }
                 }
-                if model.listening == .preparing { Text("Choose Off below to cancel.").font(.subheadline) }
             }
         }
     }
-    private func primaryLabel(_ title: String, symbol: String) -> some View {
+    private var primaryLabel: some View {
         VStack(spacing: 12) {
-            Image(systemName: symbol).font(.largeTitle).accessibilityHidden(true)
-            Text(title).font(.title2.bold()).fixedSize(horizontal: false, vertical: true)
-        }.frame(maxWidth: .infinity, minHeight: held ? 140 : (model.listening == .finishing ? 80 : 116)).padding(20).contentShape(Rectangle())
+            if model.listening == .preparing {
+                ProgressView().tint(.white).accessibilityHidden(true)
+            } else {
+                Image(systemName: primarySymbol).font(.largeTitle).accessibilityHidden(true)
+            }
+            Text(primaryTitle).font(.title2.bold()).fixedSize(horizontal: false, vertical: true)
+        }.frame(maxWidth: .infinity, minHeight: 116).padding(20)
+            .contentShape(.rect(cornerRadius: 32))
+    }
+    private var primaryTitle: String {
+        if model.listening == .preparing { return "Getting ready" }
+        if held { return "Release to finish" }
+        if presentation.showsStop { return "Stop" }
+        if presentation.showsEnableCapture { return "Turn capture on" }
+        if presentation.showsStartContinuous { return "Start listening" }
+        return "Hold to talk"
+    }
+    private var primarySymbol: String { presentation.showsStop && !held ? "stop.fill" : "mic.fill" }
+    private var primaryTint: Color { presentation.showsStop ? .red : .accentColor }
+    private var primaryIdentifier: String {
+        if model.listening == .preparing { return "preparing-talk" }
+        if held || (presentation.showsHold && !presentation.showsStop) { return "hold-to-talk" }
+        if presentation.showsStop { return "stop-immediately" }
+        return presentation.showsEnableCapture ? "enable-capture" : "start-continuous"
     }
     private func startHold() {
         guard !held else { return }; held = true; model.press(at: tick)
@@ -406,7 +443,8 @@ private struct ApprovalView: View {
                             Text("Destination").font(.headline)
                             Text(card.destination.display_name)
                             Text(card.destination.device_id).font(.subheadline).textSelection(.enabled)
-                            if let route = card.routeDescription { Text(route).font(.subheadline).textSelection(.enabled) }
+                                .frame(minHeight: 44, alignment: .leading)
+                            if let route = card.routeDescription { Text(route).font(.subheadline).textSelection(.enabled).frame(minHeight: 44, alignment: .leading) }
                         }.fixedSize(horizontal: false, vertical: true)
                         Text(card.consequences).fixedSize(horizontal: false, vertical: true)
                         DisclosureGroup("Exact details") { Text(card.exactAction).textSelection(.enabled).fixedSize(horizontal: false, vertical: true) }
@@ -419,7 +457,9 @@ private struct ApprovalView: View {
                                 systemImage: card.preview.risk == .sensitive ? "faceid" : "checkmark")
                                 .fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, minHeight: 44)
                         }.buttonStyle(.glassProminent).controlSize(.large).disabled(approving).accessibilityIdentifier("approve-action")
-                        Button("Don’t allow", role: .cancel) { model.dismissApproval() }.frame(minHeight: 44).accessibilityIdentifier("approval-deny")
+                        Button(role: .cancel) { model.dismissApproval() } label: {
+                            Text("Don’t allow").fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, minHeight: 44)
+                        }.buttonStyle(.glass).accessibilityIdentifier("approval-deny")
                         if let message = model.message { Text(message).fixedSize(horizontal: false, vertical: true) }
                     }.padding(24)
                 }
@@ -451,7 +491,7 @@ private struct TaskCompletionView: View {
 }
 
 #if DEBUG
-private struct UIDemoPresentation: ViewModifier {
+struct UIDemoPresentation: ViewModifier {
     private let arguments = ProcessInfo.processInfo.arguments
     func body(content: Content) -> some View {
         if UIDemo.requested && arguments.contains("--ui-largest") {

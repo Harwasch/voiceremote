@@ -30,3 +30,9 @@ The `ios-screenshots` artifact has named PNGs, all per-screen audit JSONs and an
 exports fail. Partial galleries can accompany test failures: check the job and
 `ios-ui-results` bundle. Audits inventory existing issues; they do not waive them
 or establish accessibility acceptance. Actual simulator/export **unverified**.
+
+Routine UI CI is light-only, default and largest Dynamic Type; sharing a test
+session does not eliminate dark-flow/audit repetition. The Linux demo probe also
+walks all five Stop fault states and rejects late/unfinished history. The source
+guard rejects dark launch arguments in the routine suite. Apple UI results remain
+**unverified** until the coordinator runs the updated suite.

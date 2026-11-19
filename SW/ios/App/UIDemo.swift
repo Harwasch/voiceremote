@@ -88,6 +88,8 @@ import VoiceRemoteProtocol
         for _ in 0..<500 where host.listening != .idle { try await Task.sleep(for: .milliseconds(10)) }
         guard host.listening == .idle, host.suggestions.count == 1, host.grants.count == 1 else { throw SttFailure.invalidResponse }
         host.stop(); host.setMode(.dictation); host.setCapture(.hold)
+        // A later UI assertion must prove its own capture, never the seed run.
+        destinationBeforeCapture = false
     }
 }
 

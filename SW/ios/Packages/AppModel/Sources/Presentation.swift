@@ -62,7 +62,7 @@ public struct HomePresentation: Sendable {
     public let capture: CaptureState
     public let listening: ListeningState
     public init(capture: CaptureState, listening: ListeningState) { self.capture = capture; self.listening = listening }
-    public var showsStop: Bool { listening == .listening || listening == .finishing }
+    public var showsStop: Bool { listening == .preparing || listening == .listening || listening == .finishing }
     public var showsFinish: Bool { listening == .listening }
     public var showsHold: Bool { capture == .hold && listening != .preparing && listening != .finishing }
     public var showsStartContinuous: Bool { capture == .continuous && !showsStop && listening != .preparing }

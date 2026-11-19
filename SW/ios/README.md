@@ -29,7 +29,7 @@ flowchart LR
 | [Packages/SttApple/](Packages/SttApple/README.md) | SpeechAnalyzer, MIT WhisperKit small.en, optional licensed Argmax; debug picker ready for UI embedding | 🟡 Coordinator `ios-ci-*` build and device use **unverified** |
 | [Packages/Brain/](Packages/Brain/README.md) | Strict non-executable proposals, relay Claude client, router, incremental suggestion cards and benchmark hook | ✅ Synthetic Linux tests; live/UI/Policy integration **unverified** |
 | [Packages/BrainApple/](Packages/BrainApple/README.md) | Foundation Models + optional on-demand MLX adapters | 🟡 Apple CI/device behavior **unverified** |
-| [UITests/](UITests/README.md) | Scripted light/dark/large-type gallery, real Policy with synthetic adapters, accessibility findings | 🟡 Coordinator `ios-ui-*` run **unverified** |
+| [UITests/](UITests/README.md) | Scripted light/default/large-type gallery, real Policy with synthetic adapters, accessibility findings | 🟡 Coordinator `ios-ui-*` run **unverified** |
 | [Tests/](Tests/README.md) | Hosted app unit test | 🟡 macOS test **unverified** |
 | [ci/](ci/README.md) | Tested release guard and simulator discovery | ✅ Linux helper tests |
 | [ios.yml](../../.github/workflows/ios.yml) | Unsigned simulator tests; optional TestFlight release | 🟡 GitHub run **unverified** |
@@ -182,5 +182,7 @@ The iOS 26 interface uses five native tabs (Home, Devices, History, Suggestions,
 Agents) and a Home settings gear. Home is transcript-first with system glass
 controls; pairing and approval are focused sheets. [Design rules and audit triage](../../AI/SW/2026-11-04-liquid-glass-research.md).
 The coordinator’s first run compiled/launched and exported 73 screenshots before
-a consent-toggle test failure. The updated switch interaction, layout and glass
-APIs require the next run; new Apple SDK/UI/accessibility acceptance **unverified**.
+a consent-toggle test failure. The next revamp compiled/launched; UI2 exposed
+overlapping Home controls and test identifier/scrolling failures. Updated layout,
+independent light-only flows and AX5 sheet/control coverage require the next run;
+new Apple SDK/UI/accessibility acceptance **unverified**.

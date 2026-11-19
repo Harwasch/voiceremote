@@ -129,7 +129,9 @@ jobs:
         run: |
           device_id=$(xcrun simctl list devices available --json | python3 ci/checks.py simulator)
           echo "id=$device_id" >> "$GITHUB_OUTPUT"
-      - name: Walk synthetic UI flows and audit accessibility unsigned
+      # The suite deliberately runs light/default and light/AX5 only. Dark mode
+      # repeats the full interaction/audit walks even within one test session.
+      - name: Walk light UI flows and largest type; audit accessibility unsigned
         env:
           SIMULATOR_ID: ${{ steps.device.outputs.id }}
         run: |
