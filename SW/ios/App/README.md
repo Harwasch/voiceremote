@@ -13,7 +13,9 @@ flowchart LR
 
 | Path | What | Status |
 |---|---|---|
-| [VoiceRemoteApp.swift](VoiceRemoteApp.swift) | Transcript-first Home, native glass talk/capture controls, five tabs, history actions and exact approval | 🟡 Apple/device **unverified** |
+| [VoiceRemoteApp.swift](VoiceRemoteApp.swift) | Four native tabs and app-level approval/completion presentation | 🟡 Apple/device **unverified** |
+| [TalkView.swift](TalkView.swift), [SuggestionCardView.swift](SuggestionCardView.swift) | Destination-first Talk, capture menu, round talk control, live text and inline AI suggestions | 🟡 Apple layout/interaction **unverified** |
+| [TargetPickerView.swift](TargetPickerView.swift), [ApprovalView.swift](ApprovalView.swift), [HistoryView.swift](HistoryView.swift) | Native destination/approval sheets and retained-text actions | 🟡 Apple layout/interaction **unverified** |
 | [AgentsView.swift](AgentsView.swift) | Tasks, sessions and time-limited permissions; existing Policy/model operations | 🟡 New Apple UI **unverified** |
 | [InfoSheet.swift](InfoSheet.swift) | Native scrollable explanatory sheets; system toolbar and dismissal | 🟡 Apple UI **unverified** |
 | [UIDemo.swift](UIDemo.swift) | DEBUG-only synthetic capture/STT/Brain, pairing, transport and biometric adapters; real AppModel/Policy/router | ✅ Linux adapter probe; Apple UI **unverified** |
@@ -116,3 +118,31 @@ moving a held finger cancels capture qualification so the page can scroll at AX5
 History rows expand vertically and their More menu has a full-width 44-point label.
 Policy, real capture/approval paths and release animations are unchanged. New Apple
 layout and gestures remain **unverified** pending CI.
+
+## Approved mockup translation
+
+Source: [nine approved HTML screens](../../../AI/SW/2026-11-19-ui-mockups/README.md).
+SF Pro, semantic system blue/indigo, native tab/toolbar glass, sheet detents and
+native button metrics replace the HTML stand-ins. No blur or custom tab bar.
+Screenshots use the same screen stems: Main, Listening, AIControl, Destination,
+Approval, History, Devices, Pairing, Agents (appearance/size prefixes retained).
+All Apple rendering and visual matching remain **unverified**.
+
+| Difference from the examples | Reason |
+|---|---|
+| Names, text, times, available sessions, delivery state and permission/remote status use AppModel/adapters; no focused-app name or battery percentage is invented | Those example values are not available in the current contracts. The synthetic fixtures remain explicitly synthetic adapters. |
+| Destination says “Ready for your words”, not “Notepad is open and focused” | A connection does not establish the current focused app. Auto still uses real authenticated focus reports. |
+| Approval uses the model's consequences and exact details; no promise to read particular datasheets or write a comparison | The trusted preview cannot establish those effects or agent workspace permissions. Face ID/Policy paths stay unchanged. |
+| Pairing says “Your computer”; the agent-access switch is read-only in step 2, with role/access choices in step 1 | The current PairingFlow doesn't expose a pending name; access is bound by the invitation handshake before the phrase. Changing it requires restarting pairing. |
+| History groups by day, explains held/unconfirmed retention, and preserves resend/Copy/Share/Delete in native context menus (held rows also have More) | Waiting text isn't automatically erased after seven days. No original text action is removed. |
+| Agents shows real task states and indeterminate progress only when running | No percentage or running task is fabricated. Tasks are seeded only by real review/Policy approval. |
+| Larger text scrolls/reflows; Mode becomes a menu and pairing words become one column at accessibility sizes; placeholder text uses secondary contrast | Preserve full words, VoiceOver actions, readable contrast and 44-point targets. |
+| Extra controls live in details, Permissions or Settings (including Mute suggestions and DEBUG diagnostics) | Preserve existing operations without adding them to the approved Talk composition. |
+
+Reduce Transparency uses an opaque talk button; system controls handle their
+native fallback. Reduce Motion disables transactions; the two recording rings
+are static, not an invented audio-level meter. Live transcript remains real STT
+output. Talk controls are pinned above the native tab bar, so long transcripts scroll
+without pushing Stop out of reach. The primary control stays circular in Off, preparing, holding, listening
+and finishing states; preparing/finishing retain a separate Stop. Finish is also
+available from the capture menu while recording. No release demo argument exists.

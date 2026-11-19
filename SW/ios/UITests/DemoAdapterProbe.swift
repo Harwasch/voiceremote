@@ -46,7 +46,7 @@ import Router
             precondition(model.controls.capture == .off && model.listening == .idle && model.partial.isEmpty)
             try await Task.sleep(for: .milliseconds(100))
             await model.refresh()
-            precondition(model.history.count == 2 && model.partial.isEmpty && model.listening == .idle)
+            precondition(model.history.count == 4 && model.partial.isEmpty && model.listening == .idle)
             precondition(demo.destinationBeforeCapture)
             print("synthetic stop probe: state reached, destination precedes capture, Stop cancels without unfinished history")
             return

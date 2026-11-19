@@ -25,9 +25,9 @@ import VoiceRemoteProtocol
     let epoch = UUID()
     static let account = "ui-synthetic"
     static let phone = "synthetic-phone"
-    static let computer = DeviceInfo(account_id: account, device_id: "synthetic-pc", display_name: "Synthetic Studio",
+    static let computer = DeviceInfo(account_id: account, device_id: "synthetic-pc", display_name: "Studio PC",
         platform: .windows, role: .both, capabilities: [.receive_text, .delegate_task, .cancel_task, .open_resource])
-    static let offline = DeviceInfo(account_id: account, device_id: "synthetic-laptop", display_name: "Synthetic Laptop",
+    static let offline = DeviceInfo(account_id: account, device_id: "synthetic-laptop", display_name: "Work laptop",
         platform: .linux, role: .both, capabilities: [.receive_text, .delegate_task, .cancel_task])
     init() { biometric = DemoBiometric(refuse: ProcessInfo.processInfo.arguments.contains("--ui-biometric-refuse")) }
     func makeCapture() async throws -> any CaptureSession {
@@ -38,7 +38,10 @@ import VoiceRemoteProtocol
         return capture
     }
     var engines: [any SttEngine] {
-        [DemoSpeech(id: "apple", slow: !seeding && arguments.contains("--ui-slow-finish")), DemoSpeech(id: "whisperkit", slow: false)]
+        [DemoSpeech(id: "apple", slow: !seeding && arguments.contains("--ui-slow-finish"), partial: previewText), DemoSpeech(id: "whisperkit", slow: false, partial: previewText)]
+    }
+    private var previewText: String {
+        model?.controls.mode == .ai_control ? "…it might be worth comparing the two servo motors before we order." : "Can we move the design review to Thursday afternoon and invite Priya"
     }
     func seed(_ host: VoiceAppModel, history: AppHistoryStore, registry: DeviceRegistry, agents: AgentControl) async throws {
         guard !prepared else { return }; prepared = true
@@ -54,7 +57,7 @@ import VoiceRemoteProtocol
             let connection = device == Self.computer ? epoch : UUID()
             try await agents.connected(device, epoch: connection) { try await transport.send($0) }
             let wire = AgentSession(account_id: Self.account, device_id: device.device_id, project_id: "synthetic-project",
-                workspace: "/synthetic/workspace", provider: .codex, provider_session_id: device.device_id + "-session",
+                workspace: "/synthetic/workspace", provider: device == Self.computer ? .codex : .claude, provider_session_id: device == Self.computer ? "arm-design" : "Laptop Claude",
                 capability_profile: .read_only, capabilities: [.delegate_task, .cancel_task])
             let request = try await messages.inventoryRequest()
             try agents.receive(AgentInventory(account_id: Self.account, device_id: device.device_id,
@@ -71,12 +74,19 @@ import VoiceRemoteProtocol
         }
         guard let session = agents.destinations.first(where: { $0.id == Self.computer.device_id })?.session else { throw RouterError.invalidStatus }
         try agents.choose(session)
+        try agents.makeDefault(session)
         let now = Int64(Date().timeIntervalSince1970 * 1000)
         try await history.saveText(HistoryEntry(segmentID: "synthetic-held", targetID: Self.computer.device_id,
-            text: "Synthetic held note for review.", createdAt: now, accountID: Self.account), state: .held, now: now)
+            text: "Remind the team the budget review moved to Friday.", createdAt: now, accountID: Self.account), state: .held, now: now)
         try await history.saveText(HistoryEntry(segmentID: "synthetic-unconfirmed", targetID: Self.computer.device_id,
-            text: "Synthetic unconfirmed note. Check the computer first.", createdAt: now, accountID: Self.account), state: .unconfirmed, now: now)
+            text: "Check the torque numbers on the elbow joint.", createdAt: now, accountID: Self.account), state: .unconfirmed, now: now)
+        try await history.saveText(HistoryEntry(segmentID: "synthetic-delivered", targetID: Self.computer.device_id,
+            text: "Move the review to Thursday at three.", createdAt: now - 120_000, accountID: Self.account), state: .delivered, now: now)
+        try await history.saveText(HistoryEntry(segmentID: "synthetic-phone-note", targetID: Self.phone,
+            text: "Running ten minutes late, start without me.", createdAt: now - 180_000, accountID: Self.account), state: .delivered, now: now)
         await host.refresh()
+        try host.updateFocus(FocusReport(account_id: Self.account, device_id: Self.computer.device_id, text_field_focused: true,
+            last_activity_at: now, activity_age_ms: 0))
         host.setTarget(.auto)
         host.grantTargetSelection(device: Self.computer, project: "synthetic-project")
         // Generate a card through capture → STT → Brain → SuggestionEngine.
@@ -111,11 +121,12 @@ import VoiceRemoteProtocol
 struct DemoSpeech: SttEngine {
     let id: String
     let slow: Bool
+    var partial = "Synthetic words for review"
     var descriptor: EngineDescriptor { .init(id: id, version: "synthetic-ui", location: .onDevice) }
     func transcribe(_ audio: AsyncStream<AudioFrame>, vocabulary: Vocabulary) -> AsyncStream<SttEvent> {
         AsyncStream { output in
             let worker = Task {
-                output.yield(.partial("Synthetic words for review"))
+                output.yield(.partial(partial))
                 for await _ in audio { if Task.isCancelled { break } }
                 if slow { try? await Task.sleep(for: .seconds(120)) }
                 if !Task.isCancelled { output.yield(.final("Please draft a synthetic workspace note")) }
@@ -128,7 +139,7 @@ struct DemoSpeech: SttEngine {
 struct DemoBrain: LlmBrain {
     func propose(_ request: BrainRequest) async throws -> BrainResponse {
         let tool = ToolCall.delegateTaskTool(DelegateTaskTool(account_id: "ui-synthetic", device_id: "synthetic-pc",
-            project_id: "synthetic-project", provider_session_id: "synthetic-pc-session", instruction: "Draft a synthetic workspace note."))
+            project_id: "synthetic-project", provider_session_id: "arm-design", instruction: "Compare the two servo motors"))
         let bytes = try JSONSerialization.data(withJSONObject: [JSONSerialization.jsonObject(with: ProtocolCodec.encode(tool))])
         return ProposalDecoder.decode(bytes, accountID: "ui-synthetic")
     }

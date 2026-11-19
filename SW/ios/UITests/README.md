@@ -11,7 +11,7 @@ flowchart LR
 |---|---|---|
 | [VoiceRemoteUITests.swift](VoiceRemoteUITests.swift) | Light-only flow assertions, largest Dynamic Type main screens, named screenshots and accessibility inventory | 🟡 Apple compile/simulator **unverified** |
 | [DemoAdapterProbe.swift](DemoAdapterProbe.swift) | Linux-only real-model/Policy smoke probe using the exact app demo adapters; excluded from Xcode target | ✅ Synthetic Linux probe; UI **unverified** |
-| `ios-screenshots` artifact | `gallery__light__default__home.png` and other labelled PNGs; `index.json` maps files/tests and contains every audit finding | 🟡 Await coordinator `ios-ui-*` run |
+| `ios-screenshots` artifact | `gallery__light__default__Main.png` and other labelled PNGs; `index.json` maps files/tests and contains every audit finding | 🟡 Await coordinator `ios-ui-*` run |
 | `ios-ui-results` artifact | Full xcresult, including failure diagnostics and XCTest audit attachments | 🟡 Await coordinator run |
 
 Start with `VoiceRemoteUITests.swift` and the [demo adapters](../App/UIDemo.swift).
@@ -22,7 +22,7 @@ No new product requirements or device-performance claims.
 |---|---|
 | Startup recovery | Synthetic storage failure shows the real blocked recovery screen; unavailable copy retains the block |
 | First run / permissions | Explicit consent; disabled recording; microphone/speech, camera and Bluetooth denied states |
-| Home / destination | Real HOLD gesture; destination exists before capture/first text; Auto/iPhone/computer selection; mode/capture switches |
+| Talk / destination | Real HOLD gesture; destination exists before capture/first text; Auto/iPhone/computer selection; mode/capture switches |
 | Stop | Idle, preparing, listening, finishing, failed and interrupted; OFF/HOLD/CONTINUOUS; no unfinished history commits |
 | Devices | Paste synthetic invitation through the system menu; compare four words; confirm then revoke |
 | History | Held and unconfirmed text; explicit resend stays visibly unconfirmed |
@@ -32,7 +32,7 @@ No new product requirements or device-performance claims.
 Screenshots run in light/default and light/AX5. Audits run once per distinct
 navigation/help screen at default size, rather than for every screenshot/state;
 the audit itself exercises font sizes. Atomic markers preserve deduplication if
-the test runner restarts. Routine CI omits dark. The five tabs plus Settings,
+the test runner restarts. Routine CI omits dark. The four tabs plus Settings,
 destination picker and approval also run at `.accessibility5`; the debug instrumentation is behind a small disclosure and scales normally. The audit uses Apple's
 [`performAccessibilityAudit`](https://developer.apple.com/documentation/xcuiautomation/xcuiapplication/performaccessibilityaudit(for:_:))
 with **report-only** issue handling: every issue is retained, no finding is waived,
@@ -51,8 +51,8 @@ Presentation: `--ui-dark`, `--ui-largest`. Slow adapters await cancellation; the
 cannot emit late text after Stop. No network, BLE or LocalAuthentication prompt
 is required for these synthetic paths.
 
-Revamp coverage: native segmented Capture/Mode; one primary control per state;
-Home gear → Settings; separate Agents tab; invitation/confirmation pairing sheet;
+Revamp coverage: capture menu and segmented Mode (menu at accessibility sizes); one primary control per state;
+Talk gear → Settings; separate Agents tab; invitation/confirmation pairing sheet;
 keyboard dismissal and visible four words; History More menu; Phone details and
 help sheets. All toggles under test use the native child switch or its trailing
 edge, with native value assertions; segmented selection uses `isSelected`, not its empty `value`. Consent also asserts real/saved model state; its
@@ -98,3 +98,14 @@ Home cancels Hold when a drag moves beyond 12 points; AX5 scrolling must leave i
 idle, and existing hold/release assertions still exercise actual capture. History
 uses an explicit full-width menu hit area and flexible row height. New Apple
 layout/interaction/timing remain **unverified**; see [UI3 evidence](../../../AI/SW/2026-11-19-ui3-timing.md).
+
+Approved mockup screenshot stems: **Main, Listening, AIControl, Destination,
+Approval, History, Devices, Pairing, Agents**. Every stem runs at light/default
+and light/AX5; extra screenshots retain descriptive state names. Native filename
+prefixes still identify appearance and size. [Translation differences](../App/README.md#approved-mockup-translation).
+The suite follows the four real tabs and inline suggestions, capture menus and
+explicit sheet Done buttons. Simulator diagnostics are opened under Settings.
+Capture selection asserts its accessibility value; native switches still tap the
+switch itself and assert values. No fixed sleeps or extra audit passes were added.
+The exact DEBUG fixtures pass the portable adapter probe; Apple compilation,
+timing, visual match and accessibility acceptance remain **unverified**.

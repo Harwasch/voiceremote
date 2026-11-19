@@ -41,6 +41,8 @@ struct SettingsView: View {
                 Text("Cloud services use the signed relay membership from pairing.").font(.footnote)
             }
             Section("AI suggestions") {
+                Toggle("Mute suggestions", isOn: Binding(get: { model.muted }, set: { value in Task { await model.muteSuggestions(value) } }))
+                    .accessibilityIdentifier("mute-suggestions")
                 Picker("Processing", selection: $model.settings.brain) {
                     Text("On-device only").tag(BrainSetting.onDeviceOnly.rawValue)
                     Text("Hybrid").tag(BrainSetting.hybrid.rawValue)
@@ -86,6 +88,8 @@ struct SettingsView: View {
                     .frame(minHeight: 44).accessibilityIdentifier("settings-demo-details")
                     .accessibilityValue(showingSimulatorDetails ? "Expanded" : "Collapsed")
                 if showingSimulatorDetails {
+                    Text("Destination before capture: " + (host.demo?.destinationBeforeCapture == true ? "Yes" : "No")).accessibilityIdentifier("demo-order")
+                    Text("Tasks: " + String(model.tasks.count)).accessibilityIdentifier("demo-tasks")
                     Text("Cloud processing: " + (model.settings.cloudConsent ? "On" : "Off") + "; saved: " + (host.savedCloudConsentForDemo.map { $0 ? "On" : "Off" } ?? "Not saved"))
                         .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("consent-state")
                 }

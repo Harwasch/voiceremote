@@ -70,3 +70,7 @@ An exact known offline local route remains reviewable as an explicit durable hol
 `CaptureSegmenter` carries silence/limit/end boundaries into bounded `CaptureIntentBuffer` revisions. Independent speech preserves earlier approvals/offline tasks; corrections invalidate only their unfinished intent. AI slices retain the displayed approved target. `ProviderOrderDraft` preserves typed commas; approval route descriptions label cloud fallback as new execution.
 
 Home presentation includes Stop while preparing; the state-matrix regression covers all capture/listening combinations. Apple rendering remains **unverified**.
+
+Presentation helpers provide sentence headings for every tool and instruction-only
+agent task titles, keeping exact payloads unchanged. Portable formatter tests
+cover all tool cases; native mockup matching remains **unverified**.

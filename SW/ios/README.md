@@ -62,7 +62,7 @@ are compiled out without DEBUG (Linux source guard tested). Apple compilation,
 UI behavior, actual exports and accessibility acceptance remain **unverified**
 until the coordinator's run. No Apple account or provider credentials are needed.
 
-Only SwiftPM downloads are cached; no simulator state, signing data or DerivedData is cached.
+UI CI caches SwiftPM downloads and compiled products. Simulator state and signing data are not cached.
 
 Runner choice checked 2026-11-02: [`macos-26`, Xcode 26.6 inventory](https://github.com/actions/runner-images/blob/main/images/macos/macos-26-Readme.md#xcode).
 The selected Xcode path is explicit; simulator model/OS patch versions are discovered at runtime.
@@ -178,14 +178,14 @@ Push defaults off; an owner-signed profile and opt-in entitlement/environment ar
 
 Cross-review: push registration shares the live relay socket, background-only resume preserves biometric-sheet approvals, remote controls use control-event acknowledgements, and source selection pins before async setup with a visible active microphone. [Portable regressions](Packages/AppModel/Tests/CrossReviewTests.swift) cover REC/target/HOLD, upgrade and presentation boundaries; [socket tests](Packages/AppModel/Tests/SignedPhoneTransportTests.swift) enforce replacement/drain behavior. Apple SDK/device checks remain **unverified**.
 
-The iOS 26 interface uses five native tabs (Home, Devices, History, Suggestions,
-Agents) and a Home settings gear. Home is transcript-first with system glass
-controls; pairing and approval are focused sheets. [Design rules and audit triage](../../AI/SW/2026-11-04-liquid-glass-research.md).
-The coordinator’s first run compiled/launched and exported 73 screenshots before
-a consent-toggle test failure. The next revamp compiled/launched; UI2 exposed
-overlapping Home controls and test identifier/scrolling failures. Updated layout,
-independent light-only flows and AX5 sheet/control coverage require the next run;
-new Apple SDK/UI/accessibility acceptance **unverified**.
+The iOS 26 interface follows the [owner-approved mockups](../../AI/SW/2026-11-19-ui-mockups/README.md):
+four native tabs, Talk / History / Devices / Agents, with Settings on the Talk gear.
+Talk puts the destination first, a capture menu at top left, a blue Dictation or
+indigo AI Control mode picker, a circular talk control and inline suggestions.
+Destination, approval and pairing use native sheets. See [screen mapping and
+necessary differences](App/README.md#approved-mockup-translation) and
+[UI test coverage](UITests/README.md). Changed Apple rendering, gestures,
+accessibility and simulator screenshots remain **unverified** until CI.
 
 UI3 hit the outer CI timeout; [timing evidence](../../AI/SW/2026-11-19-ui3-timing.md)
 explains polling, repeated audits/hierarchy scans and long failed scroll loops.

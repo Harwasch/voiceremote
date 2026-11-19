@@ -19,8 +19,14 @@ import VoiceRemoteProtocol
         #expect(AppPresentation.summary(tool) == expected)
         #expect(!AppPresentation.summary(tool).contains("Tool("))
         #expect(!AppPresentation.summary(tool).contains("VoiceRemoteProtocol"))
+        let heading = AppPresentation.actionTitle(tool)
+        #expect(!heading.contains("Tool("))
+        #expect(!heading.contains("VoiceRemoteProtocol"))
+        if case .delegateTaskTool = tool { #expect(heading == "Ask draft-session to draft a workspace note") }
+        else { #expect(heading == expected) }
     }
     #expect(AppPresentation.summary(.delegateTaskTool(.init(account_id: "synthetic", device_id: "studio", project_id: "demo", instruction: "Keep\nall words"))) == "Ask studio: Keep\nall words")
+    #expect(AppPresentation.actionTitle(.delegateTaskTool(.init(account_id: "synthetic", device_id: "studio", project_id: "demo", instruction: "Keep\nall words"))) == "Ask studio to keep\nall words")
 }
 
 @Test func protocolLabelsArePlainForEveryCase() {

@@ -51,3 +51,8 @@ UI2: Simulator details uses an explicitly identified expansion button and an
 independent saved-consent label. At accessibility sizes the speech-engine picker
 uses native inline rows with wrapping names; default size uses navigation selection.
 The real setting/save path is unchanged. New Apple layout **unverified**.
+
+The Talk gear is the Settings entry. Mute suggestions is in AI suggestions;
+DEBUG diagnostics (capture ordering, task count and real/saved consent) are behind
+Simulator details here, so no debug card changes the approved Talk layout.
+Apple interaction remains **unverified**.

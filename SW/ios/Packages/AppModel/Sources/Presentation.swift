@@ -5,6 +5,23 @@ import Router
 import VoiceRemoteProtocol
 
 public enum AppPresentation {
+    /// A sentence for headings; exact payloads remain available in the preview.
+    public static func actionTitle(_ tool: ToolCall) -> String {
+        if case .delegateTaskTool(let value) = tool {
+            let instruction = value.instruction
+            return "Ask \(value.provider_session_id ?? value.device_id) to " + instruction.prefix(1).lowercased() + instruction.dropFirst()
+        }
+        return summary(tool)
+    }
+    public static func taskTitle(_ task: QueuedTask) -> String {
+        if case .delegateTaskTool(let value) = task.command.immutable_task_payload { return value.instruction }
+        return actionTitle(task.command.immutable_task_payload)
+    }
+    public static func taskState(_ task: QueuedTask) -> String {
+        if let hold = task.hold { return hold.displayLabel }
+        if task.ownerConfirmed == true { return "You confirmed this finished" }
+        return task.state.displayLabel
+    }
     public static func summary(_ tool: ToolCall) -> String {
         switch tool {
         case .selectTargetTool(let value): "Use \(value.device_id) for text"

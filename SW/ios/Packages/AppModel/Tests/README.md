@@ -55,3 +55,7 @@ These prove synthetic policy/routing behavior. The scoped result-file fixture is
 Review regressions reproduce independent-speech cancellation, cumulative-text capture failure, cross-target grant failure, mid-capture destination reset, ordinary “session timeout” rejection and editable provider commas. Intent tests cover committed-intent separation, unfinished correction/continuation identity and full-context negation. Production cloud approval asserts the new-execution label.
 
 Home presentation includes Stop while preparing; the state-matrix regression covers all capture/listening combinations. Apple rendering remains **unverified**.
+
+Presentation helpers provide sentence headings for every tool and instruction-only
+agent task titles, keeping exact payloads unchanged. Portable formatter tests
+cover all tool cases; native mockup matching remains **unverified**.

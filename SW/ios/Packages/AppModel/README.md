@@ -78,3 +78,7 @@ Policy, authorization inputs, routing and dictation/Brain separation are unchang
 
 Home’s presentation matrix now includes Stop during preparation. The regression
 failed before the fix and passes locally; capture/Policy behavior is unchanged.
+
+Presentation helpers provide sentence headings for every tool and instruction-only
+agent task titles, keeping exact payloads unchanged. Portable formatter tests
+cover all tool cases; native mockup matching remains **unverified**.

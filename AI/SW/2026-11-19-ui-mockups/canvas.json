@@ -1,0 +1,19 @@
+{"v":3,"createdOnFiles":{"v":1,"at":"2026-11-19T21:30:00Z"},"title":"Voice Remote iPhone design","launch":{"view":"canvas"},"pages":[],
+"boards":{
+"Main.dc.html":{"x":0,"y":0,"w":390,"h":844,"title":"Talk · ready"},
+"Listening.dc.html":{"x":470,"y":0,"w":390,"h":844,"title":"Talk · listening"},
+"AIControl.dc.html":{"x":940,"y":0,"w":390,"h":844,"title":"Talk · AI Control"},
+"Destination.dc.html":{"x":1410,"y":0,"w":390,"h":844,"title":"Where words go"},
+"Approval.dc.html":{"x":0,"y":1190,"w":390,"h":844,"title":"Approve an action"},
+"History.dc.html":{"x":470,"y":1190,"w":390,"h":844,"title":"History"},
+"Devices.dc.html":{"x":940,"y":1190,"w":390,"h":844,"title":"Devices"},
+"Pairing.dc.html":{"x":1410,"y":1190,"w":390,"h":844,"title":"Pair a computer"},
+"Agents.dc.html":{"x":1880,"y":1190,"w":390,"h":844,"title":"Agents"}
+},
+"order":["Main.dc.html","Listening.dc.html","AIControl.dc.html","Destination.dc.html","Approval.dc.html","History.dc.html","Devices.dc.html","Pairing.dc.html","Agents.dc.html"],
+"notes":{
+"talk":{"x":0,"y":-300,"text":"Talking: one button, words where you can see them","kind":"title1","maxW":1800},
+"rest":{"x":0,"y":890,"text":"Approvals, history, devices and agents","kind":"title1","maxW":2270},
+"why":{"x":1880,"y":0,"w":360,"size":"m","fill":"blue","text":"Design direction\n\n• Where your words go is the biggest thing on Talk, because sending text to the wrong place is the costly mistake.\n• Dictation is blue and AI Control is indigo, so the mode is visible at a glance, not only in a switch.\n• The talk button is the one strong element. Glass is only for controls floating above content, as Apple's Liquid Glass guidance says.\n• Four tabs: Talk, History, Devices, Agents. Suggestions appear on Talk in AI Control, and Settings is the gear.\n• Type is Inter here as a stand-in for Apple's SF Pro, which the app uses."}
+},
+"designSystems":[]}
