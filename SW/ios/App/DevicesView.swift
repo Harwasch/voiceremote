@@ -200,15 +200,24 @@ private struct PairComputerView: View {
                                     .focused($codeFocused).textFieldStyle(.plain).foregroundStyle(.primary)
                                     .frame(minHeight: 44).accessibilityIdentifier("pairing-invitation")
                             }.padding(16).background(Color(uiColor: .secondarySystemGroupedBackground), in: .rect(cornerRadius: 20))
-                            Button("Connect") { codeFocused = false; Task { await pairing.begin() } }
-                                .buttonStyle(.glassProminent).controlSize(.large).disabled(pairing.busy)
-                            Button("Scan QR code", systemImage: "qrcode.viewfinder") { codeFocused = false; scan = true }
-                                .buttonStyle(.glass).controlSize(.large)
                         }
                         if pairing.busy { ProgressView("Waiting for computer…") }
                         if let message = pairing.error { Label(message, systemImage: "exclamationmark.triangle").fixedSize(horizontal: false, vertical: true) }
                     }.padding(24).frame(minHeight: geometry.size.height, alignment: .topLeading)
                 }.scrollDismissesKeyboard(.interactively)
+                    .safeAreaInset(edge: .bottom, spacing: 0) {
+                        // Pinned so the keyboard never hides Connect.
+                        if pairing.phrase == nil {
+                            HStack(spacing: 10) {
+                                Button("Scan QR code", systemImage: "qrcode.viewfinder") { codeFocused = false; scan = true }
+                                    .buttonStyle(.glass).controlSize(.large)
+                                Button { codeFocused = false; Task { await pairing.begin() } } label: {
+                                    Text("Connect").frame(maxWidth: .infinity)
+                                }.buttonStyle(.glassProminent).controlSize(.large).disabled(pairing.busy)
+                            }.dynamicTypeSize(...DynamicTypeSize.xxxLarge).padding(.horizontal, 24).padding(.vertical, 12)
+                                .background(Color(uiColor: .systemGroupedBackground))
+                        }
+                    }
                     .id(pairing.phrase == nil ? "invitation" : "confirmation")
             }.background(Color(uiColor: .systemGroupedBackground))
                 .navigationTitle("").navigationBarTitleDisplayMode(.inline)
