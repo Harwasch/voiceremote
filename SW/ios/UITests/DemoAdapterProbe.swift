@@ -28,6 +28,13 @@ import Router
         agents.onChange = { Task { await model.refreshTasks() } }
         try await demo.seed(model, history: history, registry: registry, agents: agents)
         print("seed: devices=\(model.devices.count), history=\(model.history.count), suggestions=\(model.suggestions.count), grants=\(model.grants.count), sessions=\(agents.destinations.count)")
+        if demo.arguments.contains("--ui-running-task") {
+            precondition(model.suggestions.count == 1 && model.tasks.count == 1 && model.tasks[0].state == .running)
+            precondition(model.approval == nil && model.tasks[0].route?.destination.session == agents.selected)
+            precondition(agents.completionEpoch(for: model.tasks[0]) == nil)
+            print("synthetic running task + fresh suggestion: real Policy approval and authenticated running status passed")
+            return
+        }
         precondition(model.suggestions.count == 1 && model.grants.count == 1 && model.tasks.isEmpty)
         if demo.arguments.contains("--ui-stop-probe") {
             model.setCapture(.continuous)

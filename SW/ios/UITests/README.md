@@ -109,3 +109,13 @@ Capture selection asserts its accessibility value; native switches still tap the
 switch itself and assert values. No fixed sleeps or extra audit passes were added.
 The exact DEBUG fixtures pass the portable adapter probe; Apple compilation,
 timing, visual match and accessibility acceptance remain **unverified**.
+
+`test00MainScreenGallery` now captures all nine approved names at default size
+before accessibility audits or later flows, using --ui-running-task and
+--ui-holding-preview. It starts with Listening, then captures Main, Destination,
+AIControl (live + suggestion), fresh Approval, running Agents, History, Devices
+and Pairing. Existing default flow tests still inventory accessibility once per
+screen. AX5 approval requires its pinned actions to be hittable without scrolling;
+refusal requires a single Close and no approve-action. The Linux adapter probe
+also checks the running fixture through real Policy and typed transport updates.
+Apple execution/timing remain **unverified**. CI remains light/default + AX5.

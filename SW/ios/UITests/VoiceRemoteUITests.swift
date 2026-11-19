@@ -26,7 +26,7 @@ import UIKit
         app.launchArguments = arguments
         app.launch()
         Self.lastLaunchArguments = arguments
-        let root = flags.contains("--ui-storage-denied") ? app.staticTexts["Private storage / audit recovery"] : app.tabBars.buttons["Talk"]
+        let root = flags.contains("--ui-storage-denied") ? app.staticTexts["storage-recovery-title"] : app.tabBars.buttons["Talk"]
         require(root, timeout: 30)
     }
     private func require(_ element: XCUIElement, timeout: TimeInterval = 3) {
@@ -264,8 +264,8 @@ import UIKit
         launch(["--ui-storage-denied"])
         XCTAssertFalse(app.tabBars.buttons["Talk"].exists)
         try shot("private-storage-audit-recovery")
-        tap(app.buttons["Authenticate and restore verified audit copy"])
-        XCTAssertTrue(app.staticTexts["Synthetic verified copy unavailable. Approvals remain unavailable; originals are preserved."].appears(timeout: 5))
+        tap(app.buttons["restore-saved-copy"])
+        XCTAssertTrue(app.staticTexts["No verified copy is available in this demo. Nothing was changed."].appears(timeout: 5))
         try shot("audit-recovery-unavailable")
     }
 
@@ -432,6 +432,8 @@ import UIKit
         tap(app.buttons["approve-action"])
         XCTAssertTrue(app.staticTexts["Approval denied or expired. Nothing was started."].appears(timeout: 5))
         try shot("biometric-refused")
+        XCTAssertFalse(app.buttons["approve-action"].exists)
+        XCTAssertEqual(app.buttons["approval-deny"].label, "Close")
         tap(app.buttons["approval-deny"]); tab("Talk")
         XCTAssertEqual(diagnostic("demo-tasks"), "Tasks: 0")
     }
@@ -516,7 +518,45 @@ import UIKit
         setSwitch("keep-benchmark-audio", on: true); setSwitch("keep-benchmark-audio", on: false)
     }
 
-    func test00MainScreenGallery() throws { try mainScreens(largest: false) }
+    func test00MainScreenGallery() throws {
+        // Capture the complete approved default gallery before slower audit/flow
+        // tests. The task fixture uses real Policy; no decision is pre-applied
+        // to the separate, fresh suggestion shown in Approval.
+        launch(["--ui-running-task", "--ui-holding-preview"])
+        require(app.staticTexts["partial-text"])
+        try shot("Listening", audit: false)
+        let listeningStopVisible = app.buttons["stop-immediately"].isHittable
+        tap(app.buttons["stop-immediately"]); tap(app.buttons["enable-capture"])
+        try shot("Main", audit: false)
+        let capturePillWidth = app.buttons["capture-menu"].frame.width
+        tap(app.buttons["destination-link"]); try shot("Destination", audit: false); destinationDone()
+        mode("AI Control"); capture("Continuous")
+        require(app.staticTexts["partial-text"]); require(app.buttons["review-suggestion"])
+        try shot("AIControl", audit: false)
+        tap(app.buttons["review-suggestion"]); require(app.staticTexts["approval-exact-action"])
+        try shot("Approval", audit: false)
+        let approvalVisible = app.buttons["approve-action"].isHittable
+        tap(app.buttons["approval-deny"])
+        tab("Agents"); try shot("Agents", audit: false)
+        let taskStatus = app.staticTexts["task-status"].label
+        let taskProgressVisible = app.descendants(matching: .any).matching(identifier: "agent-task-progress").firstMatch.exists
+        let taskCanCancel = app.buttons["cancel-task"].exists
+        tab("History"); try shot("History", audit: false)
+        tab("Devices"); try shot("Devices", audit: false)
+        tap(app.buttons["pair-computer"])
+        let invitation = app.descendants(matching: .any).matching(identifier: "pairing-invitation").firstMatch
+        tap(invitation); invitation.typeText("voiceremote://synthetic-invitation"); tap(app.buttons["Connect"])
+        require(app.descendants(matching: .any).matching(identifier: "pairing-phrase").firstMatch)
+        try shot("Pairing", audit: false)
+        tap(app.buttons["pairing-cancel"])
+        // Non-blocking checks come after the full gallery is safely checkpointed.
+        XCTAssertTrue(listeningStopVisible)
+        XCTAssertGreaterThan(capturePillWidth, 64, "Capture pill must include its word, not just an icon")
+        XCTAssertTrue(approvalVisible)
+        XCTAssertEqual(taskStatus, "Running")
+        XCTAssertTrue(taskProgressVisible)
+        XCTAssertTrue(taskCanCancel)
+    }
     func testLargestDynamicTypeMainScreens() throws { try mainScreens(largest: true) }
 
     private func mainScreens(largest: Bool) throws {
@@ -542,7 +582,9 @@ import UIKit
         ideas(); capture("Continuous"); state("listening"); try shot("AIControl")
         tap(app.buttons.matching(identifier: "review-suggestion").firstMatch)
         require(app.staticTexts["approval-exact-action"]); try shot("Approval")
-        visible(app.buttons["approve-action"]); try shot("tier3-approval-action")
+        XCTAssertTrue(app.buttons["approve-action"].isHittable, "Pinned approval must be visible without scrolling")
+        XCTAssertTrue(app.buttons["approval-deny"].isHittable)
+        try shot("tier3-approval-action")
         tap(app.buttons["approve-action"]); XCTAssertTrue(app.staticTexts["approval-exact-action"].disappears(timeout: 5))
         tab("Agents"); try shot("Agents")
     }

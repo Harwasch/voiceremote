@@ -131,15 +131,22 @@ def main():
     args.output.mkdir(parents=True, exist_ok=True)
     problems = []
     with tempfile.TemporaryDirectory(prefix="ios-ui-export-") as directory:
-        raw = Path(directory)
-        if args.xcresult.is_dir():
+        raw = Path(directory) / "attachments"
+        bundle = args.xcresult.resolve()
+        if (bundle / "Info.plist").is_file():
             try:
-                subprocess.run(["xcrun", "xcresulttool", "export", "attachments", "--path", str(args.xcresult),
-                                "--output-path", str(raw)], check=True, timeout=45)
+                subprocess.run(["xcrun", "xcresulttool", "export", "attachments", "--path", str(bundle),
+                                "--output-path", str(raw)], check=True, timeout=45, capture_output=True, text=True)
             except (subprocess.SubprocessError, OSError) as error:
-                problems.append("xcresult export unavailable: " + str(error))
+                detail = getattr(error, "stderr", None) or getattr(error, "stdout", None) or ""
+                if isinstance(detail, bytes):
+                    detail = detail.decode(errors="replace")
+                problems.append("xcresult export unavailable: " + str(error) + ("; " + detail.strip() if detail else ""))
+        elif bundle.is_dir():
+            problems.append("xcresult bundle unfinished: Info.plist missing; using runner checkpoints")
         else:
             problems.append("xcresult bundle missing")
+        raw.mkdir(parents=True, exist_ok=True)
         # Keep an export directory/index even when tests never started. Always
         # upload steps can then preserve the reason as well as any actual PNGs.
         manifest = raw / "manifest.json"

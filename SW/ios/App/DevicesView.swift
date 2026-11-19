@@ -77,7 +77,7 @@ struct DevicesView: View {
             ToolbarItem(placement: .topBarTrailing) { Button("Add computer", systemImage: "plus") { pairingSheet = true }.accessibilityIdentifier("pair-computer") }
         }
         .sheet(isPresented: $pairingSheet, onDismiss: { Task { await host.pairing.cancel() } }) { PairComputerView(host: host) }
-        .sheet(isPresented: $showingInfo) { InfoSheet(title: "Devices and microphones", paragraphs: ["Enter local pairing mode on the remote. Compare the fresh six-digit number in the iPhone system pairing prompt with the remote and approve on both. Reject mismatch, no-number, Legacy or Just Works pairing.", "Automatic compares recent captured PCM envelope estimates, clipping and interruptions. Proximity is unknown. Scores and thresholds are unverified; a live utterance never switches sources.", "Enrollment pins this peripheral after system/remote confirmation. iOS does not expose pairing-method attestation; remote firmware must enforce authenticated encrypted bonding. Prototype OFF is a software stop only."]) }
+        .sheet(isPresented: $showingInfo) { InfoSheet(title: "Devices and microphones", paragraphs: ["Put your remote in pairing mode, then choose Find remote. Compare the six-digit number on your iPhone with the number on the remote. Continue only when both numbers match. If either screen shows no number, cancel and try again.", "Choose Phone or headset to use your iPhone microphone or connected headset. Choose Remote to use the paired remote. Best mic, automatically chooses an available microphone before you start. It keeps that microphone for the whole phrase.", "If the remote disconnects, unfinished words are discarded. Recordings made out of range appear in History after the remote reconnects. Forget remote removes this app’s connection; also forget it in iPhone Bluetooth Settings and reset its pairing on the remote."]) }
         .confirmationDialog("Discard this recording without transcription?", isPresented: Binding(get: { discardID != nil }, set: { if !$0 { discardID = nil } })) {
             Button("Discard recording", role: .destructive) {
                 if let id = discardID { Task { await host.remote.discardOfflineRecording(id) } }; discardID = nil
@@ -182,20 +182,24 @@ private struct PairComputerView: View {
                                 .buttonStyle(.glassProminent).disabled(pairing.busy).accessibilityIdentifier("pairing-confirm")
                             Button(role: .destructive) { Task { await pairing.cancel(); dismiss() } } label: {
                                 Text("They don't match").font(.headline).frame(maxWidth: .infinity, minHeight: 36).fixedSize(horizontal: false, vertical: true)
-                            }.buttonStyle(.glass).accessibilityIdentifier("pairing-mismatch")
+                            }.buttonStyle(.glass).foregroundStyle(.red).tint(.red).accessibilityIdentifier("pairing-mismatch")
                         } else {
                             Text("Connect your computer").font(.largeTitle.bold())
                             Text("Paste the invitation from your computer, or scan its QR code.").fixedSize(horizontal: false, vertical: true)
-                            Picker("Use this computer for", selection: $pairing.role) {
-                                Text("Text receiver").tag(DeviceInfoRole.text_receiver)
-                                Text("Agent").tag(DeviceInfoRole.agent)
-                                Text("Text and agent").tag(DeviceInfoRole.both)
+                            Picker("This computer will", selection: $pairing.role) {
+                                Text("Type my words").tag(DeviceInfoRole.text_receiver)
+                                Text("Run agents").tag(DeviceInfoRole.agent)
+                                Text("Type my words and run agents").tag(DeviceInfoRole.both)
                             }
                             Toggle("Let this phone run agents here", isOn: $pairing.allowAgentCommands)
                                 .disabled(pairing.role == .text_receiver).accessibilityIdentifier("pairing-agent-access")
-                            TextField("Pairing invitation", text: $pairing.code, axis: .vertical)
-                                .textInputAutocapitalization(.never).autocorrectionDisabled().privacySensitive()
-                                .focused($codeFocused).textFieldStyle(.roundedBorder).accessibilityIdentifier("pairing-invitation")
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text("Pairing invitation").font(.subheadline.weight(.semibold))
+                                TextField("Pairing invitation", text: $pairing.code, prompt: Text("Paste the invitation from your computer").foregroundStyle(.secondary), axis: .vertical)
+                                    .textInputAutocapitalization(.never).autocorrectionDisabled().privacySensitive()
+                                    .focused($codeFocused).textFieldStyle(.plain).foregroundStyle(.primary)
+                                    .frame(minHeight: 44).accessibilityIdentifier("pairing-invitation")
+                            }.padding(16).background(Color(uiColor: .secondarySystemGroupedBackground), in: .rect(cornerRadius: 20))
                             Button("Connect") { codeFocused = false; Task { await pairing.begin() } }
                                 .buttonStyle(.glassProminent).controlSize(.large).disabled(pairing.busy)
                             Button("Scan QR code", systemImage: "qrcode.viewfinder") { codeFocused = false; scan = true }

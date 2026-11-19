@@ -12,8 +12,6 @@ struct TalkView: View {
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    @ScaledMetric(relativeTo: .largeTitle) private var destinationSize = 40
-    @ScaledMetric(relativeTo: .title) private var transcriptSize = 28
     @State private var held = false
     @GestureState private var touching = false
     @State private var triggerTimer: Task<Void, Never>?
@@ -44,9 +42,9 @@ struct TalkView: View {
             else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
-                        destination.padding(.horizontal, 4).padding(.top, 20)
+                        destination.dynamicTypeSize(...DynamicTypeSize.accessibility2).padding(.horizontal, 4).padding(.top, 20)
                         modePicker.padding(.top, 40)
-                        words.padding(.horizontal, 4).padding(.top, 38)
+                        words.dynamicTypeSize(...DynamicTypeSize.accessibility2).padding(.horizontal, 4).padding(.top, 38)
                         if ai {
                             ForEach(model.suggestions) { card in
                                 SuggestionCardView(model: model, card: card).padding(.top, 20)
@@ -61,8 +59,10 @@ struct TalkView: View {
                     .padding(.horizontal, 20).padding(.bottom, 20)
                 }.scrollEdgeEffectStyle(.soft, for: .all)
                     .safeAreaInset(edge: .bottom, spacing: 0) {
-                        talkControls.frame(maxWidth: .infinity).padding(.horizontal, 20)
+                        talkControls.dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+                            .frame(maxWidth: .infinity).padding(.horizontal, 20)
                             .padding(.top, model.isRecording ? 12 : 20).padding(.bottom, model.isRecording ? 8 : 32)
+                            .background(Color(uiColor: .systemGroupedBackground))
                     }
             }
         }
@@ -92,7 +92,9 @@ struct TalkView: View {
         .task {
             await model.refresh()
             #if DEBUG
-            if host.demo?.arguments.contains("--ui-holding-preview") == true { startHold() }
+            if let demo = host.demo, demo.arguments.contains("--ui-holding-preview"), !demo.holdingPreviewStarted {
+                demo.holdingPreviewStarted = true; startHold()
+            }
             #endif
         }
         .transaction { if reduceMotion { $0.animation = nil; $0.disablesAnimations = true } }
@@ -123,8 +125,11 @@ struct TalkView: View {
             Button("About recording", systemImage: "info.circle") { showingInfo = true }
             Text("Microphone: " + microphoneName).accessibilityIdentifier("microphone-source")
         } label: {
-            Label(model.controls.capture.displayLabel, systemImage: model.controls.capture == .hold ? "hand.draw" : (model.controls.capture == .off ? "mic.slash" : "waveform"))
-                .labelStyle(.titleAndIcon).font(.subheadline.weight(.semibold)).frame(minHeight: 44)
+            HStack(spacing: 8) {
+                Image(systemName: model.controls.capture == .hold ? "hand.draw" : (model.controls.capture == .off ? "mic.slash" : "waveform"))
+                Text(model.controls.capture.displayLabel)
+            }.font(.subheadline.weight(.semibold)).dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+                .fixedSize(horizontal: true, vertical: false).frame(minHeight: 44)
         }
         .accessibilityLabel("Capture").accessibilityValue(model.controls.capture.displayLabel)
         .accessibilityIdentifier("capture-menu").disabled(host.recorder.recording || !host.permissionGranted)
@@ -133,12 +138,9 @@ struct TalkView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text(ai ? "Asking" : "Your words go to").font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
             Button { showingDestination = true } label: {
-                HStack(spacing: 10) {
-                    Text(destinationName).font(.system(size: destinationSize, weight: .bold)).tracking(-0.8)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Image(systemName: "chevron.down").font(.title3.weight(.semibold)).foregroundStyle(.secondary)
-                }.frame(minHeight: 44, alignment: .leading).contentShape(Rectangle())
-            }.buttonStyle(.plain).accessibilityIdentifier("destination-link").disabled(host.recorder.recording)
+                TalkDestinationTitle(name: destinationName)
+                    .frame(minHeight: 44, alignment: .leading).contentShape(Rectangle())
+            }.buttonStyle(.plain).accessibilityLabel(destinationName).accessibilityIdentifier("destination-link").disabled(host.recorder.recording)
             Text(destinationDetail).font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -187,11 +189,11 @@ struct TalkView: View {
                 }.font(.footnote.weight(.semibold)).foregroundStyle(ai ? modeTint : .red)
             }
             if !model.partial.isEmpty {
-                Text(model.partial).font(.system(size: ai ? transcriptSize * 5 / 7 : transcriptSize, weight: ai ? .medium : .semibold))
+                TalkTranscriptText(text: model.partial, ai: ai)
                     .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
                     .accessibilityAddTraits(.updatesFrequently).accessibilityIdentifier("partial-text")
             } else {
-                Text(instruction).font(.system(size: transcriptSize, weight: .semibold)).foregroundStyle(.secondary)
+                TalkTranscriptText(text: instruction, ai: false).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 if model.listening == .idle, let last = model.history.last(where: { model.deliveryStates[$0.segmentID] == .delivered }) {
                     Text("Last sent \(Date(timeIntervalSince1970: Double(last.createdAt) / 1000), style: .relative) ago: “\(last.text)”")
@@ -259,9 +261,9 @@ struct TalkView: View {
                     .accessibilityIdentifier(primaryIdentifier)
             }
         }
-        .buttonStyle(.plain).foregroundStyle(.white)
-        .background(opaqueControls ? primaryTint : .clear, in: .circle)
-        .glassEffect(opaqueControls ? .identity : .regular.tint(primaryTint).interactive(), in: .circle)
+        .buttonStyle(.plain).foregroundStyle(model.controls.capture == .off ? Color.primary : .white)
+        .background(opaqueControls ? (model.controls.capture == .off ? Color(uiColor: .secondarySystemGroupedBackground) : primaryTint) : .clear, in: .circle)
+        .glassEffect(opaqueControls ? .identity : .regular.tint(primaryTint.opacity(model.controls.capture == .off ? 0.18 : 1)).interactive(), in: .circle)
         .glassEffectID("talk", in: controlsNamespace)
         .background {
             if model.isRecording {
@@ -276,10 +278,10 @@ struct TalkView: View {
     private var circleLabel: some View {
         Group {
             if model.listening == .preparing || model.listening == .finishing { ProgressView().tint(.white) }
-            else { Image(systemName: model.isRecording ? "waveform" : "mic.fill").font(.system(size: 40, weight: .medium)) }
+            else { Image(systemName: model.isRecording ? "waveform" : (model.controls.capture == .off ? "mic.slash" : "mic.fill")).font(.system(size: 40, weight: .medium)) }
         }.frame(width: 112, height: 112).contentShape(Circle()).accessibilityHidden(true)
     }
-    private var primaryTint: Color { presentation.showsStop ? .red : modeTint }
+    private var primaryTint: Color { presentation.showsStop ? .red : (model.controls.capture == .off ? .gray : modeTint) }
     private var primaryTitle: String {
         if model.listening == .preparing { return "Getting ready" }
         if model.listening == .finishing { return "Finishing" }
@@ -322,5 +324,26 @@ struct TalkView: View {
     private func cancelHold() {
         triggerTimer?.cancel(); triggerTimer = nil
         if held { held = false; model.cancelGesture() }
+    }
+}
+
+// ScaledMetric reads the environment of these child views, after the range cap.
+// A cap applied just to Text would not constrain metrics stored in TalkView.
+private struct TalkDestinationTitle: View {
+    let name: String
+    @ScaledMetric(relativeTo: .largeTitle) private var size = 40
+    @ScaledMetric(relativeTo: .title3) private var chevronSize = 22
+    var body: some View {
+        Text("\(name)\u{00a0}\(Text(Image(systemName: "chevron.down")).font(.system(size: chevronSize, weight: .semibold)).foregroundStyle(.secondary))")
+            .font(.system(size: size, weight: .bold)).tracking(-0.8)
+            .multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
+    }
+}
+private struct TalkTranscriptText: View {
+    let text: String
+    let ai: Bool
+    @ScaledMetric(relativeTo: .title) private var size = 28
+    var body: some View {
+        Text(text).font(.system(size: ai ? size * 5 / 7 : size, weight: ai ? .medium : .semibold))
     }
 }

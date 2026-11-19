@@ -45,7 +45,7 @@ import Policy
 }
 
 @MainActor @Observable final class AuditRecoveryController {
-    var message = "Audit integrity could not be verified. Approvals remain unavailable. Original audit bytes and checkpoints are preserved."
+    var message = "We couldn’t check your saved data. Restore a verified copy to continue. Your original data has been kept."
     var busy = false
     var rooms: [String] = []
     var selectedRoom = ""
@@ -94,7 +94,7 @@ import Policy
     }
     func recover() async -> Bool {
         #if DEBUG
-        if UIDemo.requested { message = "Synthetic verified copy unavailable. Approvals remain unavailable; originals are preserved."; return false }
+        if UIDemo.requested { message = "No verified copy is available in this demo. Nothing was changed."; return false }
         #endif
         guard !busy else { return false }; busy = true; defer { busy = false }
         do {
@@ -121,10 +121,10 @@ import Policy
                 destinationCheckpoints: destinationCheckpoints, account: account, actor: phone,
                 sessionID: "audit-recovery", biometric: LocalAuthenticationBiometric())
             try SecureStore.save(Data(destination.utf8), key: "active-audit-slot")
-            message = "Verified audit restored after local authentication. Original bytes remain preserved."
+            message = "Your saved copy was checked and restored. Your original data has been kept."
             return true
         } catch {
-            message = "Recovery did not complete. A current verified copy, retained decryption key and fresh Face ID or phone passcode are required. Lost or unreplicated history cannot be claimed as recovered. Originals remain preserved; executor-fenced authority reset is unavailable."
+            message = "We couldn’t restore your data. A verified saved copy, this phone’s security information, and Face ID or your passcode are needed. Your original data has been kept. Recording and approvals stay paused."
             return false
         }
     }

@@ -58,3 +58,15 @@ pairs are deduplicated. `export-status.json` records bundle problems; an interru
 run can export PNGs before its first audit. No artifacts are represented as a pass.
 Both artifact uploads always run, with PNG recompression disabled. A blank gallery
 still fails after writing its index/status, making the failure reviewable.
+
+UI8 exporter diagnosis: the [full run 44630976606](https://github.com/Harwasch/voiceremote/actions/runs/44630976606)
+export step reported a missing UI.xcresult/Info.plist after the test watchdog.
+Exit 64 was a reader validation error, not proof of an invalid flag. Apple's
+[xcresulttool manual](https://keith.github.io/xcode-man-pages/xcresulttool.1.html)
+documents `export attachments --path ... --output-path ...`; omitting
+--only-failures exports all tests. The exporter now checks finalization first,
+uses absolute paths and a fresh output subdirectory, captures SDK stderr, and
+keeps checkpoint recovery. Fixtures cover finalized success, reader error,
+timeout, unfinished/missing bundles and audit/PNG recovery; real SDK export of
+this batch remains **unverified**. The running demo probe also proves that the
+new gallery fixture uses real Policy and receives a typed running status.

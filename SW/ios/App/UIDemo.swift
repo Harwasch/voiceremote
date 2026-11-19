@@ -20,6 +20,7 @@ import VoiceRemoteProtocol
     let messages = DemoAgentTransport()
     weak var model: VoiceAppModel?
     var destinationBeforeCapture = false
+    var holdingPreviewStarted = false
     var prepared = false
     var seeding = false
     let epoch = UUID()
@@ -65,10 +66,11 @@ import VoiceRemoteProtocol
             if device == Self.offline { agents.disconnected(device.device_id, epoch: connection) }
         }
         let epoch = self.epoch
+        let runningFixture = arguments.contains("--ui-running-task")
         await messages.configure { dispatch in
             try await MainActor.run {
                 try agents.receive(TaskStatus(account_id: "ui-synthetic", command_id: dispatch.command.command_id,
-                    execution_state: .dispatched, updated_at: Int64(Date().timeIntervalSince1970 * 1000), outcome: .dispatched),
+                    execution_state: runningFixture ? .running : .dispatched, updated_at: Int64(Date().timeIntervalSince1970 * 1000), outcome: .dispatched),
                     from: "synthetic-pc", epoch: epoch)
             }
         }
@@ -89,17 +91,32 @@ import VoiceRemoteProtocol
             last_activity_at: now, activity_age_ms: 0))
         host.setTarget(.auto)
         host.grantTargetSelection(device: Self.computer, project: "synthetic-project")
-        // Generate a card through capture → STT → Brain → SuggestionEngine.
-        // Seeding never assigns approval or queue state; Policy binds trusted phone events.
+        // Every suggestion and running fixture task goes through the real model
+        // and Policy. No approval, permit or queue state is assigned by the demo.
+        try await makeSuggestion(host)
+        if runningFixture {
+            guard let card = host.suggestions.first else { throw SttFailure.invalidResponse }
+            await host.review(card)
+            await host.approve() // Real Policy; only the biometric adapter is fake.
+            for _ in 0..<100 where host.tasks.first?.state != .running {
+                await host.refreshTasks()
+                try await Task.sleep(for: .milliseconds(10))
+            }
+            guard host.approval == nil, host.tasks.count == 1, host.tasks[0].state == .running else { throw SttFailure.invalidResponse }
+            host.settingsChanged() // Start a separate synthetic idea for review.
+            try await makeSuggestion(host)
+        }
+        host.stop(); host.setMode(.dictation); host.setCapture(.hold)
+        // A later UI assertion must prove its own capture, never the seed run.
+        destinationBeforeCapture = false
+    }
+    private func makeSuggestion(_ host: VoiceAppModel) async throws {
         host.setMode(.ai_control); host.setCapture(.continuous)
         for _ in 0..<500 where !host.isRecording { try await Task.sleep(for: .milliseconds(10)) }
         guard host.isRecording else { throw SttFailure.unavailable }
         host.finishUtterance()
         for _ in 0..<500 where host.listening != .idle { try await Task.sleep(for: .milliseconds(10)) }
         guard host.listening == .idle, host.suggestions.count == 1, host.grants.count == 1 else { throw SttFailure.invalidResponse }
-        host.stop(); host.setMode(.dictation); host.setCapture(.hold)
-        // A later UI assertion must prove its own capture, never the seed run.
-        destinationBeforeCapture = false
     }
 }
 

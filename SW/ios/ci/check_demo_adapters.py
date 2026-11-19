@@ -22,6 +22,7 @@ def main():
             "-I", str(build / "Modules"), "-I", str(build / "CCryptoBoringSSL.build"), "-lstdc++",
             str(ios / "App/UIDemo.swift"), str(ios / "UITests/DemoAdapterProbe.swift"), *objects, "-o", binary], check=True)
         subprocess.run([binary], check=True)
+        subprocess.run([binary, "--ui-running-task"], check=True)
         subprocess.run([binary, "--ui-biometric-refuse"], check=True)
         for flag in ["--ui-slow-prepare", "--ui-slow-finish", "--ui-capture-failure", "--ui-interrupt", ""]:
             subprocess.run([binary, "--ui-stop-probe", *([flag] if flag else [])], check=True)

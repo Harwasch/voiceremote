@@ -21,19 +21,19 @@ import VoiceRemoteProtocol
                 else if startupError != nil {
                     ScrollView {
                     VStack(alignment: .leading, spacing: 20) {
-                        Text("Private storage / audit recovery").font(.title2)
+                        Text("Your saved data needs attention").font(.largeTitle.bold()).accessibilityIdentifier("storage-recovery-title")
                         Text(recovery.message)
                         if recovery.rooms.count > 1 {
-                            Picker("Recovery archive", selection: $recovery.selectedRoom) {
+                            Picker("Saved copy", selection: $recovery.selectedRoom) {
                                 ForEach(recovery.rooms, id: \.self) { room in Text(String(room.prefix(8))).tag(room) }
                             }
                         }
-                        Button("Authenticate and restore verified audit copy") {
+                        Button("Restore saved copy") {
                             Task { if await recovery.recover() { await openRuntime() } }
-                        }.buttonStyle(.glassProminent).controlSize(.large).disabled(recovery.busy)
-                        Text("Missing keys, missing checkpoints or an unreplicated suffix cannot be silently reset. No old execution authority is renewed.").font(.footnote)
+                        }.buttonStyle(.glassProminent).controlSize(.large).disabled(recovery.busy).accessibilityIdentifier("restore-saved-copy")
+                        Text("Recording and approvals are paused. Restoring needs Face ID or your iPhone passcode. Your original data stays on this phone.").font(.body).foregroundStyle(.secondary)
                     }.padding(24).frame(maxWidth: .infinity, alignment: .leading)
-                    }
+                    }.background(Color(uiColor: .systemGroupedBackground))
                 } else { ContentUnavailableView("Voice Remote", systemImage: "mic.slash", description: Text("Starting…")) }
             }
             #if DEBUG

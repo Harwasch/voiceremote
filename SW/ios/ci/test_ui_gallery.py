@@ -79,34 +79,68 @@ class GalleryTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 export_manifest(raw, raw / "out")
 
-    def test_cli_requests_all_attachments_from_xcresult(self):
+    def test_cli_requests_all_attachments_from_finalized_xcresult(self):
         with tempfile.TemporaryDirectory() as directory:
             bundle = Path(directory) / "UI.xcresult"; bundle.mkdir()
-            with patch("sys.argv", ["export_screenshots.py", str(bundle), str(Path(directory) / "out")]), \
-                 patch("export_screenshots.subprocess.run") as run, \
-                 patch("export_screenshots.export_manifest"):
+            (bundle / "Info.plist").write_bytes(b"synthetic finalized bundle marker")
+            def sdk_export(command, **kwargs):
+                self.assertEqual(command[:4], ["xcrun", "xcresulttool", "export", "attachments"])
+                self.assertNotIn("--only-failures", command)
+                self.assertNotIn("--legacy", command)
+                self.assertEqual(Path(command[command.index("--path") + 1]), bundle.resolve())
+                output = Path(command[command.index("--output-path") + 1])
+                self.assertTrue(output.is_absolute())
+                self.assertFalse(output.exists())
+                self.assertTrue(kwargs["check"])
+                self.assertTrue(kwargs["capture_output"])
+                output.mkdir(); self.fixture(output)
+                return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+            output = Path(directory) / "out"
+            with patch("sys.argv", ["export_screenshots.py", str(bundle), str(output)]), \
+                 patch("export_screenshots.subprocess.run", side_effect=sdk_export) as run:
                 main()
-            command = run.call_args.args[0]
-            self.assertEqual(command[:4], ["xcrun", "xcresulttool", "export", "attachments"])
-            self.assertNotIn("--only-failures", command)
-            self.assertTrue(run.call_args.kwargs["check"])
+            run.assert_called_once()
+            self.assertFalse(json.loads((output / "export-status.json").read_text())["problems"])
+            self.assertEqual(len(json.loads((output / "index.json").read_text())["screenshots"]), 1)
 
-    def test_timeout_recovers_png_without_finalized_bundle_or_audit(self):
+    def test_finalized_reader_usage_error_preserves_stderr_and_checkpoint_fallback(self):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory); checkpoints = root / "runner"; checkpoints.mkdir()
+            root = Path(directory); bundle = root / "UI.xcresult"; bundle.mkdir()
+            (bundle / "Info.plist").write_bytes(b"synthetic marker")
+            checkpoints = root / "runner"; checkpoints.mkdir()
             entries = self.fixture(checkpoints)
-            (checkpoints / "shot.meta.json").write_text(json.dumps({"testName": "Interrupted/testFlow", "attachments": entries[:1]}))
-            bundle = root / "UI.xcresult"; bundle.mkdir()  # no Info.plist, like UI3
+            (checkpoints / "shot.meta.json").write_text(json.dumps({"testName": "Synthetic/testFlow", "attachments": entries}))
             output = root / "out"
+            failure = subprocess.CalledProcessError(64, "xcresulttool", stderr="SDK reader rejected this synthetic bundle")
             with patch("sys.argv", ["export_screenshots.py", str(bundle), str(output), "--checkpoint-dir", str(checkpoints)]), \
-                 patch("export_screenshots.subprocess.run", side_effect=subprocess.TimeoutExpired("xcresulttool", 45)):
+                 patch("export_screenshots.subprocess.run", side_effect=failure):
                 main()
-            index = json.loads((output / "index.json").read_text())
-            self.assertEqual(len(index["screenshots"]), 1)
-            self.assertEqual(index["screenshots"][0]["test"], "Interrupted/testFlow")
-            self.assertEqual(index["accessibility"]["audits"], [])
-            self.assertTrue((output / index["screenshots"][0]["file"]).is_file())
-            self.assertTrue(json.loads((output / "export-status.json").read_text())["problems"])
+            self.assertIn("SDK reader rejected", " ".join(json.loads((output / "export-status.json").read_text())["problems"]))
+            self.assertEqual(len(json.loads((output / "index.json").read_text())["screenshots"]), 1)
+
+    def test_unfinished_and_timed_out_bundles_recover_checkpoint_pngs(self):
+        for finalized in (False, True):
+            with self.subTest(finalized=finalized), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory); checkpoints = root / "runner"; checkpoints.mkdir()
+                entries = self.fixture(checkpoints)
+                (checkpoints / "shot.meta.json").write_text(json.dumps({"testName": "Interrupted/testFlow", "attachments": entries[:1]}))
+                bundle = root / "UI.xcresult"; bundle.mkdir()
+                if finalized:
+                    (bundle / "Info.plist").write_bytes(b"synthetic finalized marker")
+                output = root / "out"
+                with patch("sys.argv", ["export_screenshots.py", str(bundle), str(output), "--checkpoint-dir", str(checkpoints)]), \
+                     patch("export_screenshots.subprocess.run", side_effect=subprocess.TimeoutExpired("xcresulttool", 45)) as run:
+                    main()
+                if finalized:
+                    run.assert_called_once()
+                else:
+                    run.assert_not_called()
+                index = json.loads((output / "index.json").read_text())
+                self.assertEqual(len(index["screenshots"]), 1)
+                self.assertEqual(index["screenshots"][0]["test"], "Interrupted/testFlow")
+                self.assertEqual(index["accessibility"]["audits"], [])
+                self.assertTrue((output / index["screenshots"][0]["file"]).is_file())
+                self.assertTrue(json.loads((output / "export-status.json").read_text())["problems"])
 
     def test_missing_bundle_recovers_audit_and_png_checkpoints(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -131,6 +165,14 @@ class GalleryTests(unittest.TestCase):
             index = export_manifest(raw, root / "out")
             self.assertEqual(len(index["screenshots"]), 1)
             self.assertEqual(len(index["accessibility"]["audits"]), 1)
+
+    def test_first_gallery_covers_every_approved_default_screen_without_audit_delays(self):
+        gallery = (IOS / "UITests/VoiceRemoteUITests.swift").read_text()
+        first = gallery.split("func test00MainScreenGallery() throws {", 1)[1].split("func testLargestDynamicTypeMainScreens", 1)[0]
+        for screen in ("Main", "Listening", "AIControl", "Destination", "Approval", "History", "Devices", "Pairing", "Agents"):
+            self.assertIn(f'shot("{screen}", audit: false)', first)
+        self.assertIn("--ui-running-task", first)
+        self.assertIn("--ui-holding-preview", first)
 
     def test_demo_is_absent_without_debug(self):
         # Every launch-argument consumer, fake, construction hook and demo UI is

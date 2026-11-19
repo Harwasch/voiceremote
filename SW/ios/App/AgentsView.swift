@@ -22,7 +22,10 @@ struct AgentsView: View {
                         }.fixedSize(horizontal: false, vertical: true)
                         Text(AppPresentation.taskTitle(task)).font(.body.weight(.semibold)).fixedSize(horizontal: false, vertical: true)
                         if let reply = task.appReply { Text(reply).font(.subheadline).fixedSize(horizontal: false, vertical: true) }
-                        if task.state == .running { ProgressView().tint(indigo).accessibilityLabel("Task running") }
+                        if task.state == .running {
+                            ProgressView().progressViewStyle(.linear).tint(indigo)
+                                .accessibilityLabel("Task running").accessibilityIdentifier("agent-task-progress")
+                        }
                         if model.agentControl?.completionEpoch(for: task) != nil {
                             Button("Confirm observed completion…") { model.reviewTaskCompletion(task) }.frame(minHeight: 44)
                         }

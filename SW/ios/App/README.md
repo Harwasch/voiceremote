@@ -143,6 +143,30 @@ Reduce Transparency uses an opaque talk button; system controls handle their
 native fallback. Reduce Motion disables transactions; the two recording rings
 are static, not an invented audio-level meter. Live transcript remains real STT
 output. Talk controls are pinned above the native tab bar, so long transcripts scroll
-without pushing Stop out of reach. The primary control stays circular in Off, preparing, holding, listening
+without pushing Stop out of reach. The primary control stays circular in Off (neutral grey with mic.slash), preparing, holding, listening
 and finishing states; preparing/finishing retain a separate Stop. Finish is also
 available from the capture menu while recording. No release demo argument exists.
+
+## ios-ui-8 corrections
+
+| Finding | Change / check |
+|---|---|
+| Capture label / Off | Explicit toolbar HStack; Off uses neutral glass and mic.slash. IDs stay unchanged. |
+| AX5 Talk | Destination/detail/transcript cap at accessibility2; control fonts cap at xxxLarge. Child ScaledMetric views read the capped environment. Chevron is inline text attached to the final word. The pinned area has an opaque system background. |
+| Approval | Real scroll content plus bottom safe-area actions, title capped at accessibility2. Policy refusal replaces both actions with the exact refusal and Close (approval-deny ID retained). |
+| Pairing | Explicit destructive red, a rounded system-white invitation card, plain role labels. Pairing permissions remain bound before Connect. |
+| Help / recovery | Plain instructions and a prominent Restore saved copy action; recovery logic and authentication unchanged. |
+| Gallery | DEBUG running-task fixture passes a real review/Policy approval and an authenticated fake transport running update, then creates a fresh unapproved suggestion. No queue/approval state is injected. |
+
+API declarations checked against Apple documentation: [Dynamic Type range](https://developer.apple.com/documentation/swiftui/view/dynamictypesize(_:)-26aj0),
+[ScaledMetric environment](https://developer.apple.com/documentation/swiftui/scaledmetric),
+[vertical safeAreaInset](https://developer.apple.com/documentation/swiftui/view/safeareainset(edge:alignment:spacing:content:)-4s51l),
+[Text-wrapped Image](https://developer.apple.com/documentation/swiftui/text/init(_:)-60ax7),
+[Text.font returning Text](https://developer.apple.com/documentation/swiftui/text/font(_:)),
+[TextField prompt/axis](https://developer.apple.com/documentation/swiftui/textfield/init(text:prompt:axis:label:)),
+[linear progress](https://developer.apple.com/documentation/swiftui/linearprogressviewstyle).
+`RouteChoice.destination.session` is declared in Router/Sources/Routing.swift;
+`ApprovalCard.route` is a Destination, so its `.session` is direct. No guessed
+Router members or new Section overloads. Native progress is indeterminate;
+there is no measured fraction in TaskStatus. Apple SDK compilation, visual match
+and simulator behavior of this batch remain **unverified**.
