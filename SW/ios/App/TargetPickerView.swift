@@ -26,7 +26,7 @@ struct TargetPickerView: View {
                         selectionRow("Auto", detail: "Follows the last text field you used. Now: " + (model.destination?.display_name ?? "This iPhone"), symbol: "arrow.triangle.branch", selected: model.controls.target == .auto)
                     }.accessibilityIdentifier("target-auto")
                 }
-                Section("Or always send to") {
+                Section {
                     ForEach(model.devices.filter { $0.capabilities.contains(.receive_text) }, id: \.device_id) { device in
                         Button { model.setTarget(.device(device.device_id)) } label: {
                             selectionRow(device.display_name, detail: connectedIDs.contains(device.device_id) ? "Ready for your words" : "Offline · words wait until it's back", symbol: "desktopcomputer", selected: model.controls.target == .device(device.device_id))
@@ -35,6 +35,8 @@ struct TargetPickerView: View {
                     Button { model.setTarget(.device(model.phoneID)) } label: {
                         selectionRow("This iPhone", detail: "Types with the Voice Remote keyboard", symbol: "iphone", selected: model.controls.target == .device(model.phoneID))
                     }.accessibilityIdentifier("target-phone")
+                } header: {
+                    Text("Or always send to")
                 } footer: {
                     Text("Switching stops what you're saying now. Dictation never presses Send.")
                         .font(.subheadline).fixedSize(horizontal: false, vertical: true)
