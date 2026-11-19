@@ -1,0 +1,73 @@
+Purpose: linked C6 RAM/type/encoder evidence.
+Inputs: final voice_remote.elf; GDB file inspection only.
+Verified: linked values; no runtime heap measurement.
+
+$1 = 2208
+$2 = 49232
+$3 = 544
+Dump of assembler code for function opus_encoder_get_size:
+   0x420678a6 <+0>:	addi	a4,a0,-1
+   0x420678aa <+4>:	li	a5,1
+   0x420678ac <+6>:	bgeu	a5,a4,0x420678b4 <opus_encoder_get_size+14>
+   0x420678b0 <+10>:	li	a0,0
+   0x420678b2 <+12>:	ret
+   0x420678b4 <+14>:	addi	sp,sp,-32
+   0x420678b6 <+16>:	sw	s0,24(sp)
+   0x420678b8 <+18>:	mv	s0,a0
+   0x420678ba <+20>:	addi	a0,sp,12
+   0x420678bc <+22>:	sw	ra,28(sp)
+   0x420678be <+24>:	jal	0x42069e82 <silk_Get_Encoder_Size>
+   0x420678c2 <+28>:	beqz	a0,0x420678ce <opus_encoder_get_size+40>
+   0x420678c4 <+30>:	lw	ra,28(sp)
+   0x420678c6 <+32>:	lw	s0,24(sp)
+   0x420678c8 <+34>:	li	a0,0
+   0x420678ca <+36>:	addi	sp,sp,32
+   0x420678cc <+38>:	ret
+   0x420678ce <+40>:	lw	a5,12(sp)
+   0x420678d0 <+42>:	mv	a0,s0
+   0x420678d2 <+44>:	addi	a5,a5,3
+   0x420678d4 <+46>:	andi	a5,a5,-4
+   0x420678d6 <+48>:	sw	a5,12(sp)
+   0x420678d8 <+50>:	jal	0x4207526e <celt_encoder_get_size>
+   0x420678dc <+54>:	lw	a5,12(sp)
+   0x420678de <+56>:	lw	ra,28(sp)
+   0x420678e0 <+58>:	lw	s0,24(sp)
+   0x420678e2 <+60>:	lui	a4,0x1
+   0x420678e4 <+62>:	addi	a4,a4,-1888 # 0x8a0
+   0x420678e8 <+66>:	add	a5,a5,a4
+   0x420678ea <+68>:	add	a0,a0,a5
+   0x420678ec <+70>:	addi	sp,sp,32
+   0x420678ee <+72>:	ret
+End of assembler dump.
+Dump of assembler code for function silk_Get_Encoder_Size:
+   0x42069e82 <+0>:	lui	a5,0x4
+   0x42069e84 <+2>:	addi	a5,a5,968 # 0x43c8
+   0x42069e88 <+6>:	sw	a5,0(a0)
+   0x42069e8a <+8>:	li	a0,0
+   0x42069e8c <+10>:	ret
+End of assembler dump.
+Dump of assembler code for function celt_encoder_get_size:
+   0x4207526e <+0>:	addi	sp,sp,-16
+   0x42075270 <+2>:	lui	a5,0xc
+   0x42075272 <+4>:	sw	s0,8(sp)
+   0x42075274 <+6>:	li	a2,0
+   0x42075276 <+8>:	mv	s0,a0
+   0x42075278 <+10>:	li	a1,960
+   0x4207527c <+14>:	addi	a0,a5,-1152 # 0xbb80
+   0x42075280 <+18>:	sw	ra,12(sp)
+   0x42075282 <+20>:	jal	0x42079b00 <opus_custom_mode_create>
+   0x42075286 <+24>:	lw	a5,4(a0)
+   0x42075288 <+26>:	lw	a3,8(a0)
+   0x4207528a <+28>:	slli	a4,s0,0xa
+   0x4207528e <+32>:	mul	a0,s0,a5
+   0x42075292 <+36>:	addi	a5,a4,61
+   0x42075296 <+40>:	lw	ra,12(sp)
+   0x42075298 <+42>:	mul	s0,s0,a3
+   0x4207529c <+46>:	add	a0,a0,a5
+   0x4207529e <+48>:	slli	s0,s0,0x2
+   0x420752a0 <+50>:	add	a0,a0,s0
+   0x420752a2 <+52>:	lw	s0,8(sp)
+   0x420752a4 <+54>:	slli	a0,a0,0x2
+   0x420752a6 <+56>:	addi	sp,sp,16
+   0x420752a8 <+58>:	ret
+End of assembler dump.

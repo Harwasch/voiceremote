@@ -6,7 +6,7 @@
 
 typedef struct {
     int width, height;
-    bool round, ring;
+    bool round, ring, compact;
     float scale, ox, oy, cx, cy, radius, pips_y, baseline;
 } vr_layout_t;
 typedef enum {
@@ -15,10 +15,12 @@ typedef enum {
 } vr_hit_t;
 static inline vr_layout_t vr_layout(uint16_t w,uint16_t h,bool round,bool ring)
 {
-    float rw=ring?466:240, rh=ring?466:280;
+    bool compact=ring && !round;
+    float rw=ring && !compact?466:240, rh=ring && !compact?466:280;
     float s=fminf(w/rw,h/rh);
-    return (vr_layout_t){w,h,round,ring,s,(w-rw*s)/2,(h-rh*s)/2,
-        ring?233:120,ring?233:112,ring?112:84,ring?368:222,ring?424:264};
+    return (vr_layout_t){w,h,round,ring,compact,s,(w-rw*s)/2,(h-rh*s)/2,
+        ring && !compact?233:120,ring && !compact?233:112,
+        compact?50:ring?112:84,ring && !compact?368:222,ring && !compact?424:264};
 }
 /* Producers publish actual live transmission or local acquisition, never arm. */
 static inline bool vr_ui_listening(bool streaming,bool offline) { return streaming || offline; }
@@ -35,14 +37,16 @@ static inline vr_hit_t vr_ui_hit(const vr_layout_t *l,int px,int py,bool overlay
     if(!vr_ui_inside(l,px,py)) return VR_HIT_NONE;
     float x=(px-l->ox)/l->scale,y=(py-l->oy)/l->scale;
     if(overlay) {
-        float top=l->ring?300:180;
+        float top=l->ring && !l->compact?300:180;
         if(y<top || x==l->cx) return VR_HIT_NONE;
         return x<l->cx?VR_HIT_CANCEL:VR_HIT_CONFIRM;
     }
     float dx=x-l->cx,dy=y-l->cy;
     if(dx*dx+dy*dy<=l->radius*l->radius) return VR_HIT_ORB;
-    if(y>=(l->ring?384:236) && y<=(l->ring?450:278)) return VR_HIT_TARGET;
+    if(y>=(l->ring && !l->compact?384:236) && y<=(l->ring && !l->compact?450:278)) return VR_HIT_TARGET;
     if(l->ring) {
+        /* Compact sectors have finite radial bounds: gaps cannot select capture. */
+        if(l->compact && (dx*dx+dy*dy<76*76 || dx*dx+dy*dy>114*114)) return VR_HIT_NONE;
         float a=atan2f(dx,-dy)*180.f/3.14159265358979323846f;
         if(a>=-116 && a<=-50) return VR_HIT_OFF;
         if(a>=-29 && a<=29) return VR_HIT_PTT;

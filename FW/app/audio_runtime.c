@@ -9,6 +9,7 @@
 #include "esp_heap_caps.h"
 #include "esp_clk_tree.h"
 #include "freertos/task.h"
+#include "scheduling.h"
 #include <string.h>
 #include <stdlib.h>
 
@@ -116,6 +117,7 @@ static void encode_task(void *arg)
         int64_t at=esp_timer_get_time();
         if(!result) result=opus_encode(encoder,pcm,VR_AUDIO_SAMPLES,packet,VR_MAX_PACKET);
         unsigned elapsed=(unsigned)(esp_timer_get_time()-at);
+        timing_encode(elapsed);
         lock();
         if(g==generation && (stream.running || local_running)) {
             worker_generation=g;
@@ -138,12 +140,12 @@ void audio_init(void)
     size_t before=heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT);
     size_t psram=heap_caps_get_free_size(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
     encoder=board_audio_alloc(opus_encoder_get_size(1));
-    if(!encoder || xTaskCreate(encode_task,"opus",48*1024,NULL,4,&worker)!=pdPASS) {
+    if(!encoder || xTaskCreate(encode_task,"opus",VR_AUDIO_STACK,NULL,VR_AUDIO_PRIORITY,&worker)!=pdPASS) {
         ESP_LOGE("audio","encoder allocation failed; capture disabled"); free(encoder); encoder=NULL; return;
     }
     ESP_LOGI("audio","allocation internal_delta=%d psram_delta=%d encoder_bytes=%d stack_bytes=%u",
         (int)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT)-before),
-        (int)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)-psram),opus_encoder_get_size(1),48*1024u);
+        (int)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)-psram),opus_encoder_get_size(1),VR_AUDIO_STACK);
 }
 void audio_sync(void)
 {

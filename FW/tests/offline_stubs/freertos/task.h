@@ -8,3 +8,6 @@ void vTaskSuspend(TaskHandle_t);
 void vTaskResume(TaskHandle_t);
 void vTaskDelay(TickType_t);
 UBaseType_t uxTaskGetStackHighWaterMark(TaskHandle_t);
+
+UBaseType_t uxTaskPriorityGet(TaskHandle_t);
+void vTaskPrioritySet(TaskHandle_t,UBaseType_t);

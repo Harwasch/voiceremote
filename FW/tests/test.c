@@ -276,6 +276,18 @@ static void layout(void)
     CHECK(vr_ui_hit(&r,190,222,true)==VR_HIT_CONFIRM);
     CHECK(vr_ui_hit(&r,240,222,true)==VR_HIT_NONE);
     CHECK(vr_ui_hit(&r,-1,222,true)==VR_HIT_NONE);
+    r=vr_layout(240,280,false,true);
+    CHECK(r.compact && r.scale==1 && r.radius==50);
+    CHECK(vr_ui_hit(&r,26,100,false)==VR_HIT_OFF);
+    CHECK(vr_ui_hit(&r,120,18,false)==VR_HIT_PTT);
+    CHECK(vr_ui_hit(&r,214,100,false)==VR_HIT_REC);
+    CHECK(vr_ui_hit(&r,120,112,false)==VR_HIT_ORB);
+    CHECK(vr_ui_hit(&r,120,264,false)==VR_HIT_TARGET);
+    CHECK(vr_ui_hit(&r,120,222,false)==VR_HIT_NONE);
+    CHECK(vr_ui_hit(&r,120,50,false)==VR_HIT_NONE); /* ring/disc dead band */
+    CHECK(vr_ui_hit(&r,120,0,false)==VR_HIT_PTT);
+    CHECK(vr_ui_hit(&r,65,222,true)==VR_HIT_CANCEL);
+    CHECK(vr_ui_hit(&r,175,222,true)==VR_HIT_CONFIRM);
     r=vr_layout(932,932,true,true);
     CHECK(r.scale==2 && vr_ui_hit(&r,466,466,false)==VR_HIT_ORB);
     CHECK(vr_ui_hit(&r,466,814,false)==VR_HIT_TARGET);

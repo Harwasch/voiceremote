@@ -3,14 +3,14 @@
 ```mermaid
 flowchart LR
     M5[StopWatch: ES8311 + display + controls] --> Board[board.h]
-    C6[C6: build-only stub] --> Board
+    C6[C6: ST7789 + CST816T + ES8311 + optional TCA9554] --> Board
     Board --> UI[Input task: immediate preview + debounced controls]
-    UI --> Render[Lower-priority LVGL / DMA task]
+    UI --> Render[LVGL / DMA: priority 1, boosted for phone barrier]
     UI --> State[Pure protocol + state]
     Board --> Encoder[16 kHz mono / 20 ms Opus]
     Encoder --> Queue[8 packets / MTU fragmentation]
     Queue -->|Authenticated Audio notifications| Phone[Bench client → segment WAV]
-    Encoder --> Local[Bounded flash writer: StopWatch only]
+    Encoder --> Local[Bounded flash writer: both boards]
     Local -->|Resumable sync / confirmed delete| Phone
     State <-->|Encrypted bonded BLE controls| Phone
     Tests[Host fixtures] --> State
@@ -19,14 +19,15 @@ flowchart LR
 | Path | What it is | Status |
 |---|---|---|
 | [app/](app/) | Independent input/render tasks, partial redraws, timing log + bounded Opus transport | ✅ Audio tested on StopWatch; speech-to-text untested |
-| [boards/](boards/) | StopWatch ES8311/display driver and compiling C6 mic stub | ✅ StopWatch tested; C6 stub only |
+| [boards/](boards/) | StopWatch adapter and C6 display/audio/physical or touch controls | ✅ Builds; C6 hardware unverified |
 | [tests/](tests/) | Pure C logic and Python wire tests; no board/adapter | ✅ Host verified |
-| [tools/ui_preview/](tools/ui_preview/) | Real UI, native LVGL renderer, seventeen masked PNG fixtures | ✅ Host verified |
+| [tools/ui_preview/](tools/ui_preview/) | Real UI, native LVGL renderer, twenty-three masked PNG fixtures | ✅ Host verified |
 | [tools/hil/](tools/hil/) | Unattended USB-hook + BLE offline/live regression | ✅ 12 of 12 steps on StopWatch; always reads USB logs, so it can't see unread-log stalls |
 | [tools/ble_client/](tools/ble_client/) | uv/Bleak Linux client, Numeric Comparison and segment WAV recorder | ✅ Used on hwgeekom |
 | [licences](../DOCS/licences/) | External MIT / BSD / Apache / OFL notices | ✅ Relocated |
 | `dependencies.lock.*` | Separate pinned dependency graph per board | ✅ Offline resolved |
-| [partitions-stopwatch.csv](partitions-stopwatch.csv) | StopWatch-only 16 MiB layout; preserves NVS/PHY/app | ✅ Generated table checked |
+| [partitions-stopwatch.csv](partitions-stopwatch.csv) | 16 MiB reference layout; preserves NVS/PHY/app | ✅ Generated table checked |
+| [partitions-c6.csv](partitions-c6.csv) | Exact-unit C6 16 MiB layout with physical-size boot guard | ✅ Generated table checked |
 | [app/offline-storage.md](app/offline-storage.md) | Journal/recovery, capacity arithmetic and flash timing limits | 🟡 Hardware unmeasured |
 | [historical handoff](../AI/FW/2026-11-02-offline-handoff.md) | Build evidence, assumptions and hardware checklist | 🟡 Audio hardware unverified |
 
@@ -35,7 +36,7 @@ Traces to [REQ-8], [REQ-18], [REQ-49–53]; no claim of hardware compliance.
 Firmware **0.3.0**, BLE contract **1.1**, advertised as **Voice Remote**. StopWatch reports required
 capabilities 0–5 and 7 (`0xbf`) and a 512-byte encoder output bound; both boards keep `hw_mic_cut=0`.
 Owner confirmed controls, pairing, Orb, screen speed and voice recordings on hardware;
-speech-to-text, full storage and abrupt power loss remain **unverified on hardware**. The C6 remains a build-only mic/display/control stub.
+speech-to-text, full storage and abrupt power loss remain **unverified on hardware**. The C6 now runs the same app; its new drivers and concurrent audio/UI/storage behavior remain **unverified on hardware**. See [C6 evidence and flash recipe](../AI/FW/2026-11-11-c6-port/handoff.md).
 
 Host tests, from the repository root (CMake, C compiler, Python ≥3.12):
 
@@ -43,7 +44,7 @@ Host tests, from the repository root (CMake, C compiler, Python ≥3.12):
 heavy bash FW/tests/run.sh
 ```
 
-Render all seventeen UI states from the repository root:
+Render all twenty-three UI states from the repository root:
 
 ```sh
 heavy bash FW/tools/ui_preview/run.sh
@@ -78,8 +79,12 @@ Both modes were built on S3; final S3/C6 builds use ON. Runtime timing, queue
 headroom and the power effect of vendor-supported 80 MHz QSPI need hardware to tell.
 Both targets use `CONFIG_COMPILER_OPTIMIZATION_PERF=y` (`-O2`). StopWatch alone
 uses **240 MHz**; C6 stays **160 MHz**, without PSRAM. I2C stays 100 kHz.
-The phone barrier waits up to **400 ms**, with one matching-completed-DMA check:
-a draw completed before mutex reacquisition succeeds even after the wait expires.
+The phone barrier waits up to **400 ms** and accepts only matching DMA completed
+within that deadline (344 ms accepted); delayed mutex reacquisition does not reject
+an on-time completion. Destination-only draws defer Orb/sector updates and pulse
+work. Renderer priority temporarily rises from 1 to **20 on C6 / 3 on S3**, below
+Opus, and is restored on success, timeout, DMA failure or modal cancellation.
+This reduces host blockage; sustained audio/TX completion latency remains hardware **TBC**.
 See [evidence](../AI/FW/2026-11-02-hardware-fixes/README.md) for sizes, native
 render timings and limits; press-to-pixel below 50 ms is **unverified on hardware**.
 
@@ -89,6 +94,9 @@ Test hook build (separate ignored directory, never a release):
 heavy idf.py -C FW -B FW/build-m5-hook -DIDF_TARGET=esp32s3 -DREMOTE_TIMING=ON -DREMOTE_TEST_HOOK=ON -DREMOTE_RELEASE=OFF reconfigure
 heavy cmake --build FW/build-m5-hook -j 4
 heavy idf.py -C FW -B FW/build-m5-hook build
+heavy idf.py -C FW -B FW/build-c6-hook -DREMOTE_BOARD=waveshare_c6_169 -DIDF_TARGET=esp32c6 -DREMOTE_TIMING=ON -DREMOTE_TEST_HOOK=ON -DREMOTE_RELEASE=OFF reconfigure
+heavy cmake --build FW/build-c6-hook -j 4
+heavy idf.py -C FW -B FW/build-c6-hook -DREMOTE_BOARD=waveshare_c6_169 build
 # Expected configure failure, before any IDF/toolchain work:
 heavy cmake -S FW -B FW/build-hook-release-reject -DREMOTE_TEST_HOOK=ON -DREMOTE_RELEASE=ON
 ```
@@ -104,10 +112,17 @@ authorization and capture policy. [Unattended procedure](tools/hil/README.md).
 Build directories must be **inside FW/**. `-B` is relative to the shell's working
 directory, including with `-C`. Each build has its own generated sdkconfig. After changing defaults, move that
 build's `sdkconfig` aside and reconfigure so the defaults are regenerated. The
-StopWatch selects `partitions-stopwatch.csv`; C6 keeps the original single-app
-table. `python3 FW/tests/check_partitions.py` checks both generated tables and
+boards select separate `partitions-stopwatch.csv` / `partitions-c6.csv` tables, both
+for measured 16 MiB units; C6 checks its physical flash before enabling offline storage. `python3 FW/tests/check_partitions.py` checks both generated tables and
 compares NVS against fixed historical values and IDF's old table. NVS
 stays at **0x9000 / 0x6000**, so this update does not relocate bonds.
+C6 factory is now **0x10000 / 0x1c0000**; offline is **0x1d0000 / 0xe30000**.
+The checker requires at least **20% of the app partition unused**, using normal
+and hook image sizes when present. **Offline data on C6 boards flashed before this
+map change will be reformatted; export retained recordings before updating and
+reformat the relocated offline partition during the update.** Old data is not
+migrated; surviving journal/record magic can make automatic mount fail closed, so
+flashing the new app alone does not guarantee automatic reformat. NVS stays intact.
 The source manifests use normal registry dependencies. For offline builds, set
 the supplied mirror/cache environment variables in the shell only.
 
@@ -142,3 +157,13 @@ torn headers, traversable corrupt-record lists, failed-store live/pairing fallba
 OFF on touch-down, and acknowledged GATT layout delivery. The forget overlay commits
 OFF before opening. No iPhone pairing/cache behavior or I2C fault recovery is hardware
 verified; see [app](app/README.md) and [tests](tests/README.md).
+
+C6 [pin sources and scheduling](boards/waveshare_c6_169/README.md): no PSRAM,
+8-row DMA strip, primitive Orb drawing with a ≤7056-byte A8 glyph, Opus priority 22 /
+32 KiB stack, BLE host 21, input 5, render/writer 1 (barrier render 20). Boot probes 0x20: physical
+Rev G selectors/buttons when fitted; otherwise rectangle Orb ring, BOOT PTT and
+PWR target. Touch/expander I2C runs outside the audio mutex. Ordinary flash-cache
+stalls remain hardware TBC. The NS4150B CTRL net is hardwired to VSYS; the shared codec setup powers down the DAC (`0x12=0x02`) and clears HP drive
+selection (`0x13=0x00`), retaining ADC power. See [register source](boards/es8311_mic.h). No firmware claim of amplifier power OFF.
+The optional `REMOTE_ENCODE_BENCH` was omitted; use the owner's standalone bench
+and production timing estimates. No new registry dependencies were introduced.

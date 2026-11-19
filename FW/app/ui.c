@@ -14,7 +14,9 @@
 #include "test_hook.h"
 #endif
 #include "timing.h"
+#include "render_barrier.h"
 #include "lvgl.h"
+#include "src/draw/sw/lv_draw_sw.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -40,8 +42,9 @@ static bool drawn_valid, flush_ok=true, frame_flushed, error_visible;
 static uint32_t error_since, pulse_at, frame_at;
 static vr_ui_press_t press;
 static vr_phone_t barrier_phone;
-static uint32_t barrier_id, barrier_done;
-enum { PHONE_RENDER_WAIT_MS=400 };
+static uint32_t barrier_id, barrier_done, barrier_started;
+/* 344 ms supplied C6 redraw fits the 400 ms fallback deadline.
+ * Destination-only priority-boosted draws reduce host blockage; measure on device. */
 static bool barrier_active, barrier_ok;
 #ifndef UI_PREVIEW
 static SemaphoreHandle_t barrier_signal;
@@ -57,6 +60,7 @@ static uint8_t control_values[2];
 static const uint32_t mode_colors[]={0x6fe3ff,0xff6ad5};
 typedef struct { lv_image_dsc_t image; lv_area_t area; } artwork_t;
 static artwork_t sectors[3][3], orbs[2][3];
+static lv_image_dsc_t small_sparkle;
 static uint32_t ticks(void) { return remote_now(); }
 static bool linked(void) { return view.secure && view.valid; }
 static bool listening(void)
@@ -110,6 +114,10 @@ static void icon(int kind,float x,float y,float k,uint32_t color)
         d.pivot=(lv_point_t){0,0};
         d.scale_x=d.scale_y=(int32_t)lroundf(k*layout.scale/(112.f/34)*256);
         lv_area_t a={sx(x-17*k),sy(y-17*k),sx(x-17*k)+111,sy(y-17*k)+111};
+        if(small_sparkle.data) {
+            d.src=&small_sparkle; d.scale_x=d.scale_y=256;
+            a.x2=a.x1+small_sparkle.header.w-1; a.y2=a.y1+small_sparkle.header.h-1;
+        }
         lv_draw_image(layer,&d,&a); break;
     }
     case IC_OFF:
@@ -152,13 +160,13 @@ static void target_label(void)
     /* Crossed out only when nothing is connected; plain blue means connected, waiting for the phone's state. */
     if(!linked() || view.offline) {
         bool up=view.secure && !view.offline;
-        icon(up?IC_BT:IC_BT_OFF,cx,y-(layout.ring?42:30)*.32f,(layout.ring?42:30)/26.f,up?0x2f8bff:0x8a9099); return;
+        icon(up?IC_BT:IC_BT_OFF,cx,y-((layout.ring && !layout.compact)?42:30)*.32f,((layout.ring && !layout.compact)?42:30)/26.f,up?0x2f8bff:0x8a9099); return;
     }
     bool error=view.error && view.phone.error[0];
     char name[96]; vr_ui_ascii(name,sizeof name,error?view.phone.error:view.phone.resolved);
     bool automatic=!error && view.phone.active==0;
     const lv_font_t *fonts[]={&lexend_42,&lexend_30,&lexend_24};
-    int first=layout.ring && layout.scale>.85f?0:1;
+    int first=layout.ring && !layout.compact && layout.scale>.85f?0:1;
     const int sizes[]={42,30,24};
     int available=0, badge=0, font_size=sizes[first];
     const lv_font_t *font=fonts[first];
@@ -200,9 +208,10 @@ static void draw_sector(unsigned i,bool selected)
 {
     const float starts[]={-116,-29,50},ends[]={-50,29,116};
     const uint32_t cols[]={0x8a9099,0xffd60a,0xff453a},dim[]={0x8a9099,0xa8922e,0xa8524d};
-    arc(233,233,193,starts[i],ends[i],60,selected?cols[i]:0x1d2024);
+    float cx=layout.cx,cy=layout.cy,r=layout.compact?94:193;
+    arc(cx,cy,r,starts[i],ends[i],layout.compact?36:60,selected?cols[i]:0x1d2024);
     float a=(starts[i]+ends[i])/2*3.14159265358979323846f/180;
-    icon(i,233+193*sinf(a),233-193*cosf(a),1.8f,selected?0:dim[i]);
+    icon(i,cx+r*sinf(a),cy-r*cosf(a),layout.compact?1:1.8f,selected?0:dim[i]);
 }
 static void draw_orb_static(unsigned mode,unsigned state)
 {
@@ -229,7 +238,7 @@ static size_t artwork_init(void)
     size_t total=0;
     for(unsigned kind=0;kind<2;kind++) for(unsigned i=0;i<(kind?2u:3u);i++)
         for(unsigned j=0;j<3;j++) {
-            if(!kind && !layout.ring) continue;
+            if(!kind && (!layout.ring || layout.compact)) continue;
             artwork_t *a=kind?&orbs[i][j]:&sectors[i][j];
             if(kind) a->area=(lv_area_t){sx(layout.cx-layout.radius),sy(layout.cy-layout.radius),
                 sx(layout.cx+layout.radius)-1,sy(layout.cy+layout.radius)-1};
@@ -267,21 +276,21 @@ static void draw_base(lv_event_t *e)
 {
     layer=lv_event_get_layer(e);
     if(view.overlay) {
-        float cx=layout.cx, top=layout.ring?300:180, bottom=layout.ring?466:280;
-        rect(0,top,cx,bottom,0x2a2d32); rect(cx,top,layout.ring?466:240,bottom,0x30d158);
-        float iy=layout.ring?364:222, gap=layout.ring?81:55;
-        icon(IC_X,cx-gap,iy,layout.ring?2:1.5f,0xffffff);
-        icon(IC_CHECK,cx+gap,iy,layout.ring?2:1.5f,0);
+        float cx=layout.cx, top=(layout.ring && !layout.compact)?300:180, bottom=(layout.ring && !layout.compact)?466:280;
+        rect(0,top,cx,bottom,0x2a2d32); rect(cx,top,(layout.ring && !layout.compact)?466:240,bottom,0x30d158);
+        float iy=(layout.ring && !layout.compact)?364:222, gap=(layout.ring && !layout.compact)?81:55;
+        icon(IC_X,cx-gap,iy,(layout.ring && !layout.compact)?2:1.5f,0xffffff);
+        icon(IC_CHECK,cx+gap,iy,(layout.ring && !layout.compact)?2:1.5f,0);
         if(view.overlay==1) {
-            icon(IC_BT,cx,layout.ring?74:32,1.5f,0x2f8bff);
+            icon(IC_BT,cx,(layout.ring && !layout.compact)?74:32,1.5f,0x2f8bff);
             char digits[8]; snprintf(digits,sizeof digits,"%06lu",(unsigned long)(view.number%1000000));
-            const lv_font_t *font=layout.ring?&lexend_84:&lexend_42;
-            int spacing=sz(layout.ring?6:3);
+            const lv_font_t *font=(layout.ring && !layout.compact)?&lexend_84:&lexend_42;
+            int spacing=sz((layout.ring && !layout.compact)?6:3);
             for(int i=0;i<2;i++) {
                 char row[4]; memcpy(row,digits+3*i,3); row[3]=0;
-                text(row,cx-text_width(row,font,spacing)/(2*layout.scale),layout.ring?178+86*i:95+52*i,font,0xffffff,spacing);
+                text(row,cx-text_width(row,font,spacing)/(2*layout.scale),(layout.ring && !layout.compact)?178+86*i:95+52*i,font,0xffffff,spacing);
             }
-        } else icon(IC_BIN,cx,layout.ring?164:91,layout.ring?3.5f:2.5f,0x8a9099);
+        } else icon(IC_BIN,cx,(layout.ring && !layout.compact)?164:91,(layout.ring && !layout.compact)?3.5f:2.5f,0x8a9099);
         return;
     }
     if(layout.ring) for(unsigned i=0;i<3;i++) {
@@ -296,11 +305,11 @@ static void draw_base(lv_event_t *e)
         unsigned slot=0; const bool active[]={view.full,view.waiting,view.syncing};
         const int kinds[]={IC_FULL,IC_SAVED,IC_SYNC};
         for(unsigned i=0;i<3;i++) if(active[i]) {
-            float x=layout.cx+(slot++-(status_count-1)/2.f)*(layout.ring?36:30);
-            icon(kinds[i],x,layout.pips_y,layout.ring?.7f:.6f,i==0?0xff453a:0x8a9099);
+            float x=layout.cx+(slot++-(status_count-1)/2.f)*((layout.ring && !layout.compact)?36:30);
+            icon(kinds[i],x,layout.pips_y,(layout.ring && !layout.compact)?.7f:.6f,i==0?0xff453a:0x8a9099);
         }
     } else if(linked() && !view.offline) for(int i=0;i<view.phone.count;i++)
-        circle(layout.cx+(i-(view.phone.count-1)/2.f)*(layout.ring?20:16),layout.pips_y,layout.ring?5:4,
+        circle(layout.cx+(i-(view.phone.count-1)/2.f)*((layout.ring && !layout.compact)?20:16),layout.pips_y,(layout.ring && !layout.compact)?5:4,
             i==view.phone.active?0xffffff:0x3a3f45,0,255);
     target_label();
 }
@@ -326,9 +335,10 @@ static void region(float x1,float y1,float x2,float y2)
 static void sector(unsigned i)
 {
     static const float bounds[3][4]={{7,76,118,350},{107,7,359,97},{348,76,459,350}};
-    if(layout.ring && i<3) region(bounds[i][0],bounds[i][1],bounds[i][2],bounds[i][3]);
+    if(layout.compact && i<3) region(0,0,239,224);
+    else if(layout.ring && i<3) region(bounds[i][0],bounds[i][1],bounds[i][2],bounds[i][3]);
 }
-static void target(void) { region(0,layout.ring?356:212,layout.ring?466:240,layout.ring?450:279); }
+static void target(void) { region(0,(layout.ring && !layout.compact)?356:212,(layout.ring && !layout.compact)?466:240,(layout.ring && !layout.compact)?450:279); }
 static void invalidate_changes(bool force_target)
 {
     if(!drawn_valid || view.overlay!=drawn.overlay || (view.overlay && view.number!=drawn.number)) {
@@ -421,10 +431,24 @@ void ui_init(void)
     lv_obj_add_event_cb(orb_obj,draw_orb,LV_EVENT_DRAW_MAIN,NULL);
 #ifdef REMOTE_TEST_HOOK
     lv_obj_t *mark=lv_obj_create(lv_layer_top()); lv_obj_remove_style_all(mark);
-    lv_obj_set_size(mark,6,6); lv_obj_set_pos(mark,sx(layout.cx)-3,sy(layout.ring?454:272));
+    lv_obj_set_size(mark,6,6); lv_obj_set_pos(mark,sx(layout.cx)-3,sy((layout.ring && !layout.compact)?454:272));
     lv_obj_set_style_bg_color(mark,lv_color_hex(0xff00ff),0); lv_obj_set_style_bg_opa(mark,255,0);
     lv_obj_remove_flag(mark,LV_OBJ_FLAG_CLICKABLE|LV_OBJ_FLAG_SCROLLABLE);
 #endif
+    /* LVGL 9.5 scaled A8 clipping depends on partial-buffer boundaries at
+     * these small sizes (native regression). Pre-scale only the glyph once;
+     * keep every sector and Orb primitive. 2500 / 7056 bytes, no PSRAM. */
+    if(!layout.round) {
+        unsigned n=sz(layout.radius);
+        uint8_t *alpha=lv_malloc(n*n); configASSERT(alpha);
+        lv_draw_image_dsc_t d; lv_draw_image_dsc_init(&d);
+        d.scale_x=d.scale_y=(int32_t)lroundf(layout.radius*layout.scale/112*256);
+        d.pivot=(lv_point_t){0,0};
+        lv_area_t a={0,0,(int)n-1,(int)n-1};
+        lv_draw_sw_transform(&a,vr_sparkle.data,112,112,112,&d,NULL,LV_COLOR_FORMAT_A8,alpha);
+        small_sparkle=(lv_image_dsc_t){.header={.magic=LV_IMAGE_HEADER_MAGIC,
+            .cf=LV_COLOR_FORMAT_A8,.w=n,.h=n,.stride=n},.data_size=n*n,.data=alpha};
+    }
     size_t cache_bytes=artwork_init();
 #ifdef UI_PREVIEW
     printf("ui host: artwork_cache_bytes=%zu dma_strip_bytes=%zu\n",cache_bytes,bytes);
@@ -443,12 +467,13 @@ void ui_init(void)
 }
 bool ui_phone(const vr_phone_t *p)
 {
-    if(!display || current.overlay || barrier_active) return false;
+    if(!display || !remote_renderer || current.overlay || barrier_active) return false;
     /* Called with remote_mutex taken exactly once by the ATT access callback.
      * Release it while LVGL works. Never wait on the renderer with the app lock.
-     * Measured streaming redraws reach 175 ms. Bound waiting, but accept a
-     * matching completed draw even if lock reacquisition is delayed. */
-    uint32_t started=remote_now();
+     * Bound completion time, but accept an on-time completed draw even if
+     * lock reacquisition is delayed. Boost also accelerates an in-flight frame. */
+    uint32_t started=barrier_started=remote_now();
+    UBaseType_t saved_priority=vr_render_boost(remote_renderer);
     barrier_phone=*p; barrier_active=true; barrier_ok=false;
     if(!++barrier_id) barrier_id++;
     uint32_t id=barrier_id;
@@ -457,13 +482,14 @@ bool ui_phone(const vr_phone_t *p)
 #endif
     unlock();
 #ifdef UI_PREVIEW
-    (void)preview_render_wait();
+    (void)preview_render_wait(PHONE_RENDER_WAIT_MS);
 #else
     (void)xSemaphoreTake(barrier_signal,pdMS_TO_TICKS(PHONE_RENDER_WAIT_MS));
 #endif
     lock();
     bool ok=barrier_done==id && barrier_ok && barrier_active && !current.overlay;
     cancel_barrier();
+    vr_render_restore(remote_renderer,saved_priority);
     if(ok) {
         current.phone=*p; current.valid=true;
         error_visible=p->error[0]!=0; error_since=remote_now(); current.error=error_visible;
@@ -490,6 +516,23 @@ void ui_pair_hide(void)
     if(display) { current.overlay=0; vr_ui_press_cancel(&press); cancel_barrier(); }
 }
 void ui_link(const char *status) { (void)status; ui_refresh(); }
+void ui_physical_controls(uint8_t capture,uint8_t mode)
+{
+    if(board_info()->virtual_sliders) return;
+    uint32_t now=remote_now();
+    if(capture==UINT8_MAX) capture=control_values[0];
+    if(mode==UINT8_MAX) mode=control_values[1];
+    const uint8_t values[]={capture,mode};
+    for(unsigned i=0;i<2;i++) {
+        control_values[i]=values[i];
+        control_filters[i]=(vr_debounce_t){values[i],values[i],now};
+    }
+    /* OFF first; mode before a fresh REC so its record has the selected mode. */
+    if(capture==VR_OFF && remote_state.input.capture!=VR_OFF) remote_event(VR_CAPTURE,VR_OFF,now);
+    if(mode!=remote_state.input.mode) remote_event(VR_MODE,mode,now);
+    if(capture!=remote_state.input.capture) remote_event(VR_CAPTURE,capture,now);
+    current.capture=capture; current.mode=mode;
+}
 /* Sample/hit-test in the input task, independently of LVGL and its redraw rate. */
 void ui_poll(void)
 {
@@ -500,6 +543,9 @@ void ui_poll(void)
     bool down=sample==BOARD_TOUCH_DOWN;
     timing_touch_poll(poll_start);
     vr_hit_t hit=down?vr_ui_hit(&layout,x,y,current.overlay!=0):press.hit;
+    /* With physical sliders the Orb is a status display; touch still pairs,
+     * confirms and forgets. It never overrides a physical mode selector. */
+    if(!board_info()->virtual_sliders && hit==VR_HIT_ORB) hit=VR_HIT_NONE;
     bool first_down=down && !press.down;
     vr_hit_t previous=press.hit;
     vr_hit_t released=vr_ui_touch_sample(&press,sample!=BOARD_TOUCH_ERROR,down,hit,now);
@@ -562,16 +608,24 @@ void ui_tick(void)
     uint64_t start=timing_now_us();
     bool touch_changed=!view.overlay && (view.capture!=drawn.capture || view.mode!=drawn.mode);
     flush_ok=true; frame_flushed=false;
-    invalidate_changes(job!=0);
+    /* REQ-18 needs the destination DMA completed before the ATT response.
+     * Defer mailbox Orb/sector changes and pulse work until the host is free.
+     * Do not mark those deferred regions as drawn. An invalid/overlay baseline
+     * still requires a full recovery draw. Existing LVGL damage is retained. */
+    if(job && drawn_valid && !drawn.overlay) target();
+    else invalidate_changes(job!=0);
     uint32_t now=remote_now();
-    if(!view.overlay && listening() && now-pulse_at>=200) { pulse_at=now; invalidate_pulse(); }
+    if(!job && board_info()->animate && !view.overlay && listening() && now-pulse_at>=200) { pulse_at=now; invalidate_pulse(); }
     /* Explicit refresh: no LVGL input/timer can call state or I2C while drawing. */
     lv_refr_now(display);
-    if(flush_ok) { drawn=view; drawn_valid=true; } else drawn_valid=false;
+    if(!flush_ok) drawn_valid=false;
+    else if(!job) { drawn=view; drawn_valid=true; }
+    uint32_t completed=remote_now(); /* DMA completion, before mutex reacquisition. */
     timing_redraw(start,frame_flushed,flush_ok,touch_changed?view.touch_id:0,view.touch_at);
     lock();
     if(job && barrier_active && barrier_id==job && !current.overlay) {
-        barrier_done=job; barrier_ok=flush_ok;
+        barrier_done=job;
+        barrier_ok=flush_ok && (uint32_t)(completed-barrier_started)<=PHONE_RENDER_WAIT_MS;
 #ifndef UI_PREVIEW
         xSemaphoreGive(barrier_signal);
 #endif

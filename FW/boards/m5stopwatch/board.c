@@ -7,6 +7,7 @@
  * See DOCS/licences/ and this board's README for sources and obligations.
  */
 #include "board.h"
+#include "../es8311_mic.h"
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
 #include "driver/spi_master.h"
@@ -21,7 +22,7 @@
 
 /* Swap only this constant if the physical colours are reversed. */
 static const gpio_num_t BUTTON_GPIOS[2]={GPIO_NUM_2,GPIO_NUM_1}; /* yellow PTT, blue cycle */
-static const board_info_t info={1,466,466,0xbf,true,true,true};
+static const board_info_t info={1,466,466,0xbf,true,true,true,true};
 static i2c_master_dev_handle_t ioe, pm, touch, codec;
 static i2c_master_bus_handle_t bus;
 static esp_lcd_panel_handle_t panel;
@@ -203,22 +204,9 @@ static esp_err_t mic_init(void)
     err=i2s_channel_enable(mic_rx); if(err) goto fail;
     /* MCLK must be present during codec reset, as in vendor hal_audio. */
     /* open, sample format/clock, then start: values follow vendor's codec driver.
-       Gain enum 5 = 30 dB (vendor hal_audio). DAC is muted and amp remains off. */
-    static const uint8_t regs[][2]={
-        {0x0d,0xfa},{0x44,0x08},{0x44,0x08},{0x01,0x30},{0x02,0x00},
-        {0x03,0x10},{0x16,0x24},{0x04,0x10},{0x05,0x00},{0x0b,0x00},
-        {0x0c,0x00},{0x10,0x1f},{0x11,0x7f},{0x00,0x80},{0x01,0x3f},
-        {0x06,0x00},{0x13,0x10},{0x1b,0x0a},{0x1c,0x6a},{0x44,0x58},
-        {0x09,0x0c},{0x0a,0x0c}, /* 16-bit Philips */
-        {0x02,0x00},{0x05,0x00},{0x03,0x10},{0x04,0x20},
-        {0x07,0x00},{0x08,0xff},{0x06,0x03}, /* 4.096 MHz/16 kHz */
-        {0x00,0x80},{0x01,0x3f},{0x09,0x0c},{0x0a,0x0c},
-        {0x17,0xbf},{0x0e,0x02},{0x12,0x00},{0x14,0x1a},{0x0d,0x01},
-        {0x15,0x40},{0x37,0x08},{0x45,0x00},{0x16,0x05},
-        {0x31,0x60},{0x32,0x00}, /* mute DAC; no speaker data */
-    };
-    for(unsigned i=0;i<sizeof regs/sizeof regs[0];i++) {
-        err=write_reg(codec,regs[i][0],regs[i][1]); if(err) goto fail;
+       Gain enum 5 = 30 dB (vendor hal_audio). DAC/HP path stays powered down; see shared register table. */
+    for(unsigned i=0;i<sizeof es8311_mic_regs/sizeof es8311_mic_regs[0];i++) {
+        err=write_reg(codec,es8311_mic_regs[i][0],es8311_mic_regs[i][1]); if(err) goto fail;
     }
     uint8_t format;
     err=read_reg(codec,0x0a,&format,1);
@@ -264,3 +252,8 @@ void *board_ui_alloc(size_t bytes)
     return heap_caps_malloc(bytes,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
 }
 unsigned board_ui_strip_rows(void) { return 32; }
+
+/* StopWatch retains its original serialized I2C/input behavior. */
+void board_sample_inputs(uint32_t now) { (void)now; }
+bool board_physical_controls(uint8_t *capture,uint8_t *mode)
+{ (void)capture; (void)mode; return false; }

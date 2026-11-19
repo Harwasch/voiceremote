@@ -2,6 +2,8 @@
 #include "state.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "freertos/task.h"
+extern TaskHandle_t remote_renderer;
 extern vr_state_t remote_state;
 extern SemaphoreHandle_t remote_mutex;
 uint32_t remote_now(void);

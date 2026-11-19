@@ -20,14 +20,16 @@ flowchart LR
 | `test.c` | I, E0–E5, P, A0–A2 round trips; malformed UTF-8/flags/enums/lengths, all split offsets, overflow, atomicity, transaction/input wrap, arm/OFF, debounce, scaled Orb sectors/disc/target/modals/dead zones, live/offline listening truth table, failed-touch-read hold/timeout/rearm/wrap, UTF-8 fallback, immediate preview/rollback and controls changing during a display wait | ✅ Host tested |
 | `test_offline_store.c` | Factory-used partition initialization, damaged-magic preservation, corrupt List traversal/Fetch/Confirm errors, fake-flash power loss at every script write boundary across two data sectors, torn writes/erases/final frame, prefix recovery, full, resume, metadata/CRC, delete retry, ID/boot persistence, corruption and journal rotation | ✅ Host tested |
 | `test_offline_capture.c` | Mode taps cannot restart paused/full/failed REC; fresh triggers, disconnect/reconnect, stored mode, OFF, owner/incompatibility/pause gates | ✅ Host tested |
-| `check_partitions.py` | Generated StopWatch/C6 tables against original NVS offset/size and flash bounds | ✅ Build outputs required |
+| `check_partitions.py` | Generated maps, unchanged NVS, alignment/non-overlap, C6 app ≥20% unused with built normal/hook image sizes | ✅ Build outputs required |
 | `../tools/ble_client/test_offline.py` | Contract offline hex/fragments, resume/integrity, durable copy and clock behavior | ✅ Host tested |
 | `test_config.py` | Rejects hook for explicit release and GitHub/GitLab firmware-tag signals before IDF setup | ✅ Host tested |
+| `test_es8311.c` | Actual shared init writes: DAC/HP off throughout, ADC/PGA/mic route/gain/format unchanged | ✅ Host tested |
+| `test_render_priority.c` | Production priority guard compiled for S3 and C6; boost below audio, restore original priority | ✅ Host tested |
 | `test_hook.c` | All serial commands, unknown input and held/released PTT decoder | ✅ Host tested |
 | `../tools/hil/test_run_offline.py` | Entire unattended procedure using fake serial/BLE, durable fetch interruption/resume, failure and PTY serial collector | ✅ Host tested |
 | `test_audio.c` | Production queue/framer with fake encoder: MTU 23/247, START/END/LAST, MTU changes, OFF discard, arm/hold gate, overflow and sequence/segment exhaustion; binary fixture mode | ✅ Host tested |
 | `test_audio_runtime.c` | Production audio lifecycle: codec generation survives BLE reconnect/reset during local recording; live reset invalidates generation; OFF immediately stops mic/suspends worker and discards in-flight encoder output | ✅ Host tested |
-| `test_offline_runtime.c`, `offline_stubs/` | Production writer and sync transport with synthetic NOR and bounded FIFO: queued/in-flight begin OFF, volatile discard, queue/flash full, write failure, clock/progress, contract result layouts, resume/deletion after reboot, enrollment guard, C6 capability stub and live preemption; asserts storage IO never holds the app mutex | ✅ Host tested |
+| `test_offline_runtime.c`, `offline_stubs/` | Production writer and sync transport with synthetic NOR and bounded FIFO: queued/in-flight begin OFF, volatile discard, queue/flash full, write failure, clock/progress, contract result layouts, resume/deletion after reboot, enrollment guard, capability-disabled board fallback and live preemption; asserts storage IO never holds the app mutex | ✅ Host tested |
 | `../tools/ble_client/test_audio.py` | C-to-Python framing at MTU 23/64/247/517, loss/conflicts/duplicates/watchdog, reconnect/ack/trigger policy, WAV format and real libopus decode | ✅ Host tested |
 | `../tools/ble_client/test_wire.py` | Independent synthetic Python wire fixtures | ✅ Host tested |
 
@@ -97,3 +99,20 @@ NimBLE malformed-key-size handling sets `enc_cb` (`ble_sm.c:2287–2294`);
 which publishes ENC_CHANGE (`ble_gap.c:11140–11149`). A pending local termination
 therefore does not protect the old cleanup predicate. Enrollment origin is now
 latched at CONNECT and retained until DISCONNECT/reset, independent of its timeout.
+
+| C6 port regression | Evidence / boundary |
+|---|---|
+| `test_c6_controls.c` | All 256 raw bytes/six valid selector combinations; 00, whole-byte 20 ms debounce, immediate OFF, I2C/stale stop, held boot buttons, no boot REC, wrap and bounded stuck-low INT; 4/16 MiB and overflow storage bounds |
+| `audio_single_core` | Production audio lifecycle with single-core stack/priority assertions; reference dual-core configuration also runs |
+| `c6_ui_touch`, `c6_ui_physical` | 240×280 production LVGL: ring controls/status-only Orb, physical mode changes, unchanged-selector sentinel, OFF on DOWN, pairing, offline partial/full pixel equality |
+| `check_partitions.py` | Both generated tables fit/fill 16 MiB with offline data and historical NVS/PHY/factory unchanged |
+
+The C6 small-strip AI glyph regression failed partial/full equality before the
+bounded A8 glyph fix. Pin wiring, ISR deadlines, flash cache stalls, stack/heap
+headroom and live/offline audio quality still need the coordinator's hardware run.
+
+C6 fix-round regressions: runtime scan/format counts real `vTaskDelay(1)` calls at
+256 KiB reads / each erased sector, including remount; native preview compares
+static listening versus armed pixels and checks zero pulse flushes, 344/400 ms
+accepted versus 401 ms rejected, delayed mutex reacquisition, priority restoration
+on every result, and target-only barrier bounds with pending Orb/pulse work.

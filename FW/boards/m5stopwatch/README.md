@@ -65,7 +65,7 @@ Reports `virtual_sliders=true`: the shared UI draws the Orb capture ring.
 |---|---|
 | Bus / pins | Vendor `hal_audio.cpp`: I2C 7-bit 0x18 (driver constant 0x30 is 8-bit), MCLK 18, BCLK 17, ASDOUT 16, LRCK 15, DSDIN 21 |
 | Registers | Espressif `esp_codec_dev/device/es8311/es8311.c` supplied inside PowerDemo: open → 16-bit Philips → 16 kHz / 4.096 MHz coefficient → start; MCLK present during reset |
-| Route / gain | Vendor analog mic, slave clock, 30 dB gain (`0x16=5`); `0x44=0x58` routes mic left / DAC reference right; only left enters Opus; DAC muted |
+| Route / gain | Vendor analog mic, slave clock, 30 dB gain (`0x16=5`); `0x44=0x58` routes mic left / DAC reference right; only left enters Opus; DAC powered down, HP selection cleared |
 | DMA | Stereo 16-bit, 320 stereo samples × four descriptors; nonblocking reads under app mutex; queue-overflow callback fails closed; disable resets DMA cursor and next enable resets RX queue (IDF `i2s_common.c`) |
 | Allocation | Encoder state prefers PSRAM, falls back to internal; task stack and DMA stay internal |
 
@@ -87,3 +87,14 @@ does not prove 20 ms timing. See [storage](../../app/offline-storage.md).
 same primitives. No internal-memory fallback for optional artwork. Strip growth
 costs up to 14,912 additional internal heap bytes (falls back to 16 rows if
 allocation fails); cache sizing is in the linked evidence.
+
+The C6 port adds no-op `board_sample_inputs`/`board_physical_controls` adapters here;
+StopWatch retains its original input I2C, base priorities, 48 KiB Opus stack, artwork
+cache and 32-row strip. The C6 evidence includes a base-commit PNG comparison for
+all existing fixtures and normal/hook StopWatch builds.
+
+The shared [RX-only codec table](../es8311_mic.h) also fixes the identical DAC
+power-up here (`0x12=0x02`, `0x13=0x00`); ADC/PGA/mic writes are unchanged.
+Both amplifier enable lines remain low. Host register tests cover the table;
+analog behavior remains unverified. Phone barriers temporarily raise render from
+priority 1 to **3** (Opus stays 4) and draw the destination before other changes.

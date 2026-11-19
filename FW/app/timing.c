@@ -24,7 +24,7 @@ static uint64_t esp_timer_get_time(void)
 
 typedef struct { uint64_t sum; uint32_t count, max; } metric_t;
 static struct {
-    metric_t redraw, touch, loop, period, poll, dma, barrier;
+    metric_t redraw, touch, loop, period, poll, dma, barrier, encode;
     unsigned queue_high, flush_errors, barrier_rejects;
 } stats;
 static portMUX_TYPE stats_lock=portMUX_INITIALIZER_UNLOCKED;
@@ -74,6 +74,10 @@ void timing_redraw(uint64_t start,bool flushed,bool ok,uint32_t id,uint32_t at)
     }
     portEXIT_CRITICAL(&stats_lock);
 }
+void timing_encode(unsigned us)
+{
+    portENTER_CRITICAL(&stats_lock); sample(&stats.encode,us); portEXIT_CRITICAL(&stats_lock);
+}
 void timing_queue(unsigned count)
 {
     portENTER_CRITICAL(&stats_lock);
@@ -99,10 +103,13 @@ void timing_report(void)
 #ifndef UI_PREVIEW
     if(now-report_at<5000000) return;
 #endif
-    report_at=now; (void)report_at;
+    uint64_t interval=now-report_at; report_at=now;
     portENTER_CRITICAL(&stats_lock);
     __typeof__(stats) s=stats; memset(&stats,0,sizeof stats);
     portEXIT_CRITICAL(&stats_lock);
+    ESP_LOGI("timing","encode_wall_us_mean=%lu max=%lu frames=%lu window_us=%llu load_est_pct=%lu (includes preemption)",
+        mean(s.encode),(unsigned long)s.encode.max,(unsigned long)s.encode.count,
+        (unsigned long long)interval,(unsigned long)(interval?100*s.encode.sum/interval:0));
     ESP_LOGI("timing","us mean/max redraw=%lu/%lu n=%lu touch_to_dma_est=%lu/%lu n=%lu loop=%lu/%lu period=%lu/%lu touch_poll=%lu/%lu dma_strip=%lu/%lu n=%lu queue_high=%u/4 flush_errors=%u barrier=%lu/%lu rejects=%u",
         mean(s.redraw),(unsigned long)s.redraw.max,(unsigned long)s.redraw.count,
         mean(s.touch),(unsigned long)s.touch.max,(unsigned long)s.touch.count,

@@ -4,6 +4,7 @@
 #include "timing.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "esp_heap_caps.h"
 #include "nvs_flash.h"
 #include "freertos/task.h"
 #ifdef REMOTE_TEST_HOOK
@@ -27,6 +28,7 @@ static void test_poll(void)
 #endif
 vr_state_t remote_state;
 SemaphoreHandle_t remote_mutex;
+TaskHandle_t remote_renderer;
 uint32_t remote_now(void) { return (uint32_t)(esp_timer_get_time()/1000); }
 void remote_event(uint8_t event, uint8_t value, uint32_t sampled)
 {
@@ -38,6 +40,7 @@ void remote_event(uint8_t event, uint8_t value, uint32_t sampled)
 }
 void remote_lock(void) { xSemaphoreTakeRecursive(remote_mutex,portMAX_DELAY); }
 void remote_unlock(void) { xSemaphoreGiveRecursive(remote_mutex); }
+void ui_physical_controls(uint8_t capture,uint8_t mode);
 static void render_task(void *arg)
 {
     (void)arg;
@@ -52,25 +55,34 @@ void app_main(void)
     ESP_ERROR_CHECK(nvs_flash_init());
     remote_mutex=xSemaphoreCreateRecursiveMutex(); configASSERT(remote_mutex);
     ESP_ERROR_CHECK(board_init());
+#if VR_TIMING && defined(CONFIG_FREERTOS_UNICORE) && CONFIG_FREERTOS_UNICORE
+    esp_log_level_set("timing",ESP_LOG_INFO); /* renderer logs outside audio mutex */
+#endif
     ui_init();
     offline_init();
     audio_init();
     ble_start();
+    ESP_LOGW("memory","after UI/store/Opus/BLE init internal_free=%u minimum=%u",
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+        (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
 #ifdef REMOTE_TEST_HOOK
     esp_log_level_set("*",ESP_LOG_INFO); /* Test runs read the port, so detail is safe here. */
     ESP_LOGW("test_hook","TEST BUILD: USB local-input hook ENABLED (o/p/r d/u h t x B Y)");
     usb_serial_jtag_driver_config_t hook_config=USB_SERIAL_JTAG_DRIVER_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(usb_serial_jtag_driver_install(&hook_config));
 #endif
-    /* Preemption also protects audio on single-core C6: input/transport > Opus >
-     * LVGL. No core affinity and no renderer/state lock around software drawing. */
+    /* Single-core: Opus 22 > NimBLE 21 > input 5 > render/writer 1.
+     * Barrier renders temporarily run below Opus (C6 20 / S3 3). No lock during drawing. */
     vTaskPrioritySet(NULL,5);
     if(board_info()->operational)
-        ESP_ERROR_CHECK(xTaskCreate(render_task,"render",8192,NULL,1,NULL)==pdPASS?ESP_OK:ESP_ERR_NO_MEM);
+        ESP_ERROR_CHECK(xTaskCreate(render_task,"render",8192,NULL,1,&remote_renderer)==pdPASS?ESP_OK:ESP_ERR_NO_MEM);
     for(;;) {
         uint64_t loop_start=timing_now_us();
+        board_sample_inputs(remote_now()); /* no app/audio mutex across I2C */
         remote_lock();
         uint32_t now=remote_now();
+        uint8_t capture,mode;
+        if(board_physical_controls(&capture,&mode)) ui_physical_controls(capture,mode);
         board_poll(now); ble_poll(now);
 #ifdef REMOTE_TEST_HOOK
         test_poll();

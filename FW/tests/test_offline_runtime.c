@@ -12,14 +12,17 @@
 vr_state_t remote_state;
 SemaphoreHandle_t remote_mutex;
 struct test_queue { unsigned capacity, stride, head, count; uint8_t bytes[18*sizeof(job_t)]; };
-static uint8_t flash[12*VR_STORE_SECTOR];
-static esp_partition_t part={sizeof flash};
+static uint8_t flash[1024*1024];
+static esp_partition_t part={12*VR_STORE_SECTOR};
 static board_info_t board={.capabilities=128};
 static TaskFunction_t writer_task;
 static jmp_buf pump_exit;
 static bool pumping, send_ok=true, write_ok=true;
 static unsigned lock_depth, io_calls, result_packets, progress_packets, ui_updates;
 static uint64_t fake_ms;
+static size_t read_since_yield;
+static unsigned read_yields, erase_yields, erase_calls, erase_since_yield;
+static bool check_yields;
 static uint32_t storage_hold;
 static bool nvs_ok=true;
 int nvs_open(const char *name,int mode,nvs_handle_t *h)
@@ -40,6 +43,17 @@ void *heap_caps_calloc(size_t n,size_t size,unsigned caps) { (void)caps; return 
 void *board_audio_alloc(size_t bytes) { return calloc(1,bytes); }
 int64_t esp_timer_get_time(void) { return (int64_t)(fake_ms*1000); }
 uint32_t remote_now(void) { return (uint32_t)fake_ms; }
+void vTaskDelay(TickType_t ticks)
+{
+    assert(ticks==1);
+    if(!check_yields) return;
+    assert(!lock_depth);
+    if(erase_since_yield) { assert(erase_since_yield==1); erase_since_yield=0; erase_yields++; }
+    else {
+        assert(read_since_yield>=256*1024 && read_since_yield<256*1024+256);
+        read_since_yield=0; read_yields++;
+    }
+}
 void remote_lock(void) { assert(!lock_depth); ++lock_depth; }
 void remote_unlock(void) { assert(lock_depth==1); --lock_depth; }
 void ui_refresh(void) { ++ui_updates; }
@@ -48,9 +62,9 @@ uint16_t ble_audio_mtu(void) { return mtu; }
 const esp_partition_t *esp_partition_find_first(int type,int subtype,const char *label)
 { assert(type==ESP_PARTITION_TYPE_DATA && subtype==0x40 && !strcmp(label,"offline")); return &part; }
 static void io_check(const esp_partition_t *p,uint32_t at,size_t n)
-{ assert(!lock_depth && p==&part && at<=sizeof flash && n<=sizeof flash-at); ++io_calls; }
+{ assert(!lock_depth && p==&part && at<=p->size && n<=p->size-at); ++io_calls; }
 esp_err_t esp_partition_read(const esp_partition_t *p,uint32_t at,void *out,size_t n)
-{ io_check(p,at,n); memcpy(out,flash+at,n); return ESP_OK; }
+{ io_check(p,at,n); if(check_yields) read_since_yield+=n; memcpy(out,flash+at,n); return ESP_OK; }
 esp_err_t esp_partition_write(const esp_partition_t *p,uint32_t at,const void *in,size_t n)
 {
     io_check(p,at,n); if(!write_ok) return ESP_FAIL;
@@ -60,7 +74,7 @@ esp_err_t esp_partition_write(const esp_partition_t *p,uint32_t at,const void *i
     return ESP_OK;
 }
 esp_err_t esp_partition_erase_range(const esp_partition_t *p,uint32_t at,size_t n)
-{ io_check(p,at,n); assert(!(at%VR_STORE_SECTOR) && !(n%VR_STORE_SECTOR)); memset(flash+at,255,n); return ESP_OK; }
+{ io_check(p,at,n); assert(!(at%VR_STORE_SECTOR) && !(n%VR_STORE_SECTOR)); if(check_yields) { assert(n==VR_STORE_SECTOR); erase_calls++; erase_since_yield++; } memset(flash+at,255,n); return ESP_OK; }
 QueueHandle_t xQueueCreate(UBaseType_t n,UBaseType_t size)
 { assert(n==18 && size==sizeof(job_t)); struct test_queue *q=calloc(1,sizeof *q); assert(q); q->capacity=n; q->stride=size; return q; }
 BaseType_t xQueueSend(QueueHandle_t q,const void *data,TickType_t timeout)
@@ -284,8 +298,25 @@ static void unsupported_board(void)
     remote_state=(vr_state_t){0}; board.capabilities=0; offline_init();
     assert(!ready && !store && !jobs && !io_calls && !remote_state.input.full && offline_enrollment_allowed());
 }
+static void yield_cadence(void)
+{
+    /* Fresh process: runtime rd's accumulator starts at zero. Scan 1 MiB of
+     * non-magic factory bytes; format every sector through the real callbacks. */
+    part.size=sizeof flash; memset(flash,0,sizeof flash); check_yields=true;
+    reset(false);
+    assert(read_yields>=4 && read_since_yield<256*1024);
+    assert(erase_calls==sizeof flash/VR_STORE_SECTOR);
+    assert(erase_yields==erase_calls && !erase_since_yield);
+    unsigned before=read_yields, erased=erase_calls;
+    reset(false); /* Existing empty journal also scans all sector bodies. */
+    assert(read_yields>=before+3 && read_since_yield<256*1024);
+    assert(erase_calls==erased && erase_yields==erase_calls);
+    free(store); free(jobs);
+    puts("offline runtime yields: scan every 256 KiB, format every sector, one blocked tick");
+}
 int main(int argc,char **argv)
 {
+    if(argc>1 && !strcmp(argv[1],"yield")) { yield_cadence(); return 0; }
     if(argc>1 && !strcmp(argv[1],"mount")) { broken_mount(); return 0; }
     pending_begin_off(); inflight_begin_off(); off_discards_volatile(); queue_overflow_stops(); storage_full_stops(); write_failure_stops();
     sync_vectors_and_resume(); clock_and_progress(); live_preempts_sync(); recovered_error_visible(); broken_mount(); re_enrollment_quarantine(); unsupported_board();
