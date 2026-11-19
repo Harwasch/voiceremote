@@ -17,7 +17,7 @@ int main(void)
         c6_controls_value_t v; bool valid=c6_controls_decode(raw,&v);
         assert(valid==((raw&3)!=0));
         assert(v.capture==((raw&3)==3?1:(raw&3)==2?2:0));
-        assert(v.mode==((raw>>2)&1) && v.ptt==!(raw&8) && v.target==!(raw&16));
+        assert(v.mode==!((raw>>2)&1) && v.ptt==!(raw&8) && v.target==!(raw&16));
     }
     c6_controls_t s={0}; stable(&s,0x1e,0); /* REC at boot, no start. */
     assert(!s.value.capture && !s.value.ptt);
@@ -25,7 +25,7 @@ int main(void)
     stable(&s,0x1b,200); assert(s.value.capture==1);
     c6_controls_sample(&s,true,0x1e,false,230); assert(s.value.capture==1);
     c6_controls_sample(&s,true,0x1e,false,249); assert(s.value.capture==1);
-    c6_controls_sample(&s,true,0x1e,false,250); assert(s.value.capture==2 && s.value.mode==1);
+    c6_controls_sample(&s,true,0x1e,false,250); assert(s.value.capture==2 && s.value.mode==0); /* P2 high: TXT */
     c6_controls_sample(&s,true,0x19,false,251); assert(!s.value.capture); /* immediate OFF */
     stable(&s,0x1b,300); assert(s.value.capture==1);
     c6_controls_sample(&s,true,0,false,330); assert(!s.value.capture && !s.value.ptt);

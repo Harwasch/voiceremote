@@ -4,7 +4,7 @@ bool c6_controls_decode(uint8_t raw,c6_controls_value_t *v)
 {
     unsigned code=raw&3;
     *v=(c6_controls_value_t){.capture=code==3?1:code==2?2:0,
-        .mode=(raw>>2)&1,.ptt=!(raw&8),.target=!(raw&16)};
+        .mode=!((raw>>2)&1), /* I/O board G2: P2 low = AI, high or open = TXT */.ptt=!(raw&8),.target=!(raw&16)};
     return code!=0;
 }
 static void publish(c6_controls_t *s,c6_controls_value_t v)

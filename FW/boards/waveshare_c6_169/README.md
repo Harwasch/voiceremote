@@ -51,6 +51,7 @@ net names below are authoritative when demos disagree.
 | BOOT | 9, active low | Schematic K1/R17; GPIO table also names `IMU_INT` on 9. IMU stays unconfigured; verify interrupt does not drive this net |
 | USB Serial/JTAG | 12 / 13 | Schematic `USB_N` / `USB_P`; sole console, no UART on pads |
 | TCA9554 INT / unused TX | 17 input / 16 unused | Rev G `MAIN/AI/HW/2026-11-06-proto1g/firmware-note.md`, schematic `ESP_RXD` / `ESP_TXD`; external 10 kΩ INT pull is on Rev G |
+| TXT/AI selector (S2) | TCA9554 P2 | I/O board G2: P2 low = AI, high or open = TXT, superseding Rev G's note. Source `MAIN/AI/HW/2026-11-19-ioboard-g2/FIRMWARE-NOTE-S2.md` (owner-approved printed caps). OFF/PTT/REC on P1:P0 unchanged |
 | Battery ADC | 0, unused | Schematic `BAT_ADC`; owner measured ~4.2 V on USB, **not** a battery-presence detector |
 
 ST7789 setup uses SPI mode 0, **40 MHz**, RGB565 and inversion on
