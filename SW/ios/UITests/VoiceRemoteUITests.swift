@@ -8,43 +8,62 @@ import UIKit
     private var app = XCUIApplication()
     private let appearance = "light"
     private var size = "default"
+    private var seekUp = true
+    private static var auditedScreens: Set<String> = []
+    private static var lastLaunchArguments: [String]?
 
     override func setUpWithError() throws { continueAfterFailure = false }
 
-    private func launch(_ flags: [String] = [], largest: Bool = false) {
-        app.terminate()
+    private func launch(_ flags: [String] = [], largest: Bool = false, reuse: Bool = false) {
+        let arguments = ["--ui-demo", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"] + flags
+            + (largest ? ["--ui-largest"] : [])
         size = largest ? "accessibility5" : "default"
         app = XCUIApplication()
-        app.launchArguments = ["--ui-demo", "-AppleLanguages", "(en)", "-AppleLocale", "en_US"] + flags
-            + (largest ? ["--ui-largest"] : [])
+        if reuse && Self.lastLaunchArguments == arguments && app.state == .runningForeground {
+            tab("Home"); return
+        }
+        if app.state != .notRunning { app.terminate() }
+        app.launchArguments = arguments
         app.launch()
+        Self.lastLaunchArguments = arguments
         let root = flags.contains("--ui-storage-denied") ? app.staticTexts["Private storage / audit recovery"] : app.tabBars.buttons["Home"]
         require(root, timeout: 30)
     }
-    private func require(_ element: XCUIElement, timeout: TimeInterval = 8) {
-        let found = element.waitForExistence(timeout: timeout)
+    private func require(_ element: XCUIElement, timeout: TimeInterval = 3) {
+        let found = element.appears(timeout: timeout)
         if !found { snapshot("missing-element") }
         XCTAssertTrue(found, "Expected element: \(element)")
     }
     private func scroll(up: Bool) {
-        let scroller = app.scrollViews.firstMatch.exists ? app.scrollViews.firstMatch :
-            (app.tables.firstMatch.exists ? app.tables.firstMatch : app)
-        // The content margin avoids accidentally pressing the large talk control.
-        let start = scroller.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: up ? 0.8 : 0.2))
-        let end = scroller.coordinate(withNormalizedOffset: CGVector(dx: 0.98, dy: up ? 0.2 : 0.8))
-        start.press(forDuration: 0.05, thenDragTo: end)
+        // App-relative gestures cannot retain a disappearing sheet's ScrollView.
+        // Native swipes scroll the actual hit-tested list/scroll view, including
+        // UICollectionView-backed SwiftUI Lists. Home cancels Hold on movement.
+        let keyboard = app.keyboards.firstMatch
+        if keyboard.exists {
+            let frame = app.frame
+            let lower = min(frame.maxY - 120, keyboard.frame.minY - 24)
+            let upper = frame.minY + 140
+            let startY = up ? lower : upper
+            let endY = up ? upper : lower
+            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: (startY - frame.minY) / frame.height))
+            let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: (endY - frame.minY) / frame.height))
+            start.press(forDuration: 0.01, thenDragTo: end, withVelocity: .fast, thenHoldForDuration: 0)
+        } else if up { app.swipeUp(velocity: .fast) } else { app.swipeDown(velocity: .fast) }
     }
     private func visible(_ element: XCUIElement, requireHittable: Bool = true) {
-        _ = element.waitForExistence(timeout: 2)
-        for up in [true, false] {
-            for _ in 0..<(size == "accessibility5" ? 20 : 12) {
-                if element.exists && (requireHittable ? element.isHittable : app.frame.intersects(element.frame)) { return }
-                if element.exists && element.frame.maxY > 0 && element.frame.minY < 100 { scroll(up: false) }
-                else { scroll(up: up) }
+        if !element.exists { _ = element.appears(timeout: 1) }
+        let viewport = app.frame.insetBy(dx: 0, dy: 100)
+        for _ in 0..<8 {
+            if element.exists {
+                if requireHittable && element.isHittable { seekUp = true; return }
+                let frame = element.frame
+                if !requireHittable && viewport.intersects(frame) { seekUp = true; return }
+                seekUp = frame.minY >= viewport.minY
             }
+            scroll(up: seekUp)
         }
         snapshot("element-not-visible")
-        XCTFail("Element did not become visible: \(element)")
+        XCTFail("Element did not become hittable after eight swipes: \(element)")
     }
     private func tap(_ element: XCUIElement) { visible(element); element.tap() }
     private func tab(_ name: String) {
@@ -54,7 +73,8 @@ import UIKit
         }
         tap(app.tabBars.buttons[name])
         if name == "Home" {
-            for _ in 0..<4 where !app.navigationBars["Voice Remote"].exists {
+            for _ in 0..<4 {
+                if app.navigationBars["Voice Remote"].exists { break }
                 tap(app.navigationBars.buttons.firstMatch)
             }
             require(app.navigationBars["Voice Remote"])
@@ -68,8 +88,9 @@ import UIKit
         let native = control.switches.firstMatch
         if native.exists && native.isHittable { native.tap() }
         else { control.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 0.5)).withOffset(CGVector(dx: -26, dy: 0)).tap() }
+        if control.value as? String == desired { return }
         let changed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == %@", desired), object: control)
-        XCTAssertEqual(XCTWaiter.wait(for: [changed], timeout: 5), .completed)
+        XCTAssertEqual(XCTWaiter.wait(for: [changed], timeout: 3), .completed)
     }
     private func assertSavedConsent(_ on: Bool) {
         tap(app.buttons["settings-demo-details"])
@@ -82,7 +103,7 @@ import UIKit
     private func assertCaptureOff() {
         let off = app.segmentedControls["capture-picker"].buttons["Off"]
         visible(off)
-        XCTAssertTrue(off.wait(for: \.isSelected, toEqual: true, timeout: 8), "Off must be the selected segment")
+        XCTAssertTrue(off.isSelected || off.wait(for: \.isSelected, toEqual: true, timeout: 3), "Off must be the selected segment")
     }
     private func diagnostic(_ id: String) -> String {
         tap(app.buttons["demo-disclosure"])
@@ -92,10 +113,11 @@ import UIKit
         tap(app.buttons["demo-disclosure"])
         return value
     }
-    private func top() { for _ in 0..<3 { scroll(up: false) } }
+    private func top() { scroll(up: false); seekUp = false }
     private func expect(_ element: XCUIElement, label: String) {
+        if element.exists && element.label == label { return }
         let matched = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND label == %@", label), object: element)
-        let result = XCTWaiter.wait(for: [matched], timeout: 12)
+        let result = XCTWaiter.wait(for: [matched], timeout: 3)
         if result != .completed { snapshot("unexpected-state") }
         XCTAssertEqual(result, .completed, "Expected label: " + label)
     }
@@ -113,15 +135,18 @@ import UIKit
         // A fault may end Continuous immediately. Its resulting listening state
         // is asserted by the caller; only stable selections are checked here.
         if !["CONTINUOUS", "Continuous"].contains(value) {
-            XCTAssertTrue(segment.wait(for: \.isSelected, toEqual: true, timeout: 8))
+            XCTAssertTrue(segment.isSelected || segment.wait(for: \.isSelected, toEqual: true, timeout: 3))
         }
     }
     private func mode(_ value: String) {
         tap(app.segmentedControls["mode-picker"].buttons[value])
     }
     private func snapshot(_ screen: String) {
-        let screenshot = XCTAttachment(screenshot: app.screenshot())
-        screenshot.name = "gallery__\(appearance)__\(size)__" + screen
+        let captured = app.screenshot()
+        let label = "gallery__\(appearance)__\(size)__" + screen
+        checkpoint(captured.pngRepresentation, label: label, suffix: "png")
+        let screenshot = XCTAttachment(screenshot: captured)
+        screenshot.name = label
         screenshot.lifetime = .keepAlways; add(screenshot)
     }
     private func assertHomeLayout() {
@@ -140,11 +165,40 @@ import UIKit
             }
         }
     }
+    private var checkpointDirectory: URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("ios-ui-checkpoints", isDirectory: true)
+    }
+    private func checkpoint(_ data: Data, label: String, suffix: String) {
+        do {
+            let directory = checkpointDirectory
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let id = UUID().uuidString
+            let filename = id + "." + suffix
+            try data.write(to: directory.appendingPathComponent(filename), options: .atomic)
+            let metadata: [String: Any] = ["testName": name, "attachments": [
+                ["exportedFileName": filename, "suggestedHumanReadableName": label + "." + suffix]]]
+            try JSONSerialization.data(withJSONObject: metadata).write(
+                to: directory.appendingPathComponent(id + ".meta.json"), options: .atomic)
+        } catch { XCTFail("Cannot checkpoint synthetic UI artifact: \(error)") }
+    }
     private func shot(_ screen: String, audit: Bool = true) throws {
         let label = "\(appearance)__\(size)__\(screen)"
         snapshot(screen)
-        if app.navigationBars["Voice Remote"].exists { assertHomeLayout() }
-        guard audit else { return }
+        // One audit per navigation/help screen, not per state, type size or
+        // screenshot. Audit internally exercises font sizes. No issues waived.
+        let canonical: [String: String] = ["main-home": "home", "home": "home", "main-devices": "devices", "devices": "devices",
+            "main-history": "history", "history": "history", "main-suggestions": "suggestions", "suggestions": "suggestions",
+            "main-agents": "agents", "agent-sessions": "agents", "main-settings": "settings", "settings": "settings",
+            "target-picker": "destination", "tier3-approval": "approval", "pairing-invitation": "invitation",
+            "pairing-four-words": "confirmation", "first-run": "first-run", "permission-explanation": "permission",
+            "benchmark-recorder": "recorder", "owner-completion": "completion", "phone-details": "phone-details",
+            "microphone-speech-denied": "permission-denied", "camera-denied": "camera-denied",
+            "private-storage-audit-recovery": "storage-recovery", "recording-info": "recording-info", "devices-info": "devices-info",
+            "privacy-info": "privacy-info", "recorder-info": "recorder-info"]
+        guard audit, size == "default", let key = canonical[screen], !Self.auditedScreens.contains(key) else { return }
+        let marker = checkpointDirectory.appendingPathComponent("audit-" + key + ".done")
+        guard !FileManager.default.fileExists(atPath: marker.path) else { return }
         var findings: [[String: String]] = []
         try app.performAccessibilityAudit(for: .all) { issue in
             findings.append(["type": String(describing: issue.auditType), "summary": issue.compactDescription,
@@ -154,9 +208,12 @@ import UIKit
             return true
         }
         let report: [String: Any] = ["screen": label, "mode": "report-only", "findings": findings]
-        let attachment = XCTAttachment(data: try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]),
-            uniformTypeIdentifier: "public.json")
+        let data = try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
+        checkpoint(data, label: "audit__" + label, suffix: "json")
+        let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.json")
         attachment.name = "audit__" + label; attachment.lifetime = .keepAlways; add(attachment)
+        Self.auditedScreens.insert(key)
+        try Data().write(to: marker, options: .atomic)
     }
 
     func testFirstRunAndRecovery() throws {
@@ -167,12 +224,12 @@ import UIKit
         tap(app.buttons["permission-continue"])
         try shot("permission-explanation")
         tap(app.buttons["permission-allow"])
-        XCTAssertTrue(app.buttons["permission-allow"].waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["permission-allow"].disappears(timeout: 5))
         try shot("first-run-consented")
 
         launch(["--ui-permission-denied"])
         tap(app.buttons["permission-continue"]); tap(app.buttons["permission-allow"])
-        XCTAssertTrue(app.alerts["Voice Remote"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.alerts["Voice Remote"].appears(timeout: 5))
         try shot("microphone-speech-denied")
         tap(app.alerts.buttons["OK"])
         XCTAssertFalse(app.buttons["hold-to-talk"].exists)
@@ -181,12 +238,12 @@ import UIKit
         XCTAssertFalse(app.tabBars.buttons["Home"].exists)
         try shot("private-storage-audit-recovery")
         tap(app.buttons["Authenticate and restore verified audit copy"])
-        XCTAssertTrue(app.staticTexts["Synthetic verified copy unavailable. Approvals remain unavailable; originals are preserved."].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Synthetic verified copy unavailable. Approvals remain unavailable; originals are preserved."].appears(timeout: 5))
         try shot("audit-recovery-unavailable")
     }
 
     func testHomeDestinationAndHold() throws {
-        launch()
+        launch() // Fresh capture-order flag/history are part of this assertion.
         state("idle"); try shot("home")
         tap(app.buttons["About recording"]); try shot("recording-info"); tap(app.buttons["Done"])
         tap(app.buttons["destination-link"])
@@ -212,7 +269,7 @@ import UIKit
         state("idle")
         XCTAssertEqual(diagnostic("demo-order"), "Destination before capture: Yes")
         tab("History")
-        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "synthetic workspace note")).firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "synthetic workspace note")).firstMatch.appears(timeout: 5))
         try shot("history-after-hold")
     }
 
@@ -227,12 +284,12 @@ import UIKit
     }
 
     func testModeAndCaptureSwitches() throws {
-        launch()
+        launch(reuse: true)
         tap(app.buttons["destination-link"]); tap(app.buttons["target-synthetic-pc"])
         tap(app.navigationBars.buttons.firstMatch)
         mode("AI Control"); capture("CONTINUOUS"); state("listening")
         XCTAssertTrue(app.buttons["destination-link"].label.contains("Synthetic Studio"))
-        XCTAssertTrue(app.staticTexts["partial-text"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["partial-text"].appears(timeout: 5))
         try shot("listening")
         tap(app.buttons["finish-utterance"]); state("idle")
         visible(app.buttons["start-continuous"]); try shot("utterance-finished")
@@ -251,17 +308,17 @@ import UIKit
         try shot("agent-sessions")
         tab("Suggestions")
         tap(app.buttons.matching(identifier: "review-suggestion").firstMatch)
-        XCTAssertTrue(app.staticTexts["approval-exact-action"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["approval-exact-action"].appears(timeout: 5))
         XCTAssertTrue(app.staticTexts["Face ID or iPhone passcode required"].exists)
         try shot("tier3-approval")
         tap(app.buttons["approve-action"])
-        XCTAssertTrue(app.staticTexts["approval-exact-action"].waitForNonExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["approval-exact-action"].disappears(timeout: 8))
         tab("Agents")
         let task = app.staticTexts.matching(identifier: "task-status").firstMatch
         visible(task); XCTAssertTrue(task.exists)
         try shot("agent-task-dispatched")
         tap(app.buttons.matching(identifier: "Confirm observed completion…").firstMatch)
-        XCTAssertTrue(app.navigationBars["Owner completion"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.navigationBars["Owner completion"].appears(timeout: 5))
         try shot("owner-completion")
         tap(app.buttons["Keep waiting"])
         tap(app.buttons.matching(identifier: "cancel-task").firstMatch)
@@ -286,26 +343,27 @@ import UIKit
         UIPasteboard.general.string = "voiceremote://synthetic-invitation"
         invitation.press(forDuration: 1.1)
         let paste = app.menuItems["Paste"]
-        if paste.waitForExistence(timeout: 2) { paste.tap() } else { tap(app.buttons.matching(identifier: "Paste").firstMatch) }
-        if app.alerts.firstMatch.waitForExistence(timeout: 1) { tap(app.alerts.buttons["Allow Paste"]) }
+        if paste.appears(timeout: 2) { paste.tap() } else { tap(app.buttons.matching(identifier: "Paste").firstMatch) }
+        if app.alerts.firstMatch.appears(timeout: 1) { tap(app.alerts.buttons["Allow Paste"]) }
         tap(app.buttons["Connect"])
-        XCTAssertEqual(app.staticTexts["pairing-phrase"].waitForExistence(timeout: 5), true)
+        XCTAssertEqual(app.staticTexts["pairing-phrase"].appears(timeout: 5), true)
         visible(app.staticTexts["pairing-phrase"]); try shot("pairing-four-words")
         XCTAssertEqual(app.staticTexts["pairing-phrase"].label, "maple river copper orbit")
         XCTAssertEqual(app.keyboards.count, 0)
         XCTAssertTrue(app.staticTexts["pairing-phrase"].isHittable)
         XCTAssertFalse(app.staticTexts["device-synthetic-new"].exists)
         tap(app.buttons["The words match on both screens"])
-        top()
-        XCTAssertTrue(app.staticTexts["device-synthetic-new"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["pairing-cancel"].disappears(timeout: 3))
+        visible(app.staticTexts["device-synthetic-new"])
+        XCTAssertTrue(app.staticTexts["device-synthetic-new"].exists)
         try shot("pairing-confirmed")
         app.staticTexts["device-synthetic-new"].swipeLeft()
         tap(app.buttons.matching(identifier: "Revoke").firstMatch)
-        XCTAssertTrue(app.staticTexts["device-synthetic-new"].waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["device-synthetic-new"].disappears(timeout: 5))
         try shot("pairing-revoked")
         tap(app.buttons["pair-computer"])
         tap(app.buttons["Scan QR code"])
-        XCTAssertTrue(app.staticTexts["Camera access denied"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Camera access denied"].appears(timeout: 5))
         try shot("camera-denied")
         tap(app.buttons["Cancel scan"])
         tap(app.buttons["pairing-cancel"])
@@ -331,14 +389,14 @@ import UIKit
         assertCaptureOff()
         tab("Settings")
         tap(app.buttons["benchmark-recorder"])
-        XCTAssertTrue(app.navigationBars["Benchmark recorder"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.navigationBars["Benchmark recorder"].appears(timeout: 5))
         try shot("benchmark-recorder")
         tap(app.buttons["About recorder"]); try shot("recorder-info"); tap(app.buttons["Done"])
         tap(app.buttons["Record prompt"])
-        XCTAssertTrue(app.buttons["Finish"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Finish"].appears(timeout: 5))
         try shot("benchmark-recording")
         tap(app.buttons["Finish"]); top()
-        XCTAssertTrue(app.staticTexts["1 / 1 prompts completed"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.staticTexts["1 / 1 prompts completed"].appears(timeout: 8))
         try shot("benchmark-completed")
     }
 
@@ -346,7 +404,7 @@ import UIKit
         launch(["--ui-biometric-refuse"])
         tab("Suggestions"); tap(app.buttons.matching(identifier: "review-suggestion").firstMatch)
         tap(app.buttons["approve-action"])
-        XCTAssertTrue(app.staticTexts["Approval denied or expired. Nothing was started."].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Approval denied or expired. Nothing was started."].appears(timeout: 5))
         try shot("biometric-refused")
         tap(app.buttons["approval-deny"]); tab("Home")
         XCTAssertEqual(diagnostic("demo-tasks"), "Tasks: 0")
@@ -381,7 +439,7 @@ import UIKit
     }
 
     func testOffInEveryCaptureMode() {
-        launch()
+        launch(reuse: true)
         for value in ["Off", "Hold", "Continuous"] {
             capture(value); capture("Off"); state("idle"); assertCaptureOff()
         }
@@ -432,7 +490,7 @@ import UIKit
         setSwitch("keep-benchmark-audio", on: true); setSwitch("keep-benchmark-audio", on: false)
     }
 
-    func testMainScreenGallery() throws { try mainScreens(largest: false) }
+    func test00MainScreenGallery() throws { try mainScreens(largest: false) }
     func testLargestDynamicTypeMainScreens() throws { try mainScreens(largest: true) }
 
     private func mainScreens(largest: Bool) throws {
@@ -441,11 +499,15 @@ import UIKit
         defer { continueAfterFailure = false }
         launch(largest: largest)
         for name in ["Home", "Devices", "History", "Suggestions", "Agents", "Settings"] {
-            tab(name); top(); try shot("main-" + name.lowercased())
+            tab(name); try shot("main-" + name.lowercased())
+            if name == "Home" { assertHomeLayout() }
             if largest {
                 let bottomID = ["Home": "mode-picker", "Devices": "phone-details", "History": "history-more-synthetic-held",
                     "Suggestions": "review-suggestion", "Agents": "wake-permission", "Settings": "benchmark-recorder"][name]!
-                visible(app.descendants(matching: .any).matching(identifier: bottomID).firstMatch)
+                let bottom = name == "Home" ? app.segmentedControls[bottomID] :
+                    (name == "Agents" ? app.switches[bottomID] : app.buttons[bottomID])
+                visible(bottom)
+                if name == "Home" { XCTAssertFalse(app.buttons["stop-immediately"].exists, "Scrolling must cancel Hold") }
                 try shot("main-" + name.lowercased() + "-controls")
             }
         }
@@ -474,4 +536,9 @@ import UIKit
         visible(app.buttons["Finish"]); try shot("benchmark-recording")
         tap(app.buttons["Discard recording"])
     }
+}
+
+@MainActor private extension XCUIElement {
+    func appears(timeout: TimeInterval) -> Bool { exists || waitForExistence(timeout: timeout) }
+    func disappears(timeout: TimeInterval) -> Bool { !exists || waitForNonExistence(timeout: timeout) }
 }

@@ -30,7 +30,7 @@ def attachments(value, test="unknown"):
                     yield from attachments(child, test)
 
 
-def export_manifest(raw: Path, output: Path):
+def export_manifest(raw: Path, output: Path, *, require_audits=True):
     output.mkdir(parents=True, exist_ok=True)
     manifest = json.loads((raw / "manifest.json").read_text())
     screenshots, audits, names = [], [], set()
@@ -77,23 +77,87 @@ def export_manifest(raw: Path, output: Path):
     if os.environ.get("GITHUB_STEP_SUMMARY"):
         with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as stream:
             stream.write(summary + "\nDownload **ios-screenshots**, then open `index.json`; findings are not waived or a passing accessibility baseline.\n")
-    if not screenshots or not audits:
+    if not screenshots or (require_audits and not audits):
         raise ValueError("Missing gallery or accessibility attachments; inspect the UI test result bundle")
     return index
+
+
+def merge_checkpoints(raw: Path, checkpoints: Path):
+    """Merge atomic runner-side artifacts, including an interrupted final test.
+
+    Deduplicate identical label/content pairs already recovered from xcresult.
+    Resolve and validate every source path before copying it into the export.
+    """
+    manifest_file = raw / "manifest.json"
+    manifest = json.loads(manifest_file.read_text()) if manifest_file.exists() else []
+    if not isinstance(manifest, list):
+        manifest = [manifest]
+    seen, usable, missing = set(), [], 0
+    for test, item in attachments(manifest):
+        source = (raw / item["exportedFileName"]).resolve()
+        if not source.is_relative_to(raw.resolve()):
+            raise ValueError("Attachment path escapes export directory")
+        if source.is_file():
+            seen.add((item.get("suggestedHumanReadableName"), hashlib.sha256(source.read_bytes()).digest()))
+            usable.append({"testName": test, "attachments": [item]})
+        else:
+            missing += 1
+    manifest = usable
+    for metadata in sorted(checkpoints.glob("*.meta.json")):
+        value = json.loads(metadata.read_text())
+        for test, item in attachments(value):
+            source = (checkpoints / item["exportedFileName"]).resolve()
+            if not source.is_relative_to(checkpoints.resolve()):
+                raise ValueError("Checkpoint path escapes runner directory")
+            data = source.read_bytes()
+            key = (item.get("suggestedHumanReadableName"), hashlib.sha256(data).digest())
+            if key in seen:
+                continue
+            seen.add(key)
+            filename = "checkpoint-" + source.name
+            shutil.copyfile(source, raw / filename)
+            manifest.append({"testName": test, "attachments": [dict(item, exportedFileName=filename)]})
+    manifest_file.write_text(json.dumps(manifest))
+    return missing
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("xcresult", type=Path)
     parser.add_argument("output", type=Path)
+    parser.add_argument("--checkpoint-dir", type=Path,
+        help="UITest runner Documents/ios-ui-checkpoints; survives an unfinalized xcresult")
     args = parser.parse_args()
-    if not args.xcresult.is_dir():
-        parser.error("xcresult bundle missing: UI build/test did not produce results")
+    args.output.mkdir(parents=True, exist_ok=True)
+    problems = []
     with tempfile.TemporaryDirectory(prefix="ios-ui-export-") as directory:
         raw = Path(directory)
-        subprocess.run(["xcrun", "xcresulttool", "export", "attachments", "--path", str(args.xcresult),
-                        "--output-path", str(raw)], check=True)
-        export_manifest(raw, args.output)
+        if args.xcresult.is_dir():
+            try:
+                subprocess.run(["xcrun", "xcresulttool", "export", "attachments", "--path", str(args.xcresult),
+                                "--output-path", str(raw)], check=True, timeout=45)
+            except (subprocess.SubprocessError, OSError) as error:
+                problems.append("xcresult export unavailable: " + str(error))
+        else:
+            problems.append("xcresult bundle missing")
+        # Keep an export directory/index even when tests never started. Always
+        # upload steps can then preserve the reason as well as any actual PNGs.
+        manifest = raw / "manifest.json"
+        try:
+            json.loads(manifest.read_text())
+        except (OSError, ValueError):
+            problems.append("xcresult attachment manifest missing or unreadable")
+            manifest.write_text("[]")
+        if args.checkpoint_dir and args.checkpoint_dir.is_dir():
+            missing = merge_checkpoints(raw, args.checkpoint_dir)
+            if missing:
+                problems.append(f"Skipped {missing} unwritten xcresult attachments")
+        (args.output / "export-status.json").write_text(json.dumps({
+            "problems": problems, "checkpoint_directory_found": bool(args.checkpoint_dir and args.checkpoint_dir.is_dir()),
+            "acceptance": "Partial artifacts do not establish a successful test run"}, indent=2) + "\n")
+        export_manifest(raw, args.output, require_audits=not problems)
+        if problems:
+            print("Partial gallery recovered; inspect export-status.json and the test step outcome.")
 
 
 if __name__ == "__main__":

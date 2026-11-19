@@ -109,3 +109,10 @@ come from [portable formatters](../Packages/AppModel/Sources/Presentation.swift)
 [Research, source URLs and audit triage](../../../AI/SW/2026-11-04-liquid-glass-research.md).
 The coordinator compiled/launched the revamp. These UI2 layout, sheet-size and
 diagnostic fixes remain **unverified** on Apple SDKs until the next run.
+
+UI3: demo launch disables UIKit and SwiftUI animations only behind DEBUG. Home's
+full-width scroll content has an explicit hit shape and bottom safe padding;
+moving a held finger cancels capture qualification so the page can scroll at AX5.
+History rows expand vertically and their More menu has a full-width 44-point label.
+Policy, real capture/approval paths and release animations are unchanged. New Apple
+layout and gestures remain **unverified** pending CI.

@@ -10,6 +10,7 @@ flowchart LR
 | File | Purpose | Status |
 |---|---|---|
 | [2026-11-04-liquid-glass-research.md](2026-11-04-liquid-glass-research.md) | Sources, native design rules, API availability, icon decision and audit triage | 🟡 Sources/counts checked; new Apple UI **unverified** |
+| [2026-11-19-ui3-timing.md](2026-11-19-ui3-timing.md), [parser](2026-11-19-ui3-timing.py) | Timeout causes, bounded Xcode run and independent screenshot recovery | 🟡 Local log/fixture checks; Apple timing **unverified** |
 | [2026-11-19-ui2-triage.md](2026-11-19-ui2-triage.md) | UI2 log/screenshot failures, fixes and 28-report audit inventory | 🟡 Local evidence; new Apple UI **unverified** |
 | [2026-11-04-liquid-glass-audit.py](2026-11-04-liquid-glass-audit.py) | Reproduce counts from exported audit JSONs without copying accessibility trees | ✅ Local synthetic inventory |
 

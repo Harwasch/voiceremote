@@ -186,3 +186,10 @@ a consent-toggle test failure. The next revamp compiled/launched; UI2 exposed
 overlapping Home controls and test identifier/scrolling failures. Updated layout,
 independent light-only flows and AX5 sheet/control coverage require the next run;
 new Apple SDK/UI/accessibility acceptance **unverified**.
+
+UI3 hit the outer CI timeout; [timing evidence](../../AI/SW/2026-11-19-ui3-timing.md)
+explains polling, repeated audits/hierarchy scans and long failed scroll loops.
+The suite now deduplicates audits and checkpoints every PNG/JSON independently of
+xcresult. An internal Xcode deadline leaves time for always-run export/upload;
+compiled products are cached. Under-12-minute completion and updated Apple UI
+remain **unverified** until the coordinator runs it.

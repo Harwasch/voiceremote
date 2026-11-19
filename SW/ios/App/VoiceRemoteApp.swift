@@ -183,7 +183,9 @@ private struct HomeView: View {
                         }
                         #endif
                     }.frame(maxWidth: .infinity, alignment: .leading).padding(24)
+                        .contentShape(Rectangle())
                 }
+                .safeAreaPadding(.bottom, 24)
                 .scrollEdgeEffectStyle(.soft, for: .all)
             }
         }
@@ -273,7 +275,12 @@ private struct HomeView: View {
                             Button {} label: { primaryLabel }
                                 .simultaneousGesture(DragGesture(minimumDistance: 0)
                                     .updating($touching) { _, state, _ in state = true }
-                                    .onChanged { _ in startHold() }
+                                    .onChanged { value in
+                                        // A scroll is not a held press. Cancel before
+                                        // the 300 ms qualification, even with a simultaneous gesture.
+                                        if abs(value.translation.width) > 12 || abs(value.translation.height) > 12 { cancelHold() }
+                                        else { startHold() }
+                                    }
                                     .onEnded { _ in
                                         guard held else { return }
                                         held = false; triggerTimer?.cancel(); model.release(at: tick)
@@ -384,15 +391,18 @@ private struct HistoryView: View {
                         Button(state == .unconfirmed ? "Resend after checking computer" : "Send to computer") { Task { await model.sendHeld(entry.segmentID) } }
                             .frame(minHeight: 44).accessibilityIdentifier("send-" + entry.segmentID)
                     } else { Button("Copy", systemImage: "doc.on.doc") { copy(entry.text) }.frame(minHeight: 44) }
-                    Menu("More", systemImage: "ellipsis") {
+                    Menu {
                         Button("Copy", systemImage: "doc.on.doc") { copy(entry.text) }
                         ShareLink(item: entry.text) { Label("Share", systemImage: "square.and.arrow.up") }
                         Button("Delete", systemImage: "trash", role: .destructive) { Task { await model.deleteHistory(entry.segmentID) } }
-                    }.frame(minHeight: 44).accessibilityIdentifier("history-more-" + entry.segmentID)
-                }.buttonStyle(.borderless)
+                    } label: {
+                        Label("More", systemImage: "ellipsis").fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
+                    }.accessibilityIdentifier("history-more-" + entry.segmentID)
+                }.fixedSize(horizontal: false, vertical: true).buttonStyle(.borderless)
                 .swipeActions { Button("Delete", role: .destructive) { Task { await model.deleteHistory(entry.segmentID) } } }
             }
-        }.navigationTitle("History").task { await model.refresh() }
+        }.safeAreaPadding(.bottom, 24).navigationTitle("History").task { await model.refresh() }
         .toolbar { Button("About history", systemImage: "info.circle") { showingInfo = true } }
         .sheet(isPresented: $showingInfo) {
             InfoSheet(title: "Your text", paragraphs: ["Only text is kept here. Held and unconfirmed text stays until you delete it. Other text expires after seven days.", "Check the computer before resending unconfirmed text, so it isn’t inserted twice. Expired held text needs a Keep or Delete choice in Settings."])
@@ -496,9 +506,16 @@ struct UIDemoPresentation: ViewModifier {
     func body(content: Content) -> some View {
         if UIDemo.requested && arguments.contains("--ui-largest") {
             content.preferredColorScheme(arguments.contains("--ui-dark") ? .dark : .light).dynamicTypeSize(.accessibility5)
-        } else {
-            content.preferredColorScheme(UIDemo.requested ? (arguments.contains("--ui-dark") ? .dark : .light) : nil)
-        }
+                .transaction(Self.disableAnimations)
+        } else if UIDemo.requested {
+            content.preferredColorScheme(arguments.contains("--ui-dark") ? .dark : .light)
+                .transaction(Self.disableAnimations)
+        } else { content }
+    }
+    // SwiftUI may evaluate transforms away from the main actor. This transform
+    // reads no runtime, environment or actor-isolated demo properties.
+    private nonisolated static func disableAnimations(_ transaction: inout Transaction) {
+        transaction.animation = nil; transaction.disablesAnimations = true
     }
 }
 #endif

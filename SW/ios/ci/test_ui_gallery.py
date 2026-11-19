@@ -6,7 +6,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from export_screenshots import export_manifest, main
+from export_screenshots import export_manifest, main, merge_checkpoints
+import subprocess
 
 IOS = Path(__file__).resolve().parents[1]
 
@@ -90,6 +91,47 @@ class GalleryTests(unittest.TestCase):
             self.assertNotIn("--only-failures", command)
             self.assertTrue(run.call_args.kwargs["check"])
 
+    def test_timeout_recovers_png_without_finalized_bundle_or_audit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); checkpoints = root / "runner"; checkpoints.mkdir()
+            entries = self.fixture(checkpoints)
+            (checkpoints / "shot.meta.json").write_text(json.dumps({"testName": "Interrupted/testFlow", "attachments": entries[:1]}))
+            bundle = root / "UI.xcresult"; bundle.mkdir()  # no Info.plist, like UI3
+            output = root / "out"
+            with patch("sys.argv", ["export_screenshots.py", str(bundle), str(output), "--checkpoint-dir", str(checkpoints)]), \
+                 patch("export_screenshots.subprocess.run", side_effect=subprocess.TimeoutExpired("xcresulttool", 45)):
+                main()
+            index = json.loads((output / "index.json").read_text())
+            self.assertEqual(len(index["screenshots"]), 1)
+            self.assertEqual(index["screenshots"][0]["test"], "Interrupted/testFlow")
+            self.assertEqual(index["accessibility"]["audits"], [])
+            self.assertTrue((output / index["screenshots"][0]["file"]).is_file())
+            self.assertTrue(json.loads((output / "export-status.json").read_text())["problems"])
+
+    def test_missing_bundle_recovers_audit_and_png_checkpoints(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); checkpoints = root / "runner"; checkpoints.mkdir()
+            entries = self.fixture(checkpoints)
+            (checkpoints / "shot.meta.json").write_text(json.dumps({"testName": "Synthetic/testFlow", "attachments": entries}))
+            output = root / "out"
+            with patch("sys.argv", ["export_screenshots.py", str(root / "missing"), str(output), "--checkpoint-dir", str(checkpoints)]):
+                main()
+            index = json.loads((output / "index.json").read_text())
+            self.assertEqual(index["accessibility"]["finding_count"], 1)
+            self.assertEqual(len(index["screenshots"]), 1)
+
+    def test_checkpoint_merge_deduplicates_and_drops_unwritten_bundle_entries(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); raw = root / "raw"; raw.mkdir(); checkpoints = root / "runner"; checkpoints.mkdir()
+            entries = self.fixture(raw)
+            self.fixture(raw, entries + [dict(entries[0], exportedFileName="unwritten.png")])
+            self.fixture(checkpoints)
+            (checkpoints / "duplicate.meta.json").write_text(json.dumps({"testName": "Runner/testFlow", "attachments": entries}))
+            self.assertEqual(merge_checkpoints(raw, checkpoints), 1)
+            index = export_manifest(raw, root / "out")
+            self.assertEqual(len(index["screenshots"]), 1)
+            self.assertEqual(len(index["accessibility"]["audits"]), 1)
+
     def test_demo_is_absent_without_debug(self):
         # Every launch-argument consumer, fake, construction hook and demo UI is
         # inside #if DEBUG. This is a source grep guard, not an Apple Release build.
@@ -105,7 +147,8 @@ class GalleryTests(unittest.TestCase):
         workflow = (IOS.parents[1] / ".github/workflows/ios.yml").read_text()
         job = workflow.split("  ui-gallery:\n", 1)[1].split("  testflight:", 1)[0]
         self.assertIn("startsWith(github.ref, 'refs/tags/ios-ui-') || github.event_name == 'workflow_dispatch'", job)
-        for required in ["timeout-minutes: 30", "-configuration Debug", "CODE_SIGNING_ALLOWED=NO", "-jobs 4", "name: ios-screenshots", "if: always()"]:
+        for required in ["timeout-minutes: 30", "-configuration Debug", "CODE_SIGNING_ALLOWED=NO", "-jobs 4", "name: ios-screenshots", "if: always()", "gtimeout --signal=INT --kill-after=20s 600s",
+                         "-test-timeouts-enabled YES", "-maximum-test-execution-time-allowance 90", "--checkpoint-dir"]:
             self.assertIn(required, job)
         spec = (IOS / "project.yml").read_text()
         self.assertIn("type: bundle.ui-testing", spec)

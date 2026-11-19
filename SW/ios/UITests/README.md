@@ -29,7 +29,10 @@ No new product requirements or device-performance claims.
 | Suggestions / Policy | Connected/offline sessions, real scoped grant/revoke, tier 3 exact preview, fake biometric success/refusal, task delivery/completion review/cancel |
 | Settings / recorder | Cloud consent off/on/off; withdrawal stops capture; synthetic-only recorder prompt and completion |
 
-Screenshots and audits run in light mode; routine CI omits dark to avoid repeating all interactions/audits. The five tabs plus Settings,
+Screenshots run in light/default and light/AX5. Audits run once per distinct
+navigation/help screen at default size, rather than for every screenshot/state;
+the audit itself exercises font sizes. Atomic markers preserve deduplication if
+the test runner restarts. Routine CI omits dark. The five tabs plus Settings,
 destination picker and approval also run at `.accessibility5`; the debug instrumentation is behind a small disclosure and scales normally. The audit uses Apple's
 [`performAccessibilityAudit`](https://developer.apple.com/documentation/xcuiautomation/xcuiapplication/performaccessibilityaudit(for:_:))
 with **report-only** issue handling: every issue is retained, no finding is waived,
@@ -74,8 +77,24 @@ Home’s heading into view after Finish. No fixed animation delays are used.
 Flows and Stop fault states are separate XCTest cases. Independent default/AX5
 main-screen inventories preserve the other tabs after layout assertion failures;
 screenshots precede layout assertions and failure helpers attach extra snapshots.
+The default baseline runs first; geometry inventory runs only for baseline Home.
 AX5 includes lower controls on every tab, pairing words/confirmation, approval
 and recorder. Home geometry assertions reject intersecting controls. Debug AX5 is
 applied at sheet roots, too. The Linux adapter probe now exercises all five Stop
 faults in addition to real Policy approval/refusal. Updated Apple execution and
 accessibility acceptance remain **unverified** pending the coordinator’s run.
+
+UI3 performance: successful existence checks return immediately; only genuinely
+missing elements poll. State waits have a three-second failure bound. Eight native
+fast swipes replace 24/40 slow edge drags; no ScrollView reference survives sheet
+dismissal. Keyboard-visible gestures stay above the keyboard. Pairing waits for its sheet to disappear before finding the new device.
+Selected default flows may reuse an already-running matching fixture; faults,
+approvals and baselines launch fresh. Normal test semantics do not depend on order.
+Demo UIKit/SwiftUI animations are off; release and ordinary Debug are unchanged.
+
+Every PNG/audit is checkpointed atomically in the runner container before attaching
+to XCTest. [CI export](../ci/README.md) recovers them without a finalized xcresult.
+Home cancels Hold when a drag moves beyond 12 points; AX5 scrolling must leave it
+idle, and existing hold/release assertions still exercise actual capture. History
+uses an explicit full-width menu hit area and flexible row height. New Apple
+layout/interaction/timing remain **unverified**; see [UI3 evidence](../../../AI/SW/2026-11-19-ui3-timing.md).

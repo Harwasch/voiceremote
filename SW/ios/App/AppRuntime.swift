@@ -22,6 +22,7 @@ import VoiceRemoteProtocol
         try bootstrap.resolve {
             #if DEBUG
             if UIDemo.requested {
+                UIView.setAnimationsEnabled(false)
                 let demo = UIDemo()
                 if demo.arguments.contains("--ui-storage-denied") { throw SttFailure.unavailable }
                 return try AppRuntime(demo: demo)
