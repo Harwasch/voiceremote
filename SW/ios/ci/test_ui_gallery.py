@@ -143,6 +143,27 @@ class GalleryTests(unittest.TestCase):
         self.assertIn("if UIDemo.requested", runtime)
         self.assertNotIn("ProcessInfo.processInfo.arguments", without_debug(runtime))
 
+    def test_ui_build_and_simulator_preparation_precede_timed_tests(self):
+        workflow = (IOS.parents[1] / ".github/workflows/ios.yml").read_text()
+        job = workflow.split("  ui-gallery:\n", 1)[1].split("  testflight:", 1)[0]
+        steps = job.split("      - name: ")
+        build = next((step for step in steps if "xcodebuild build-for-testing " in step), "")
+        self.assertTrue(build, "Compile UI tests separately from the test watchdog")
+        self.assertNotIn("gtimeout", build)
+        boot = next(step for step in steps if 'xcrun simctl bootstatus "$SIMULATOR_ID" -b' in step)
+        commands = [f'xcrun simctl {action} "$SIMULATOR_ID"' for action in ("shutdown", "erase", "boot", "bootstatus")]
+        for first, second in zip(commands, commands[1:]):
+            self.assertLess(boot.index(first), boot.index(second))
+        self.assertNotIn("|| true", boot, "Simulator preparation must fail visibly")
+        tests = next(step for step in steps if "xcodebuild test-without-building " in step)
+        self.assertIn("gtimeout --signal=INT --kill-after=20s 600s xcodebuild test-without-building", tests)
+        for step in (build, tests):
+            self.assertIn('-destination "platform=iOS Simulator,id=$SIMULATOR_ID"', step)
+            self.assertIn("-derivedDataPath DerivedData", step)
+            self.assertIn("SIMULATOR_ID: ${{ steps.device.outputs.id }}", step)
+        self.assertLess(job.index(build), job.index(boot))
+        self.assertLess(job.index(boot), job.index(tests))
+
     def test_ui_job_and_scheme_are_separate_and_unsigned(self):
         workflow = (IOS.parents[1] / ".github/workflows/ios.yml").read_text()
         job = workflow.split("  ui-gallery:\n", 1)[1].split("  testflight:", 1)[0]

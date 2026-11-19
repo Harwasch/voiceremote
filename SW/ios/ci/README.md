@@ -37,13 +37,18 @@ walks all five Stop fault states and rejects late/unfinished history. The source
 guard rejects dark launch arguments in the routine suite. Apple UI results remain
 **unverified** until the coordinator runs the updated suite.
 
-UI3 timeout recovery: the unsigned Xcode step runs under GNU `gtimeout` (600 s,
-SIGINT, SIGKILL after 20 s), with XCTest timeouts enabled and 90 s default/maximum
-per test. Simulator boot overlaps compilation. Build/module/source-package caches
-are restored and saved even after test failure; compiler indexing is disabled.
-The job retains its 30-minute outer ceiling so cleanup is never its deadline.
-The **target** is under 12 minutes including export; cold-build and new UI timing
-remain **unverified**. Time limits are failures, never a successful acceptance run.
+UI compilation uses unsigned `build-for-testing` without a shell watchdog. After
+building, CI shuts down the selected simulator if needed, erases it, boots it and
+waits for `bootstatus -b` (a separate three-minute step limit). Both Xcode actions
+use the same simulator ID and DerivedData. Only `test-without-building` runs under
+GNU `gtimeout` (600 s, SIGINT, SIGKILL after 20 s), with XCTest timeouts enabled and
+90 s default/maximum per test. Ten minutes allows headroom over the expected
+five-to-eight-minute test walk; that timing remains **unverified**.
+Build/module/source-package caches are restored and saved even after test failure;
+compiler indexing is disabled. The job retains its 30-minute outer ceiling; an
+outer job cancellation can still prevent recovery. The **target** is under 12
+minutes including export; cold-build and new UI timing remain **unverified**.
+Time limits are failures, never a successful acceptance run.
 
 Each screenshot/audit is also written atomically to the UITest runner's
 `Documents/ios-ui-checkpoints`, with per-file metadata. The always-run export gets
