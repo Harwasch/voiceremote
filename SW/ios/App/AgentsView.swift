@@ -18,7 +18,7 @@ struct AgentsView: View {
                             Text(AppPresentation.taskState(task)).font(.subheadline.weight(.semibold)).foregroundStyle(indigo)
                                 .accessibilityIdentifier("task-status")
                             Spacer(minLength: 0)
-                            if let session = task.route?.session { Text(session.providerSessionID).font(.subheadline).foregroundStyle(.secondary) }
+                            if let session = task.route?.destination.session { Text(session.providerSessionID).font(.subheadline).foregroundStyle(.secondary) }
                         }.fixedSize(horizontal: false, vertical: true)
                         Text(AppPresentation.taskTitle(task)).font(.body.weight(.semibold)).fixedSize(horizontal: false, vertical: true)
                         if let reply = task.appReply { Text(reply).font(.subheadline).fixedSize(horizontal: false, vertical: true) }
