@@ -69,3 +69,16 @@ Cross-review fixes and proof: [regressions](Tests/CrossReviewTests.swift), [live
 AI Control audit closures: deliberate phone HOLD target selection can use an exact armed grant without a card; open ambient capture produces replaceable review hypotheses. Authenticated inventory feeds selected/recent/default routing and configured fallbacks, with changed-route reapproval. Linked tasks wait for an audited phone owner “This finished” event bound to task/session/operation. History/offline envelopes bind the installation account. See [tests](Tests/README.md); synthetic Linux evidence only, Apple/device/provider effects **unverified**.
 
 Ambient silence commits a separate review intent; corrections/linked continuations stay within the current unfinished intent. Length rollover keeps capture open and cannot authorize a truncated PTT command. Named-target grants can select a different registered destination. See `AIControlGapTests` and `AgentControlTests`; Apple capture/UI acceptance remains **unverified**.
+
+[Presentation formatters](Sources/Presentation.swift) keep wire names and Swift
+value descriptions out of the UI. Their exhaustive switches and Home visibility
+matrix are covered by [PresentationTests](Tests/PresentationTests.swift), together
+with real on/off cloud consent persistence. These change presentation only;
+Policy, authorization inputs, routing and dictation/Brain separation are unchanged.
+
+Home’s presentation matrix now includes Stop during preparation. The regression
+failed before the fix and passes locally; capture/Policy behavior is unchanged.
+
+Presentation helpers provide sentence headings for every tool and instruction-only
+agent task titles, keeping exact payloads unchanged. Portable formatter tests
+cover all tool cases; native mockup matching remains **unverified**.

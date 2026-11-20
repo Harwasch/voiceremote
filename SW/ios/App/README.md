@@ -13,7 +13,12 @@ flowchart LR
 
 | Path | What | Status |
 |---|---|---|
-| [VoiceRemoteApp.swift](VoiceRemoteApp.swift) | Controls, cloud indicator, history Send/Copy/Share, approval | 🟡 Apple/device **unverified** |
+| [VoiceRemoteApp.swift](VoiceRemoteApp.swift) | Four native tabs and app-level approval/completion presentation | 🟡 Apple/device **unverified** |
+| [TalkView.swift](TalkView.swift), [SuggestionCardView.swift](SuggestionCardView.swift) | Destination-first Talk, capture menu, round talk control, live text and inline AI suggestions | 🟡 Apple layout/interaction **unverified** |
+| [TargetPickerView.swift](TargetPickerView.swift), [ApprovalView.swift](ApprovalView.swift), [HistoryView.swift](HistoryView.swift) | Native destination/approval sheets and retained-text actions | 🟡 Apple layout/interaction **unverified** |
+| [AgentsView.swift](AgentsView.swift) | Tasks, sessions and time-limited permissions; existing Policy/model operations | 🟡 New Apple UI **unverified** |
+| [InfoSheet.swift](InfoSheet.swift) | Native scrollable explanatory sheets; system toolbar and dismissal | 🟡 Apple UI **unverified** |
+| [UIDemo.swift](UIDemo.swift) | DEBUG-only synthetic capture/STT/Brain, pairing, transport and biometric adapters; real AppModel/Policy/router | ✅ Linux adapter probe; Apple UI **unverified** |
 | [AppRuntime.swift](AppRuntime.swift) | Protected storage, signed cloud transports, deferred STT | 🟡 Apple/device **unverified** |
 | [PhoneWakeDelegate.swift](PhoneWakeDelegate.swift), [Push.entitlements](Push.entitlements) | Signing-gated APNs registration, fixed-hint background handler, bounded/coalesced reconciliation and best-effort daily archive scheduler | 🟡 Apple/APNs **unverified** |
 | [AuditArchiveRuntime.swift](AuditArchiveRuntime.swift) | Atomic protected key/anchor/pending state; loss health, biometric recovery into pinned new slots, preserved originals | 🟡 Keychain/Apple **unverified**; portable crypto/recovery tests |
@@ -58,7 +63,7 @@ ambiguous failures require Retry. Offline text never invokes Brain or inserts.
 ComputerLink uses the shared production PhoneConnection for readiness, correlated insertion outcomes, state reports and read-only reconciliation. New connections try every discovered same-room private LAN candidate with pinned Noise, then signed relay. Browser timeout is not task cancellation. Authenticated remote capture is stop-only: microphone starts are refused with actual state, and sequence/deadline checks reject delayed requests. Keyboard delivery waits for a post-insertion shared receipt. Apple adapters/display timing remain **unverified**.
 
 Privacy (REQ-56): one installation account is pinned in ThisDeviceOnly Keychain before stores open; Settings cannot switch accounts. Legacy files stay in place. History exposes expired held text as a required Settings review; Keep renews seven days, Delete removes it. `RetainedTaskStore` expires on-disk payloads/previews at seven days and keeps replay hashes; audit checkpoints and key metadata remain. Portable tests cover the rules; SwiftUI/Keychain execution remains **unverified**.
-AI Control is wired through AppRuntime → AgentControl → Router → ComputerLink/PhoneConnection. Devices has explicit agent-access enrollment; Suggestions has exact session selection, status/cancel, restored-task review and scoped target-selection permission/revoke controls. Ambiguous wake never creates identity or tier 2 authority. Apple SDK/device verification remains **unverified**.
+AI Control is wired through AppRuntime → AgentControl → Router → ComputerLink/PhoneConnection. Devices has explicit agent-access enrollment; Agents has exact session selection, status/cancel, restored-task review and target-selection permission/revoke controls. Ambiguous wake never creates identity or tier 2 authority. Apple SDK/device verification remains **unverified**.
 
 Rebase integration: AI Control shares the account-pinned `RetainedTaskStore`, original history expiry/review rules and audit/checkpoints; it does not open a separate raw task store.
 
@@ -81,3 +86,87 @@ Evidence: [cross-review tests](../Packages/AppModel/Tests/CrossReviewTests.swift
 AI Control now exposes automatic session priorities/defaults, configured fallback orders and a one-action independence choice. Exact changed routes require new approval. The owner completion sheet shows instruction/task/full provider route and explains that linked steps wait for “This finished”. AppRuntime binds local history/offline/audit construction to the protected installation account. Argmax remains visibly unavailable without a licensed loaded adapter. Portable flows are tested in AppModel; SwiftUI/LA/device execution **unverified** on Linux.
 
 Provider-order editing keeps raw comma-separated drafts rather than rewriting text on every keystroke. Cloud approval previews explicitly say “Cloud fallback · new execution”. Portable draft/preview tests pass; Apple UI execution remains **unverified**.
+
+Debug UI review: `--ui-demo` selects fresh temporary state and synthetic identities;
+normal Debug launches use the existing runtime. Release ignores all `--ui-*`
+arguments. [UITests](../UITests/README.md) documents the screenshot matrix and
+permission/state fault flags; fakes do not grant authority or replace Policy.
+The recorder marks demo runs synthetic. OS prompts, actual audit restoration and hardware remain
+**unverified**. No synthetic data enters production identity/history storage.
+
+Native iOS 26 revamp: Home, Devices, History, Suggestions and Agents are the five
+tabs; Settings is the Home gear. Home keeps transcript content off glass, groups
+capture/mode controls in a native glass container within the scroll layout. One
+tappable destination sits beside the heading. The primary talk control retains
+the same rounded shape and minimum size; state changes do not animate layout. Native bars and
+button styles adapt to system preferences; the custom Hold fallback is opaque
+under Reduce Transparency. Preparing retains a disabled control/spinner and a separate Stop; active
+recording/finishing exposes Stop in the talk area. The ambiguous toolbar square
+is removed. Off cancels failed/interrupted states as well.
+
+Pairing is a sheet with invitation and four-word confirmation steps; account/phone
+IDs are in Phone details. History has one primary action and a More menu. Exact
+approval still calls the real Policy/Face ID path. Plain labels and tool sentences
+come from [portable formatters](../Packages/AppModel/Sources/Presentation.swift).
+[Research, source URLs and audit triage](../../../AI/SW/2026-11-04-liquid-glass-research.md).
+The coordinator compiled/launched the revamp. These UI2 layout, sheet-size and
+diagnostic fixes remain **unverified** on Apple SDKs until the next run.
+
+UI3: demo launch disables UIKit and SwiftUI animations only behind DEBUG. Home's
+full-width scroll content has an explicit hit shape and bottom safe padding;
+moving a held finger cancels capture qualification so the page can scroll at AX5.
+History rows expand vertically and their More menu has a full-width 44-point label.
+Policy, real capture/approval paths and release animations are unchanged. New Apple
+layout and gestures remain **unverified** pending CI.
+
+## Approved mockup translation
+
+Source: [nine approved HTML screens](../../../AI/SW/2026-11-19-ui-mockups/README.md).
+SF Pro, semantic system blue/indigo, native tab/toolbar glass, sheet detents and
+native button metrics replace the HTML stand-ins. No blur or custom tab bar.
+Screenshots use the same screen stems: Main, Listening, AIControl, Destination,
+Approval, History, Devices, Pairing, Agents (appearance/size prefixes retained).
+All Apple rendering and visual matching remain **unverified**.
+
+| Difference from the examples | Reason |
+|---|---|
+| Names, text, times, available sessions, delivery state and permission/remote status use AppModel/adapters; no focused-app name or battery percentage is invented | Those example values are not available in the current contracts. The synthetic fixtures remain explicitly synthetic adapters. |
+| Destination says “Ready for your words”, not “Notepad is open and focused” | A connection does not establish the current focused app. Auto still uses real authenticated focus reports. |
+| Approval uses the model's consequences and exact details; no promise to read particular datasheets or write a comparison | The trusted preview cannot establish those effects or agent workspace permissions. Face ID/Policy paths stay unchanged. |
+| Pairing says “Your computer”; the agent-access switch is read-only in step 2, with role/access choices in step 1 | The current PairingFlow doesn't expose a pending name; access is bound by the invitation handshake before the phrase. Changing it requires restarting pairing. |
+| History groups by day, explains held/unconfirmed retention, and preserves resend/Copy/Share/Delete in native context menus (held rows also have More) | Waiting text isn't automatically erased after seven days. No original text action is removed. |
+| Agents shows real task states and indeterminate progress only when running | No percentage or running task is fabricated. Tasks are seeded only by real review/Policy approval. |
+| Larger text scrolls/reflows; Mode becomes a menu and pairing words become one column at accessibility sizes; placeholder text uses secondary contrast | Preserve full words, VoiceOver actions, readable contrast and 44-point targets. |
+| Extra controls live in details, Permissions or Settings (including Mute suggestions and DEBUG diagnostics) | Preserve existing operations without adding them to the approved Talk composition. |
+
+Reduce Transparency uses an opaque talk button; system controls handle their
+native fallback. Reduce Motion disables transactions; the two recording rings
+are static, not an invented audio-level meter. Live transcript remains real STT
+output. Talk controls are pinned above the native tab bar, so long transcripts scroll
+without pushing Stop out of reach. The primary control stays circular in Off (neutral grey with mic.slash), preparing, holding, listening
+and finishing states; preparing/finishing retain a separate Stop. Finish is also
+available from the capture menu while recording. No release demo argument exists.
+
+## ios-ui-8 corrections
+
+| Finding | Change / check |
+|---|---|
+| Capture label / Off | Explicit toolbar HStack; Off uses neutral glass and mic.slash. IDs stay unchanged. |
+| AX5 Talk | Destination/detail/transcript cap at accessibility2; control fonts cap at xxxLarge. Child ScaledMetric views read the capped environment. Chevron is inline text attached to the final word. The pinned area has an opaque system background. |
+| Approval | Real scroll content plus bottom safe-area actions, title capped at accessibility2. Policy refusal replaces both actions with the exact refusal and Close (approval-deny ID retained). |
+| Pairing | Explicit destructive red, a rounded system-white invitation card, plain role labels. Pairing permissions remain bound before Connect. |
+| Help / recovery | Plain instructions and a prominent Restore saved copy action; recovery logic and authentication unchanged. |
+| Gallery | DEBUG running-task fixture passes a real review/Policy approval and an authenticated fake transport running update, then creates a fresh unapproved suggestion. No queue/approval state is injected. |
+
+API declarations checked against Apple documentation: [Dynamic Type range](https://developer.apple.com/documentation/swiftui/view/dynamictypesize(_:)-26aj0),
+[ScaledMetric environment](https://developer.apple.com/documentation/swiftui/scaledmetric),
+[vertical safeAreaInset](https://developer.apple.com/documentation/swiftui/view/safeareainset(edge:alignment:spacing:content:)-4s51l),
+[Text-wrapped Image](https://developer.apple.com/documentation/swiftui/text/init(_:)-60ax7),
+[Text.font returning Text](https://developer.apple.com/documentation/swiftui/text/font(_:)),
+[TextField prompt/axis](https://developer.apple.com/documentation/swiftui/textfield/init(text:prompt:axis:label:)),
+[linear progress](https://developer.apple.com/documentation/swiftui/linearprogressviewstyle).
+`RouteChoice.destination.session` is declared in Router/Sources/Routing.swift;
+`ApprovalCard.route` is a Destination, so its `.session` is direct. No guessed
+Router members or new Section overloads. Native progress is indeterminate;
+there is no measured fraction in TaskStatus. Apple SDK compilation, visual match
+and simulator behavior of this batch remain **unverified**.

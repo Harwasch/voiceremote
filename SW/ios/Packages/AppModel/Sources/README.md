@@ -12,6 +12,7 @@ flowchart LR
 
 | File | What | Status |
 |---|---|---|
+| [Presentation.swift](Presentation.swift) | Plain tool sentences, enum/status labels, planned microphone labels and Home control visibility; no authority changes | ✅ Portable tests; Apple UI **unverified** |
 | [AgentControl.swift](AgentControl.swift) | Paired inventory/identity, live Router targets, retained preview dispatch, status/query/cancel and revocation | ✅ Synthetic tests; Apple UI unverified |
 | [PhoneWake.swift](PhoneWake.swift) | Fixed-hint validation; APNs token registration on the existing authenticated relay socket; retained intent for reconnect | ✅ Synthetic signed-byte checks; APNs **unverified** |
 | [PhoneArchive.swift](PhoneArchive.swift), [ArchiveHTTP.swift](ArchiveHTTP.swift) | Real AES-GCM, exact member-signed HTTP, typed refusal mapping, bounded/no-redirect reads, biometric restore adapter | ✅ Portable crypto/transport/recovery; Apple HTTP **unverified** |
@@ -67,3 +68,9 @@ Cross-review: scene resume requires a prior background transition; Live Activity
 An exact known offline local route remains reviewable as an explicit durable hold; its preview says it will wait. Availability is never rewritten for review, and only the same approved provider session can release it on reconnect.
 
 `CaptureSegmenter` carries silence/limit/end boundaries into bounded `CaptureIntentBuffer` revisions. Independent speech preserves earlier approvals/offline tasks; corrections invalidate only their unfinished intent. AI slices retain the displayed approved target. `ProviderOrderDraft` preserves typed commas; approval route descriptions label cloud fallback as new execution.
+
+Home presentation includes Stop while preparing; the state-matrix regression covers all capture/listening combinations. Apple rendering remains **unverified**.
+
+Presentation helpers provide sentence headings for every tool and instruction-only
+agent task titles, keeping exact payloads unchanged. Portable formatter tests
+cover all tool cases; native mockup matching remains **unverified**.

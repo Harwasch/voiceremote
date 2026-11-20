@@ -29,6 +29,7 @@ flowchart LR
 | [Packages/SttApple/](Packages/SttApple/README.md) | SpeechAnalyzer, MIT WhisperKit small.en, optional licensed Argmax; debug picker ready for UI embedding | 🟡 Coordinator `ios-ci-*` build and device use **unverified** |
 | [Packages/Brain/](Packages/Brain/README.md) | Strict non-executable proposals, relay Claude client, router, incremental suggestion cards and benchmark hook | ✅ Synthetic Linux tests; live/UI/Policy integration **unverified** |
 | [Packages/BrainApple/](Packages/BrainApple/README.md) | Foundation Models + optional on-demand MLX adapters | 🟡 Apple CI/device behavior **unverified** |
+| [UITests/](UITests/README.md) | Scripted light/default/large-type gallery, real Policy with synthetic adapters, accessibility findings | 🟡 Coordinator `ios-ui-*` run **unverified** |
 | [Tests/](Tests/README.md) | Hosted app unit test | 🟡 macOS test **unverified** |
 | [ci/](ci/README.md) | Tested release guard and simulator discovery | ✅ Linux helper tests |
 | [ios.yml](../../.github/workflows/ios.yml) | Unsigned simulator tests; optional TestFlight release | 🟡 GitHub run **unverified** |
@@ -44,14 +45,24 @@ for p in Protocol Core Pairing Stt Brain; do swift test -j 4 --package-path SW/i
 python3 -m unittest discover -s SW/ios/ci -p 'test_*.py'
 ```
 
-The coordinator pushes an `ios-ci-*` tag or dispatches the workflow. Only `ios-ci-*`,
+The coordinator pushes an `ios-ci-*` tag or dispatches the workflow. Only `ios-ci-*`, `ios-ui-*`,
 `ios-v*` tags and manual dispatch run it; no PR, branch, schedule or automatic macOS build.
 Each macOS job has a 30-minute timeout and uses at most four build jobs. XcodeGen is installed
 with Homebrew; generated projects, Info plists and placeholder icon catalog are ignored.
-`Configuration/generate_icon.py` supplies an opaque waveform icon for archive validation.
+`Configuration/generate_icon.py` supplies original light/dark/tinted microphone icons.
 The workflow discovers an available iPhone on iOS 26+ and runs `xcodebuild test ... CODE_SIGNING_ALLOWED=NO`.
 No Apple account is needed for that job. Test results are retained for seven days.
-Only SwiftPM downloads are cached; no simulator state, signing data or DerivedData is cached.
+
+UI review: the separate `ui-gallery` job runs only on `ios-ui-*` or manual dispatch,
+with `VoiceRemoteUI`, Debug and `CODE_SIGNING_ALLOWED=NO`. `ios-ui-*` skips the ordinary
+simulator job. Download **ios-screenshots** for named PNGs, `index.json` and all
+report-only accessibility findings; **ios-ui-results** preserves the xcresult even
+on test failure. [Coverage and limits](UITests/README.md). Demo arguments and fakes
+are compiled out without DEBUG (Linux source guard tested). Apple compilation,
+UI behavior, actual exports and accessibility acceptance remain **unverified**
+until the coordinator's run. No Apple account or provider credentials are needed.
+
+UI CI caches SwiftPM downloads and compiled products. Simulator state and signing data are not cached.
 
 Runner choice checked 2026-11-02: [`macos-26`, Xcode 26.6 inventory](https://github.com/actions/runner-images/blob/main/images/macos/macos-26-Readme.md#xcode).
 The selected Xcode path is explicit; simulator model/OS patch versions are discovered at runtime.
@@ -166,3 +177,19 @@ Cross-review: relay 403 suspends without deleting credentials; cleanup always at
 Push defaults off; an owner-signed profile and opt-in entitlement/environment are required. Background verification is best effort; foreground and reconnect also check. New authority after irrecoverable loss needs an executor fence and is unavailable here. The shared bench schema has no remote enum: named board exports use `voiceremote-named-source-benchmark-v1`, not a false phone-mic cohort.
 
 Cross-review: push registration shares the live relay socket, background-only resume preserves biometric-sheet approvals, remote controls use control-event acknowledgements, and source selection pins before async setup with a visible active microphone. [Portable regressions](Packages/AppModel/Tests/CrossReviewTests.swift) cover REC/target/HOLD, upgrade and presentation boundaries; [socket tests](Packages/AppModel/Tests/SignedPhoneTransportTests.swift) enforce replacement/drain behavior. Apple SDK/device checks remain **unverified**.
+
+The iOS 26 interface follows the [owner-approved mockups](../../AI/SW/2026-11-19-ui-mockups/README.md):
+four native tabs, Talk / History / Devices / Agents, with Settings on the Talk gear.
+Talk puts the destination first, a capture menu at top left, a blue Dictation or
+indigo AI Control mode picker, a circular talk control and inline suggestions.
+Destination, approval and pairing use native sheets. See [screen mapping and
+necessary differences](App/README.md#approved-mockup-translation) and
+[UI test coverage](UITests/README.md). Changed Apple rendering, gestures,
+accessibility and simulator screenshots remain **unverified** until CI.
+
+UI3 hit the outer CI timeout; [timing evidence](../../AI/SW/2026-11-19-ui3-timing.md)
+explains polling, repeated audits/hierarchy scans and long failed scroll loops.
+The suite now deduplicates audits and checkpoints every PNG/JSON independently of
+xcresult. An internal Xcode deadline leaves time for always-run export/upload;
+compiled products are cached. Under-12-minute completion and updated Apple UI
+remain **unverified** until the coordinator runs it.

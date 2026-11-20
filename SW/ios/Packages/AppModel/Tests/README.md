@@ -10,6 +10,7 @@ flowchart LR
 
 | File | What | Status |
 |---|---|---|
+| [PresentationTests.swift](PresentationTests.swift) | Every tool/enum/category label, Home state matrix, microphone preview and real settings persistence for consent on/off | ✅ Portable synthetic tests; native interaction **unverified** |
 | [CrossReviewTests.swift](CrossReviewTests.swift) | Background-only reconciliation, REC restart gating, target/PTT ordering, held-PTT snapshot acknowledgement/wrap, trigger source pinning, presentation failure, empty-journal migration and Apple source wiring | ✅ Portable behavior/source checks; Apple SDK **unverified** |
 | [PhoneAdaptersTests.swift](PhoneAdaptersTests.swift) | AEAD nonce/AAD/key mutation, durable read-back loss, denied/accepted/crash-resumed biometric recovery, content-free wakes, BLE tick wrap/snapshots/source loss and remote tier 3 refusal | ✅ Portable synthetic boundaries |
 | [SignedPhoneTransportTests.swift](SignedPhoneTransportTests.swift) | Real Ed25519 proofs over exact production adapter bytes, uncertain append retry with identical ciphertext, read-back/typed writer refusal and APNs registration metadata | ✅ In-memory transport; service **unverified** |
@@ -52,3 +53,9 @@ The socket fake enforces same-device replacement and destructive queue drain, ma
 These prove synthetic policy/routing behavior. The scoped result-file fixture is checked independently before the simulated owner tap; live provider effects and SwiftUI execution remain **unverified**.
 
 Review regressions reproduce independent-speech cancellation, cumulative-text capture failure, cross-target grant failure, mid-capture destination reset, ordinary “session timeout” rejection and editable provider commas. Intent tests cover committed-intent separation, unfinished correction/continuation identity and full-context negation. Production cloud approval asserts the new-execution label.
+
+Home presentation includes Stop while preparing; the state-matrix regression covers all capture/listening combinations. Apple rendering remains **unverified**.
+
+Presentation helpers provide sentence headings for every tool and instruction-only
+agent task titles, keeping exact payloads unchanged. Portable formatter tests
+cover all tool cases; native mockup matching remains **unverified**.

@@ -4,7 +4,16 @@ import UIKit
 
 struct QRScanner: UIViewControllerRepresentable {
     let completion: @MainActor @Sendable (String?) -> Void
-    func makeUIViewController(context: Context) -> ScannerController { ScannerController(completion: completion) }
+    #if DEBUG
+    var demoDenied = false
+    #endif
+    func makeUIViewController(context: Context) -> ScannerController {
+        let controller = ScannerController(completion: completion)
+        #if DEBUG
+        controller.demoDenied = demoDenied
+        #endif
+        return controller
+    }
     func updateUIViewController(_ controller: ScannerController, context: Context) {}
     static func dismantleUIViewController(_ controller: ScannerController, coordinator: ()) { controller.stop() }
 }
@@ -13,17 +22,37 @@ struct QRScanner: UIViewControllerRepresentable {
     private var layer: AVCaptureVideoPreviewLayer?
     private let completion: @MainActor @Sendable (String?) -> Void
     private var finished = false
+    #if DEBUG
+    var demoDenied = false
+    #endif
     init(completion: @escaping @MainActor @Sendable (String?) -> Void) { self.completion = completion; super.init(nibName: nil, bundle: nil) }
     required init?(coder: NSCoder) { fatalError("init(coder:) is unavailable") }
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .systemBackground
-        let cancel = UIButton(type: .system); cancel.setTitle("Cancel scan", for: .normal)
+        let cancel = UIButton(type: .system)
+        var configuration = UIButton.Configuration.glass()
+        configuration.title = "Cancel scan"
+        configuration.contentInsets = NSDirectionalEdgeInsets(top: 12, leading: 24, bottom: 12, trailing: 24)
+        cancel.configuration = configuration
+        cancel.titleLabel?.font = UIFont.preferredFont(forTextStyle: .body)
+        cancel.titleLabel?.adjustsFontForContentSizeCategory = true
         cancel.addTarget(self, action: #selector(cancelScan), for: .touchUpInside)
         cancel.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(cancel)
         NSLayoutConstraint.activate([cancel.centerXAnchor.constraint(equalTo: view.centerXAnchor), cancel.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -24)])
         Task {
+            #if DEBUG
+            if demoDenied {
+                let label = UILabel()
+                label.text = "Camera access denied"; label.textAlignment = .center
+                label.font = UIFont.preferredFont(forTextStyle: .title2)
+                label.adjustsFontForContentSizeCategory = true; label.numberOfLines = 0
+                label.translatesAutoresizingMaskIntoConstraints = false; view.addSubview(label)
+                NSLayoutConstraint.activate([label.centerXAnchor.constraint(equalTo: view.centerXAnchor), label.centerYAnchor.constraint(equalTo: view.centerYAnchor), label.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 24), label.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -24)])
+                return
+            }
+            #endif
             guard await AVCaptureDevice.requestAccess(for: .video), !finished else { finish(nil); return }
             let layer = capture.makePreviewLayer(); layer.videoGravity = .resizeAspectFill
             layer.frame = view.bounds; view.layer.insertSublayer(layer, at: 0); self.layer = layer
